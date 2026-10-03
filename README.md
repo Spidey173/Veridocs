@@ -2,65 +2,70 @@
 
 # 📑 Veridocs
 
-**An Enterprise Multi-PDF Q&A platform with two-stage retrieval (FAISS + Cross-Encoder), citation grounding, and hallucination verification.**
+**An AI-powered Document Intelligence platform that lets you chat with your documents with page-level citations and automated fact-checking.**
 
+[![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/Tests-78%20Passing-success?style=flat-square)](https://github.com/Spidey173/Veridocs)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2015-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
+[![Tests](https://img.shields.io/badge/Tests-78%20Passing-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
+[![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)](LICENSE)
 
 </div>
 
 ---
 
-## 💡 What Problem Does This Solve?
+## 📌 Overview
 
-Standard RAG (Retrieval-Augmented Generation) applications often suffer from two common problems:
-1. **Low Retrieval Precision:** Single-stage vector search frequently retrieves irrelevant context, polluting the LLM prompt.
-2. **Hallucinations & Lack of Source Traceability:** Users cannot easily verify whether the LLM generated accurate information or which page it came from.
+When using standard AI document search (RAG), users often face two major issues:
+1. **Hallucinations:** The AI answers confidently, but you cannot easily tell if the information was made up or actually mentioned in the document.
+2. **Missing Citations:** You get an answer, but you still have to manually search through a 50-page PDF to find the exact page or paragraph.
 
-**Veridocs** addresses these challenges by introducing a **two-stage retrieval pipeline (FAISS + Cross-Encoder)**, **exact page-level source citations**, and an **automated post-generation verification layer** to audit claims against source text.
-
----
-
-## 🚀 Key Features
-
-* **📄 Multi-PDF Q&A with Page-Level Citations**  
-  Ingests multiple documents simultaneously and attaches `[Page X]` citations to generated answers so users can instantly verify statements against the source document.
-
-* **⚡ Two-Stage Retrieval (FAISS + Cross-Encoder Reranking)**  
-  Performs fast dense vector search via FAISS (`all-MiniLM-L6-v2`) to retrieve top candidate chunks, then refines and re-scores them using a Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) to ensure only the most relevant context reaches the LLM.
-
-* **🛡️ Factual Grounding & Hallucination Verification**  
-  Splits generated responses into individual claims and checks sequence/n-gram overlap against retrieved source passages, computing a grounding confidence score to flag unsupported claims.
-
-* **🔄 Swappable Multi-LLM Backend**  
-  Built with a unified adapter interface supporting **Google Gemini**, **Groq**, and **OpenRouter**, switchable via `.env` configuration without changing application code.
+**Veridocs** solves this by combining **hybrid search (keywords + semantics)** with a **neural cross-encoder re-ranker**, **clickable page citations**, and an **automatic fact-checking engine** that grades whether claims are verified, inferred, or unsupported.
 
 ---
 
-## 🏗️ How It Works (Pipeline)
+## ✨ Features
+
+- **📄 Multi-Document Support:** Upload and search across multiple PDF, DOCX, and TXT files simultaneously in a single workspace.
+- **🎯 Interactive Page Citations:** Click any citation pill (e.g., `[Page 3]`) in the chat to instantly jump to that exact page in the PDF canvas.
+- **⚡ Two-Stage Hybrid Retrieval:**
+  - **BM25 Lexical Search:** Matches exact keywords, acronyms, and numbers.
+  - **FAISS Vector Search:** Matches meaning and semantics using dense embeddings.
+  - **Reciprocal Rank Fusion (RRF):** Blends keyword and semantic results to find the most accurate passages.
+- **🧠 Cross-Encoder Re-Ranking:** Re-scores retrieved candidate passages using a cross-encoder model to filter out irrelevant text before passing it to the LLM.
+- **🛡️ 3-State Claim Verification (Fact-Checking):**
+  - 🟢 **Verified:** Directly backed by the text in the document.
+  - 🟡 **Inferred:** Logically derived or summarized from the context.
+  - 🔴 **Unsupported:** Warns the user if the claim lacks direct support in the source.
+- **📊 Document Insights:** Automatically generates an executive summary and extracts key entities like financial amounts (`$2.5M`), dates, and organizations right after uploading.
+- **⚡ Fast & Lightweight:** Uses CPU-friendly FastEmbed ONNX models (~70MB RAM, zero PyTorch overhead) so it runs smoothly even on free-tier cloud containers.
+- **🔄 Flexible LLM Support:** Easily connect with free API keys from **Google Gemini**, **Groq**, or **OpenRouter**.
+
+---
+
+## 🏗️ How It Works
 
 ```
-1. Document Ingestion    ──► Text extraction with page tracking (PyPDF / EasyOCR)
-2. Chunking & Indexing   ──► Recursive text chunking + FAISS dense vector store
-3. Query & Retrieval     ──► Top-K candidate chunks retrieved via vector similarity
-4. Cross-Encoder Rerank  ──► Re-scores (query, chunk) pairs to select top relevant context
-5. LLM Answer Generation ──► Context-injected prompt sent to LLM (Gemini/Groq/OpenRouter)
-6. Grounding Validation  ──► Post-generation claim verification & page citation attachment
+1. Upload Document   ──► Extract text and split into clean, semantic chunks
+2. Hybrid Search     ──► Retrieve top candidate chunks using BM25 + FAISS
+3. Re-Ranking        ──► Cross-encoder ranks and filters down to the top relevant chunks
+4. LLM Generation    ──► Context-injected prompt generates answer with citations
+5. Fact Verification ──► Claims are verified against source text (Verified / Inferred / Unsupported)
+6. Instant View      ──► User sees answer, clicks citation, and PDF jumps to target page
 ```
 
 ---
 
-## 🧠 Key Design Decisions
+## 🛠️ Tech Stack
 
-| Decision | Why It Was Chosen |
+| Layer | Technologies |
 | :--- | :--- |
-| **FAISS Vector Store** | Lightweight, runs in-memory/locally, eliminating external database dependencies for fast prototyping and low latency. |
-| **Cross-Encoder Reranker** | Bi-encoders compare embeddings independently. Cross-Encoders attend to both query and passage simultaneously, offering significantly higher ranking precision before LLM generation. |
-| **Claim-Level Grounding Check** | Rather than blind trust in LLM outputs, string/n-gram overlap scoring verifies if each statement exists in the retrieved source text. |
-| **Modular LLM Gateway** | Decoupled LLM service allows zero-code-change switching across different API providers (Gemini, Groq, OpenRouter) to balance speed and cost. |
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS, Lucide Icons |
+| **State & Viewer** | Zustand, PDF.js canvas viewer (with local Blob URL rendering) |
+| **Backend** | Python 3.11, FastAPI, Uvicorn, Pydantic v2 |
+| **Search & AI** | FAISS (vector search), BM25 (keyword search), FastEmbed ONNX (embeddings & cross-encoder) |
+| **LLM Providers** | Google Gemini 2.5 Flash, Groq (Qwen/Llama), OpenRouter |
+| **Testing** | Pytest, Pytest-Asyncio, Pytest-Cov (78 automated tests) |
 
 ---
 
@@ -69,82 +74,101 @@ Standard RAG (Retrieval-Augmented Generation) applications often suffer from two
 ```
 Veridocs/
 ├── backend/
-│   ├── config.py              # Application settings & model registry
-│   ├── conversation.py        # Chat session management
-│   ├── insights_engine.py     # Document summary & entity extraction
-│   ├── llm_service.py         # Multi-LLM provider gateway
-│   ├── main.py                # FastAPI endpoints & static routing
-│   ├── models.py              # Pydantic schemas
-│   ├── pdf_processor.py       # PDF extraction & page-level chunking
-│   ├── reranker.py            # Cross-Encoder reranking pipeline
-│   ├── vector_store.py        # FAISS vector store integration
-│   ├── verification.py        # Factual grounding & citation engine
-│   ├── requirements.txt       # Backend dependencies
-│   ├── pytest.ini             # Pytest configuration
-│   └── tests/                 # Automated Pytest suite (78 tests, ~86% coverage)
-│       ├── conftest.py            # Shared fixtures & mock providers
-│       ├── test_api_endpoints.py  # FastAPI integration & SSE stream tests
-│       ├── test_config.py         # Settings & model registry tests
-│       ├── test_conversation.py   # Multi-turn memory & LRU cache tests
-│       ├── test_insights_engine.py# Entity extraction & summary tests
-│       ├── test_llm_service.py    # Multi-provider LLM gateway tests
-│       ├── test_models.py         # Pydantic schemas validation
-│       ├── test_pdf_processor.py  # Text cleaning & section parsing
-│       ├── test_reranker.py       # Cross-Encoder reranking tests
-│       ├── test_vector_store.py   # BM25 + FAISS hybrid RRF tests
-│       └── test_verification.py   # Claim-level grounding & citations
+│   ├── config.py              # Configuration & model registry singleton
+│   ├── conversation.py        # Multi-turn chat session memory
+│   ├── insights_engine.py     # Summary generation & entity extraction
+│   ├── llm_service.py         # Multi-provider LLM gateway
+│   ├── main.py                # FastAPI REST & SSE streaming endpoints
+│   ├── models.py              # Pydantic data schemas
+│   ├── pdf_processor.py       # PDF, DOCX, and TXT parsing & chunking
+│   ├── reranker.py            # Neural Cross-Encoder re-ranker
+│   ├── vector_store.py        # FAISS vector store & BM25 hybrid search
+│   ├── verification.py        # 3-state claim grounding & fact-checking
+│   ├── requirements.txt       # Python dependencies
+│   └── tests/                 # 78 automated unit & integration tests
 ├── frontend/
-│   ├── app/                   # Next.js App Router
-│   ├── components/            # UI components (chat, viewer, upload)
+│   ├── app/                   # Next.js App Router (layout, landing page)
+│   ├── components/            # UI components (Chat, PDF viewer, Insights, Upload)
 │   ├── lib/                   # API client & Zustand state store
 │   └── package.json           # Frontend dependencies
+├── render.yaml                # Render cloud deployment blueprint
 └── README.md
 ```
 
 ---
 
-## ⚡ Quick Start
+## 🚀 Quick Start
+
+### Prerequisites
+- **Python 3.11+**
+- **Node.js 18+**
 
 ### 1. Backend Setup
 
 ```bash
+# Navigate to backend directory
 cd backend
-python -m venv venv && source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Create and activate a virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
-cp .env.example .env  # Add your API key (GEMINI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY)
+
+# Create your .env file
+cp .env.example .env
+```
+
+Open `.env` and add your free API key (e.g. Gemini or Groq):
+```env
+LLM_PROVIDER=google
+GOOGLE_API_KEY=your_gemini_api_key_here
+```
+
+Start the backend server:
+```bash
 uvicorn main:app --reload --port 8000
 ```
+API docs will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+---
 
 ### 2. Frontend Setup
 
 ```bash
+# In a new terminal, navigate to the frontend directory
 cd frontend
+
+# Install packages
 npm install
+
+# Start development server
 npm run dev
 ```
 
-The app will be running at [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🧪 Automated Testing
+## 🧪 Testing
 
-Veridocs includes a full automated test suite covering unit logic and FastAPI endpoint integration tests.
+The backend includes a comprehensive automated test suite with **78 tests** covering all parsing, retrieval, re-ranking, verification, and API endpoint logic.
 
 ```bash
-# Run all tests
+# Run pytest from the root or backend directory
 pytest
 
-# Run with verbose output and test coverage report
+# Run with test coverage report
 pytest --cov=backend --cov-report=term-missing
 ```
 
-* **Test Suite:** 78 automated tests (0 external API calls required during test runs).
-* **Coverage:** ~86% overall code coverage.
-* **Continuous Integration:** Automated GitHub Actions workflow on every push/PR via `.github/workflows/test.yml`.
+- **Test Results:** 78 / 78 passing (100%)
+- **Test Coverage:** ~82%
+- **Zero External Calls:** All tests use deterministic local mocks, running in under 1 second without consuming any API credits.
 
 ---
 
 ## 📄 License
 
-This project is open-source under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](LICENSE).
