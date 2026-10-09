@@ -24,48 +24,48 @@ When using standard AI document search (RAG), users often face two major issues:
 
 ---
 
-## ✨ Features
+## ✨ Features & Technical Implementation
 
-- **📄 Multi-Document Support:** Upload and search across multiple PDF, DOCX, and TXT files simultaneously in a single workspace.
-- **🎯 Interactive Page Citations:** Click any citation pill (e.g., `[Page 3]`) in the chat to instantly jump to that exact page in the PDF canvas.
+- **📄 Multi-Document Ingestion:** Parses and indexes PDF, DOCX, and TXT files using `pypdf`, `python-docx`, and LangChain recursive character chunking with metadata preservation (document title, page number, chunk index).
+- **🎯 Interactive Page Citations:** Clickable citation badges (e.g. `[Page 3]`) integrated with the client-side PDF.js canvas viewer to jump directly to the cited page.
 - **⚡ Two-Stage Hybrid Retrieval:**
-  - **BM25 Lexical Search:** Matches exact keywords, acronyms, and numbers.
-  - **FAISS Vector Search:** Matches meaning and semantics using dense embeddings.
-  - **Reciprocal Rank Fusion (RRF):** Blends keyword and semantic results to find the most accurate passages.
-- **🧠 Cross-Encoder Re-Ranking:** Re-scores retrieved candidate passages using a cross-encoder model to filter out irrelevant text before passing it to the LLM.
-- **🛡️ 3-State Claim Verification (Fact-Checking):**
-  - 🟢 **Verified:** Directly backed by the text in the document.
-  - 🟡 **Inferred:** Logically derived or summarized from the context.
-  - 🔴 **Unsupported:** Warns the user if the claim lacks direct support in the source.
-- **📊 Document Insights:** Automatically generates an executive summary and extracts key entities like financial amounts (`$2.5M`), dates, and organizations right after uploading.
-- **⚡ Fast & Lightweight:** Uses CPU-friendly FastEmbed ONNX models (~70MB RAM, zero PyTorch overhead) so it runs smoothly even on free-tier cloud containers.
-- **🔄 Flexible LLM Support:** Easily connect with free API keys from **Google Gemini**, **Groq**, or **OpenRouter**.
+  - **BM25 Lexical Index:** In-memory keyword scoring for exact matches, technical acronyms, and figures.
+  - **FAISS Vector Index:** Dense similarity search using `sentence-transformers/all-MiniLM-L6-v2` embeddings via ONNX runtime.
+  - **Reciprocal Rank Fusion (RRF):** Merges rank lists ($k=60$) from both sparse and dense retrievers to produce candidate passages.
+- **🧠 Cross-Encoder Re-Ranking:** Re-scores the top retrieved candidate chunks using `ms-marco-MiniLM-L-6-v2` cross-encoder scoring to filter out low-relevance passages before LLM context construction.
+- **🛡️ 3-State Claim Grounding & Verification:**
+  - Evaluates generated responses sentence-by-sentence using a combination of token overlap (Jaccard), fuzzy sequence matching, and strict numeric consistency checks.
+  - Classifies claims as 🟢 **Verified** (high lexical similarity + matching numerical entities), 🟡 **Inferred** (conceptual overlap), or 🔴 **Unsupported** (flagging ungrounded claims or hallucinated figures).
+- **📊 Heuristic Document Insights:** Extracts structured entities (monetary amounts, dates, percentages, organizations) via regular expressions and generates high-level summaries immediately upon document upload.
+- **⚡ Lightweight CPU Inference:** Leverages FastEmbed ONNX runtime (~70MB memory footprint, zero heavy PyTorch dependencies) to ensure responsive embedding generation even on resource-constrained containers.
+- **🔄 Multi-Provider LLM Gateway:** Configurable support for Google Gemini, Groq (Qwen / Llama), OpenRouter, and GitHub Models.
 
 ---
 
-## 🏗️ How It Works
+## 🏗️ Retrieval & Generation Pipeline
 
 ```
-1. Upload Document   ──► Extract text and split into clean, semantic chunks
-2. Hybrid Search     ──► Retrieve top candidate chunks using BM25 + FAISS
-3. Re-Ranking        ──► Cross-encoder ranks and filters down to the top relevant chunks
-4. LLM Generation    ──► Context-injected prompt generates answer with citations
-5. Fact Verification ──► Claims are verified against source text (Verified / Inferred / Unsupported)
-6. Instant View      ──► User sees answer, clicks citation, and PDF jumps to target page
+1. Ingestion       ──► Parse document -> Recursive text chunking -> Assign page & chunk metadata
+2. Hybrid Search   ──► Dual retrieval via BM25 (keyword) + FAISS (dense embeddings)
+3. Rank Fusion     ──► Merge candidate rankings using Reciprocal Rank Fusion (RRF)
+4. Re-Ranking      ──► Cross-encoder model scores and trims candidates to top-K
+5. Generation      ──► Context-injected prompt sent to LLM with citation constraints
+6. Claim Grounding ──► Post-generation verification scores sentence overlap and flags unverified numbers
+7. UI Presentation ──► Render formatted response with interactive page citation pills
 ```
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer | Technologies |
-| :--- | :--- |
-| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS, Lucide Icons |
-| **State & Viewer** | Zustand, PDF.js canvas viewer (with local Blob URL rendering) |
-| **Backend** | Python 3.11, FastAPI, Uvicorn, Pydantic v2 |
-| **Search & AI** | FAISS (vector search), BM25 (keyword search), FastEmbed ONNX (embeddings & cross-encoder) |
-| **LLM Providers** | Google Gemini 2.5 Flash, Groq (Qwen/Llama), OpenRouter |
-| **Testing** | Pytest, Pytest-Asyncio, Pytest-Cov (78 automated tests) |
+| Layer | Technologies | Role in Project |
+| :--- | :--- | :--- |
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS | Modern dashboard, responsive layouts, SSE stream consumption |
+| **State & Viewer** | Zustand, PDF.js | Local state management and in-browser canvas PDF rendering |
+| **Backend** | Python 3.11, FastAPI, Uvicorn, Pydantic v2 | High-performance asynchronous REST and SSE streaming API |
+| **Search & AI** | FAISS, Custom BM25, FastEmbed ONNX | Hybrid retrieval, RRF ranking, and neural cross-encoder re-ranking |
+| **LLM Gateway** | Google Gemini, Groq, OpenRouter, GitHub Models | Flexible model routing and context-grounded response generation |
+| **Testing** | Pytest, Pytest-Asyncio, Pytest-Cov | Automated unit and integration testing suite |
 
 ---
 
@@ -163,9 +163,8 @@ pytest
 pytest --cov=backend --cov-report=term-missing
 ```
 
-- **Test Results:** 78 / 78 passing (100%)
-- **Test Coverage:** ~82%
-- **Zero External Calls:** All tests use deterministic local mocks, running in under 1 second without consuming any API credits.
+- **Test Suite:** 78 unit & integration tests covering parsing, retrieval fusion, re-ranking, claim verification, and API endpoints.
+- **Mocked External Services:** Tests leverage deterministic mocks for LLM and embedding pipelines, enabling fast local execution without external API dependencies or network latency.
 
 ---
 
