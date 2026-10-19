@@ -2,7 +2,7 @@
 
 # 📑 Veridocs
 
-**Forensic Document Intelligence, Pixel-Level Visual Grounding & Cross-Document Contradiction Engine.**
+**Smart Document QA & Comparison with Visual Source Highlighting**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
@@ -12,279 +12,147 @@
 
 <br />
 
-[Quick Recruiter Snapshot](#-recruiter-fast-track--candidate-snapshot) • [Key Features](#-key-breakthrough-features) • [Architecture](#-system-architecture) • [Engineering Trade-Offs](#-engineering-trade-offs--design-decisions) • [Interview Q&A](#-fresher-technical-interview-guide) • [Tech Stack](#️-full-tech-stack) • [Quick Start](#-quick-start)
+[Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Tech Stack](#️-tech-stack) • [Quick Start](#-quick-start) • [Testing](#-testing)
 
 </div>
 
 ---
 
-## ⚡ Recruiter Fast-Track & Candidate Snapshot
+## 💡 Quick Overview (For Recruiters & Interviewers)
 
-> **🎯 Target Role:** **AI Engineer / Full-Stack ML Engineer / Backend Systems Engineer (Fresher / New Grad)**  
-> **Core Competencies:** Hybrid Information Retrieval (RRF), Local ONNX Inference Optimization, Claim Grounding & Hallucination Mitigation, Full-Stack Architecture (FastAPI + Next.js 16 + TypeScript), Production Automated Testing.
+> **Role Focus:** **Junior Full-Stack Engineer / Python Backend / AI Application Developer**  
+> **What This Is:** A full-stack web application that lets users upload PDFs, ask questions, see exact answers **highlighted directly on the document page**, and **compare two documents** side-by-side to catch discrepancies (like changed prices, dates, or clauses).
 
-### 📊 Standout Engineering Metrics
-
-```
-┌─────────────────────────────────┬─────────────────────────────────┬─────────────────────────────────┐
-│     ~70 MB RAM FOOTPRINT        │     82 TESTS IN 0.87 SECONDS    │      <10 MS HYBRID RETRIEVAL    │
-│  96% drop vs PyTorch (>1.8GB)   │   100% automated test pass rate │   FAISS FlatIP + BM25Okapi      │
-│  via FastEmbed ONNX runtime     │   with zero-network mocking     │   fused via RRF (k=60) on CPU   │
-└─────────────────────────────────┴─────────────────────────────────┴─────────────────────────────────┘
-```
-
-| Standout Metric | Veridocs Implementation | Concrete Production Impact |
-| :--- | :--- | :--- |
-| **Inference Footprint** | **~70MB RAM** on CPU (`bge-small-en-v1.5` ONNX) | **96% memory reduction** vs standard PyTorch/Transformers (>1.8GB); runs effortlessly on low-cost single-core instances. |
-| **Test Suite Speed** | **82 Unit & Integration Tests in 0.87s** | **100% pass rate**; uses deterministic mocking & in-memory test clients for instantaneous CI/CD verification. |
-| **Retrieval Latency** | **<10ms Local Hybrid Retrieval** | Combines FAISS dense inner-product search with custom BM25Okapi via Reciprocal Rank Fusion ($k=60$). |
-| **Hallucination Defense** | **3-State Claim Grounding (0ms LLM overhead)** | Multi-signal token overlap, phrase windows, and numeric fact-checking with zero secondary LLM latency or cost. |
+### ⚡ 3 Standout Engineering Highlights
+1. **Visual Source Grounding:** When the AI gives an answer, clicking the citation scrolls the PDF and draws a visual highlight box over the exact sentence on the page using PDF.js.
+2. **Hybrid Search on CPU:** Combines keyword search (BM25 for exact terms/IDs) with vector search (FAISS for meaning) using FastEmbed ONNX (~70MB RAM, no heavy GPU needed).
+3. **82 Automated Tests:** 100% passing test suite running in **under 1 second** using Pytest with mocked APIs for reliable offline testing.
 
 ---
 
-### 🏆 Top 3 Systems Portfolio
+## 🎯 Why I Built This
 
-| System | Architecture & Focus Area | Key Technical Highlights |
-| :--- | :--- | :--- |
-| **1. [Veridocs](https://github.com/Spidey173/Veridocs) (This Project)**<br>*(Flagship AI / Full-Stack)* | **Forensic Document Intelligence & Contradiction Audit Engine** | • Sub-second hybrid retrieval (BM25 + FAISS + RRF $k=60$)<br>• Pixel-level PDF.js canvas coordinate transforms (`convertToViewportRectangle`)<br>• Automated 3-state claim grounding & forensic cross-document diffing<br>• FastAPI + Next.js 16 Turbopack + Zustand, 82 automated tests |
-| **2. [Candor (Chronexa)](https://github.com/Spidey173/Chronexa)**<br>*(AI Systems / Memory OS)* | **Temporal Memory Operating System & TextOS** | • Dense BGE embeddings with Reciprocal Rank Fusion for conversational recall<br>• 100% Top-10 historical state retrieval across multi-turn sessions<br>• Episodic state tracking and temporal entity knowledge graphs |
-| **3. [LedgerFlow / Chronos](https://github.com/Spidey173/Chronos)**<br>*(Distributed Data Systems)* | **Core Banking Temporal Lakehouse & Audit Engine (SCD Type 2)** | • Medallion Architecture (Bronze/Silver/Gold) with slowly changing dimensions<br>• Point-in-time historical audit joins (`valid_from`, `valid_to`, `is_current`)<br>• Automated geographic velocity fraud detection with strict schema enforcement |
+Most generic "Chat with your PDF" tutorials have two big problems:
+1. **You can't verify where answers come from:** The AI gives you a block of text, but you don't know if it hallucinated or what page the information is on.
+2. **You can't compare documents:** In real life (contracts, invoices, policy updates), people need to compare **Version 1 vs Version 2** to see what changed.
 
----
-
-### 💼 Google XYZ Resume Bullets (Copy-Ready)
-
-- **AI / Full-Stack Engineer — Veridocs (Document Intelligence & Contradiction Engine)**
-  - *Engineered an end-to-end forensic document intelligence platform in Python (FastAPI) and Next.js 16, enabling sub-second hybrid document retrieval (BM25 + FAISS + RRF) and cross-document discrepancy auditing.*
-  - *Built a pixel-level visual grounding engine using PDF.js transformation matrices, projecting cited clauses directly onto an interactive document canvas with illuminated coordinate bounding boxes.*
-  - *Developed an automated 3-state claim verification system and RAG Triad observability telemetry, detecting numerical hallucinations and evaluating faithfulness with zero external LLM latency.*
-  - *Authored 82 comprehensive automated unit and integration tests achieving 100% test pass rate in 0.87s, and containerized the platform with FastEmbed ONNX runtime (~70MB RAM footprint).*
+I built **Veridocs** to solve these two practical problems with a clean full-stack interface.
 
 ---
 
-## 📌 Problem & Solution: Why Veridocs?
+## ✨ Key Features
 
-Most generic "Chat with PDF" applications built today suffer from three fatal flaws:
-1. **Ungrounded Hallucinations:** Naive vector search feeds noisy chunks to LLMs, causing fabricated numbers and false confidence.
-2. **Missing Evidence & Disconnected Citations:** Answers provide raw text snippets without showing where the claim physically exists on the page.
-3. **Single-Document Myopia:** They cannot compare document revisions (e.g., *Contract 2024 v1* vs. *Amended 2025 v2*) to flag altered liability caps, slipped deadlines, or contradictory clauses.
+### 1. 🔍 Visual PDF Highlighting
+- When you ask a question, the backend retrieves the relevant text chunk and its page location.
+- The frontend (using PDF.js) finds the matching text on that page and draws a colored highlight box around it.
+- Clicking any citation automatically scrolls you to that exact spot on the document.
 
-**Veridocs** is an audit-grade intelligence platform that couples local hybrid search with **pixel-level visual grounding** directly on the document canvas and an automated **cross-document contradiction matrix**.
+### 2. ⚖️ Side-by-Side Document Comparison
+- Upload two versions of a document (e.g., an original contract and an amended contract).
+- The system checks both files and flags differences—such as changes in payment terms, liability numbers, or dates.
+- You can click **"Inspect in Canvas"** to jump to the clause in Document A or Document B.
 
-| Capability | Generic "Chat with PDF" | Veridocs Intelligence Engine |
-| :--- | :--- | :--- |
-| **Visual Evidence** | Text snippet in chat bubble | **Pixel-level canvas bounding boxes** with viewport transform coordinates |
-| **Document Comparison** | ❌ None (1 document only) | **Forensic Contradiction Matrix** (Contract v1 vs v2 diff & liability audit) |
-| **Self-Consistency Audit** | ❌ None | **Internal Document Audit** (Detects conflicting dates, figures, & timeline overlaps) |
-| **Retrieval Engine** | Naive Vector Search (cosine only) | **Two-Stage Hybrid Search**: Dense FAISS + Sparse BM25 via Reciprocal Rank Fusion ($k=60$) |
-| **Hallucination Guard** | Prompt instructions only | **3-State Sentence Claim Verification**: 🟢 Verified, 🟡 Inferred, 🔴 Unsupported |
-| **Telemetry & Evals** | ❌ None | **Live RAG Triad**: Context Relevance, Faithfulness, Answer Relevance, Numeric Accuracy |
-| **Inference Footprint** | Heavy PyTorch / CUDA (>2GB RAM) | **FastEmbed ONNX Runtime** (~70MB RAM, sub-second local CPU encoding) |
-| **Automated Testing** | 0-5 smoke tests | **82 Automated Unit & Integration Tests** (100% pass rate in 0.87s) |
+### 3. 🔎 Hybrid Search (Keywords + Meaning)
+- **Keyword Search (BM25):** Great for finding exact numbers, section codes (e.g., "Section 4.2"), or names.
+- **Vector Search (FAISS):** Great for finding concepts even if you use different words.
+- Both results are combined so you get the best of both worlds.
 
----
+### 4. 🛡️ Fact-Checking & Hallucination Check
+- Verifies that numbers, dates, and amounts in the AI's answer actually appear in the uploaded document.
+- Tags answers with simple status badges so you know if a statement is directly backed by the source text.
 
-## ✨ Key Breakthrough Features
-
-### 1. 🎯 Pixel-Level Bounding Box Visual Grounding
-- Uses PDF.js text layer coordinate geometry (`getTextContent()` transform matrices).
-- Automatically converts normalized PDF text stream coordinates into viewport screen space via `viewport.convertToViewportRectangle()`.
-- Renders illuminated amber/rose bounding boxes directly over cited words, sentences, and table rows on the document canvas.
-- Features smooth auto-scroll centering and floating premise verification badges.
-
-### 2. ⚖️ Forensic Cross-Document Contradiction & Diff Engine
-- **Cross-Document Auditing:** Compares two versions of contracts, policies, or financial reports (e.g. *SaaS Agreement 2024 v1* vs. *SaaS Agreement 2025 Amended*).
-- **Automated Discrepancy Detection:** Flags altered numerical obligations (e.g. Net 30 extended to Net 60), slashed liability caps (e.g. $1M reduced to $250k), and SLA uptime downgrades (99.95% to 99.5%).
-- **Internal Consistency / Self-Audit:** Scans single multi-page documents for internal timeline discrepancies, conflicting dates, or contradictory requirements between sections.
-- **Inspect in Canvas:** Every identified contradiction includes an interactive "Inspect in Doc A Canvas" / "Inspect in Doc B Canvas" button that jumps directly to the conflicting clause with canvas highlights.
-
-### 3. ⚡ Sub-Second Hybrid Retrieval (BM25 + FAISS + RRF)
-- **BM25 Lexical Index:** In-memory keyword scoring for exact IDs, acronyms, and alphanumeric terms.
-- **FAISS Vector Index:** Dense semantic embeddings generated via FastEmbed ONNX (`BAAI/bge-small-en-v1.5`).
-- **Reciprocal Rank Fusion (RRF):** Blends dense and sparse rankings ($k=60$) to eliminate single-retriever bias.
-- **Sub-10ms Execution:** 100% local, thread-safe, and zero external network latency.
-
-### 4. 🛡️ 3-State Claim Grounding & RAG Triad Telemetry
-- Sentence-by-sentence entailment verification evaluates generated answers against source text.
-- Classifies claims into:
-  - 🟢 **Verified:** Direct lexical & numeric grounding in source chunks.
-  - 🟡 **Inferred:** Supported conceptually with partial linguistic variation.
-  - 🔴 **Unsupported:** Flags ungrounded claims or hallucinated numerical figures.
-- Live telemetry inspector tracks **Context Relevance**, **Groundedness (Faithfulness)**, **Answer Relevance**, and **Numeric Accuracy**.
+### 5. ⚡ Lightweight & Fast
+- Uses **FastEmbed ONNX** instead of heavy PyTorch libraries.
+- Runs smoothly on standard CPU instances using just **~70MB of RAM** (instead of 2GB+).
 
 ---
 
-## 💡 Try the Interactive Demo (Zero Files Required)
+## 🗣️ How to Explain This in an Interview
 
-Want to evaluate the engine immediately without uploading personal documents?
-1. Start the application (`./start.sh`) and open [http://localhost:3000](http://localhost:3000).
-2. Click **"Try Interactive Demo"** on the landing screen (or click **"Try Demo Contract Pair"** in the Contradiction Matrix).
-3. **Instant Experience:**
-   - Pre-loaded split-pane workspace with comparative contracts.
-   - Streaming chat with live claim grounding and citation pills.
-   - Forensic Contradiction Matrix detecting altered liability caps and SLA terms.
-   - Clickable **"Inspect in Canvas"** buttons highlighting exact source coordinates directly on the document canvas.
+*(Clear, honest, and easy to speak out loud without getting trapped in complex math!)*
+
+### The 30-Second Pitch
+> *"I built Veridocs because standard 'Chat with PDF' tools often hallucinate and don't show you proof. Veridocs is a full-stack document assistant built with FastAPI and Next.js. What makes it different is that when it gives you an answer, it physically highlights the exact sentence on the PDF page so you can verify it yourself. It also has a comparison mode that checks two versions of a document side-by-side to spot changes in dates, amounts, or clauses."*
 
 ---
 
-## 🏗️ System Architecture
+### Common Interview Questions & Simple Answers
+
+#### Q1: "How does the PDF highlighting work?"
+> **Your Answer:**  
+> *"When the PDF is rendered in the browser using PDF.js, PDF.js provides the text and its bounding coordinates for each page. When my search retrieves the source passage, the frontend matches that text with the page's coordinate layer, scales it to match the current zoom level, and renders an SVG/canvas highlight box right over the words."*
+
+#### Q2: "Why did you use both BM25 and vector search?"
+> **Your Answer:**  
+> *"Vector search is great at understanding meaning—for example, if you ask 'how do I cancel?' it finds 'termination of agreement'. But vector search often struggles with exact strings like 'Section 12.4' or specific numbers like '$50,000'. BM25 is a classic keyword algorithm that's great at exact lookups. I combined both using Reciprocal Rank Fusion so the system finds both conceptual answers and exact terms."*
+
+#### Q3: "Why did you choose FastEmbed over standard PyTorch or HuggingFace?"
+> **Your Answer:**  
+> *"Standard PyTorch and Transformers libraries are huge—they download over 2GB of dependencies and take over 1.5GB of RAM to run. Since I wanted this project to run quickly on low-cost CPU servers or local machines, I used FastEmbed with ONNX runtime. It uses about 70MB of memory and generates embeddings in milliseconds without needing a GPU."*
+
+#### Q4: "How did you test the project?"
+> **Your Answer:**  
+> *"I wrote 82 automated tests with Pytest covering text extraction, search indexing, API endpoints, and document comparison. To make sure the tests run fast and don't cost API money or need internet, I mocked the external LLM calls. The entire 82-test suite runs in under one second, which makes it great for CI/CD pipelines."*
+
+---
+
+## 🏗️ How It Works (Architecture)
 
 ```mermaid
-flowchart TD
-    subgraph Ingestion["1. Multi-Document Ingestion & Parsing"]
-        Doc[PDF / DOCX / TXT] --> Extractor[pypdf / python-docx Text & Coordinate Extraction]
-        Extractor --> Formatter[Whitespace & Character De-Spacing Normalizer]
-        Formatter --> TableBlock[Table Boundary & Layout Segmentation]
-        TableBlock --> Chunker[Semantic Chunking + Hierarchical Metadata Breadcrumbs]
-    end
-
-    subgraph Indexing["2. Hybrid Indexing (Sub-Second Local CPU)"]
-        Chunker --> BM25[BM25 Sparse Lexical Inverted Index]
-        Chunker --> FastEmbed[FastEmbed ONNX CPU Embeddings: bge-small-en-v1.5]
-        FastEmbed --> FAISS[FAISS Inner Product Dense Index FlatIP]
-    end
-
-    subgraph Retrieval["3. Query & Forensic Diff Engine"]
-        UserQuery[User Question / Audit Request] --> QueryDense[FAISS Search Top-20]
-        UserQuery --> QuerySparse[BM25 Search Top-20]
-        QueryDense & QuerySparse --> RRF[Reciprocal Rank Fusion k=60]
-        RRF --> Reranker[Neural Cross-Encoder Re-ranker Top-5]
-        Reranker --> LLM[LLM Gateway: Groq / Gemini / OpenRouter / GitHub]
-        DocA[Document A Chunks] & DocB[Document B Chunks] --> DiffEngine[Forensic Contradiction Engine]
-        DiffEngine --> LLM
-    end
-
-    subgraph Verification["4. Grounding & Visual Verification"]
-        LLM --> Claims[Sentence Claim Decomposition]
-        Claims --> Overlap[Lexical Token Overlap + Substring Similarity]
-        Claims --> NumericCheck[Numeric Token Factuality Validator]
-        Overlap & NumericCheck --> Triad[RAG Triad & Numeric Accuracy Scoring]
-        Triad --> CoordTransform[PDF.js Canvas Matrix Transform]
-        CoordTransform --> Canvas[Pixel-Level Highlight Bounding Boxes on Canvas]
-    end
+flowchart LR
+    A[Upload PDF/Doc] --> B[Extract Text & Coordinates]
+    B --> C[Hybrid Search: FAISS + BM25]
+    C --> D[Retrieve Relevant Chunks]
+    D --> E[LLM Generates Answer]
+    E --> F[Next.js Frontend]
+    F --> G[Highlight Exact Words on PDF Canvas]
 ```
 
----
-
-## ⚖️ Engineering Trade-Offs & Design Decisions
-
-| Architectural Decision | Chosen Strategy | Alternative Rejected | Concrete Engineering Trade-Off |
-| :--- | :--- | :--- | :--- |
-| **Embeddings Runtime** | **FastEmbed ONNX** (`bge-small-en-v1.5`) | PyTorch + HuggingFace Transformers | **Footprint & Cold-Start:** PyTorch bundles over 2GB of CUDA/C++ libraries and consumes >1.5GB RAM at idle. FastEmbed runs directly on ONNX runtime with single-thread CPU execution, consuming just **~70MB RAM**, booting instantaneously on constrained instances without GPU overhead. |
-| **Hybrid Rank Merging** | **Reciprocal Rank Fusion** ($k=60$) | Linear Weighted Score Sum ($\alpha \cdot \text{Dense} + (1-\alpha) \cdot \text{BM25}$) | **Score Calibration:** BM25 produces unbounded positive floats, whereas cosine distance produces normalized floats in $[0, 1]$. Linear weighting requires arbitrary calibration heuristics that fail across diverse corpus lengths. RRF ranks items strictly by positional reciprocal score ($1 / (k + \text{rank})$), ensuring robust fusion without score distortion. |
-| **Evidence Visualization** | **PDF.js Text Layer Coordinate Mapping** | Server-side Image Cropping / OCR Slices | **Responsiveness & Fidelity:** Server-side cropping requires rasterizing PDF pages to PNGs, uploading images over the network, and causing significant latency. Veridocs uses client-side PDF.js transform matrices (`convertToViewportRectangle`), rendering illuminated bounding boxes directly on the client canvas at 60fps with zero layout shift during zoom and pan. |
-| **Discrepancy Auditing** | **Dual-Pass Engine** (LLM Semantic Reasoning + Deterministic Fallback) | Pure LLM Extraction | **Reliability & Rate Limits:** Pure LLM approaches fail if external API keys expire, hit quota rate limits, or produce malformed JSON. Veridocs executes an LLM comparative prompt with strict JSON schema parsing, but automatically falls back to an offline deterministic token & regex differ that extracts numerical, liability, and SLA discrepancies. |
-| **Thread Management** | **1-Thread CPU Allocation** (`OMP/MKL/ONNX=1`) | Unrestricted multi-threading | **Container Stability:** On cloud instances (Docker/Render/Fly.io) with multi-core CPUs, NumPy and ONNX runtime spawn thread pools per core, causing memory spikes and Out-Of-Memory (OOM) killer crashes. Forcing single-thread execution guarantees deterministic memory limits under heavy concurrent traffic. |
+1. **Upload & Parse:** The file is parsed into text chunks, keeping track of page numbers and layout.
+2. **Index:** Chunks are added to an in-memory keyword index (BM25) and a vector index (FAISS).
+3. **Query & Retrieve:** When you ask a question, the best matches from both search methods are combined.
+4. **Answer & Check:** The LLM generates the answer, and numbers/dates are cross-checked against the source.
+5. **Render & Highlight:** The frontend scrolls to the page and draws the visual highlight.
 
 ---
 
-## 🎓 Fresher Technical Interview Guide
+## 🛠️ Tech Stack
 
-If you are a fresher presenting this project in engineering interviews, interviewers will drill into your design choices, edge cases, and architectural depth. Here are the most critical questions and how to answer them with authority:
-
-### Q1: "How does the coordinate mapping from the PDF text layer to the HTML canvas work?"
-> **Answer:**  
-> When a PDF is rendered via PDF.js, text elements are extracted from the content stream using `getTextContent()`. Each text item contains a 6-element transformation matrix:
-> 
-> $$\begin{bmatrix} a & b & 0 \\ c & d & 0 \\ e & f & 1 \end{bmatrix}$$
-> 
-> where $[e, f]$ represents the horizontal and vertical position in PDF user space coordinates ($72 \text{ DPI}$ points with origin at bottom-left).  
-> In Veridocs, when a citation snippet is clicked, we find the corresponding `TextItem` sequence on the target page. We then feed the bounding rectangle $[x_1, y_1, x_2, y_2]$ into PDF.js's `viewport.convertToViewportRectangle()`. This transforms the coordinate space into the browser's top-left origin screen space, factoring in current device pixel ratio (`DPR`) and canvas zoom scale (`pdfScale`). The resulting bounding boxes are drawn in an absolute overlay SVG/canvas with smooth auto-scroll centering.
-
-### Q2: "Why use Reciprocal Rank Fusion ($RRF$) instead of just taking the top cosine results from FAISS?"
-> **Answer:**  
-> Dense semantic search (FAISS) excels at conceptual queries (e.g., *"What are the termination conditions?"*), but frequently fails on exact lexical lookups, alphanumeric clause IDs (e.g., *"Section 14.3(b)"*), acronyms, or specific currency figures (e.g., *"$250,000"*).  
-> Sparse search (BM25) excels at exact token lookups but fails on synonyms or semantic paraphrasing.  
-> Directly adding BM25 scores to cosine similarity is problematic because BM25 scores are unbounded $[0, \infty)$ while cosine similarity is bounded $[-1, 1]$.  
-> RRF solves this by scoring each document solely based on its rank position across both lists:
-> 
-> $$RRF\_Score(d) = \sum_{m \in M} \frac{w_m}{k + r_m(d)}$$
-> 
-> with $k=60$. This guarantees that a document performing well in either or both retrievers is appropriately prioritized without requiring arbitrary normalization constants.
-
-### Q3: "How do you detect hallucinations and verify claim grounding without incurring the latency of an LLM-as-a-judge call?"
-> **Answer:**  
-> Calling a second LLM to evaluate the first LLM doubles latency and API costs. Instead, Veridocs implements an automated multi-signal algorithm:
-> 1. **Sentence Claim Decomposition:** The response text is parsed into individual atomic propositional claims, stripping markdown formatting, citations, and meta-phrases.
-> 2. **Normalized Token Overlap:** Lemmatized and stopword-filtered token sets are compared between each claim and the retrieved source chunks ($w_1 = 0.60$).
-> 3. **Phrase Window Substring Matching:** Tri-gram sliding windows ensure phrase structure integrity is preserved ($w_2 = 0.25$).
-> 4. **Sequence Ratio:** SequenceMatcher determines character-level alignment ($w_3 = 0.15$).
-> 5. **Numeric Token Grounding:** Numerical tokens (currencies, percentages, integers) in the claim are cross-verified against the source text. If a claim invents or distorts a numerical obligation, a steep hallucination penalty ($0.35$) is deducted, classifying the claim as **🔴 Unsupported**.
-
-### Q4: "How does the Forensic Contradiction Engine work when comparing two contracts?"
-> **Answer:**  
-> The contradiction engine operates in a dual-pass architecture:
-> - **Ingestion & Section Partitioning:** Chunks from Document A and Document B are tagged with their respective document origins, section headings, and page coordinates.
-> - **Semantic Clause Matching:** The engine aligns related covenants across both documents (e.g. *Payment Terms*, *Limitation of Liability*, *Termination Notice*, *Warranty & SLA*).
-> - **Discrepancy Identification:** It submits excerpt pairs to an LLM prompted with a strict JSON output schema to categorize the severity (*critical*, *warning*, *info*), conflict type (*contradiction*, *numeric_mismatch*, *omission*), and exact verbatim quotes from both documents.
-> - **Deterministic Heuristic Fallback:** If the LLM gateway is offline or hits quota, the deterministic regex diff engine inspects payment terms (Net 30 vs Net 60), liability caps ($1M vs $250k), and notice periods across matched topic keywords, guaranteeing that cross-document audits always return actionable results.
-
-### Q5: "How did you manage to run 82 automated tests in under 1 second without a GPU?"
-> **Answer:**  
-> Production automated testing must be fast to enable seamless CI/CD. The test suite achieves sub-second execution through three design choices:
-> 1. **Deterministic Mocking of External APIs:** All LLM completions (Google Gemini, Groq, OpenRouter) and network I/O are mocked using standard deterministic fixtures in `conftest.py`.
-> 2. **In-Memory Embedding Caching:** FastEmbed embeddings and vector index operations use synthetic vector fixtures or in-memory caches, avoiding redundant model re-downloads.
-> 3. **Lightweight TestClient:** Tests run directly against FastAPI's `TestClient` and Pytest-Asyncio in memory without spawning external network daemon listeners.
-
----
-
-## 🛠️ Full Tech Stack
-
-| Layer | Technologies | Role in Platform |
+| Layer | Tools Used | Why It Was Chosen |
 | :--- | :--- | :--- |
-| **Frontend Framework** | Next.js 16 (Turbopack), React 19, TypeScript, Tailwind CSS | Modern high-density workspace, split-pane layouts, responsive telemetry drawers |
-| **Canvas & Viewer** | PDF.js text layer coordinate transform engine | Pixel-level bounding box rendering, coordinate mapping, smooth zoom & pan |
-| **State Management** | Zustand (with session persistence & local blob caching) | Global state, active highlights, file buffers, and multi-doc session sync |
-| **Backend API** | Python 3.11, FastAPI, Uvicorn, Pydantic v2 | Asynchronous REST and Server-Sent Events (SSE) streaming API |
-| **Retrieval & ML** | FAISS, Custom BM25, FastEmbed ONNX (`bge-small-en-v1.5`) | Zero-PyTorch CPU vector search, lexical indexing, and RRF rank fusion |
-| **LLM Gateway** | Groq (Llama / Qwen), Google Gemini, OpenRouter, GitHub Models | Attributed response generation, executive summaries, and contradiction reasoning |
-| **Testing Suite** | Pytest, Pytest-Asyncio, Pytest-Cov | 82 comprehensive automated unit and integration tests (100% passing in 0.87s) |
+| **Frontend** | **Next.js 16, React 19, TypeScript, Tailwind CSS** | Clean UI, fast development, and responsive components. |
+| **PDF Rendering** | **PDF.js** | Industry-standard browser library for rendering PDF pages and text layers. |
+| **State Management** | **Zustand** | Lightweight, simple state management for active files and citations. |
+| **Backend API** | **Python 3.11, FastAPI, Uvicorn** | Fast asynchronous endpoints with automatic Swagger documentation. |
+| **Search & Vectors** | **FAISS, BM25, FastEmbed (ONNX)** | Fast, lightweight semantic + keyword search running entirely on CPU. |
+| **LLM Gateway** | **Groq, Google Gemini, OpenRouter** | Multi-provider support for generating answers and summaries. |
+| **Testing** | **Pytest, Pytest-Asyncio** | 82 unit and integration tests running in <1.0s. |
 
 ---
 
-## 📁 Repository Structure
+## 📁 Project Structure
 
 ```
 Veridocs/
 ├── backend/
-│   ├── config.py                   # Model registry singleton & thread-safe config
-│   ├── contradiction_engine.py     # Forensic diff & internal consistency audit engine
-│   ├── conversation.py             # Multi-turn chat session memory with LRU eviction
-│   ├── insights_engine.py          # Executive summaries & regex entity extraction
-│   ├── llm_service.py              # Multi-provider LLM gateway (Groq, Gemini, OpenRouter)
-│   ├── main.py                     # FastAPI REST & SSE streaming endpoints
-│   ├── models.py                   # Pydantic v2 data models & validation schemas
-│   ├── pdf_processor.py            # PDF text & coordinate extraction, DOCX/TXT parser
-│   ├── reranker.py                 # Neural Cross-Encoder re-ranker
-│   ├── vector_store.py             # FAISS vector store & BM25 hybrid search
-│   ├── verification.py             # 3-state claim grounding & RAG triad evaluators
-│   ├── requirements.txt            # Python dependencies
-│   └── tests/                      # 82 automated unit & integration tests
-│       ├── conftest.py             # Deterministic test fixtures & mock gateways
-│       ├── test_api_endpoints.py
-│       ├── test_config.py
-│       ├── test_contradiction_engine.py
-│       ├── test_conversation.py
-│       ├── test_insights_engine.py
-│       ├── test_llm_service.py
-│       ├── test_models.py
-│       ├── test_pdf_processor.py
-│       ├── test_reranker.py
-│       ├── test_vector_store.py
-│       └── test_verification.py
+│   ├── main.py                     # FastAPI routes & streaming chat endpoints
+│   ├── config.py                   # Settings & singleton model manager
+│   ├── pdf_processor.py            # PDF parsing & text extraction
+│   ├── vector_store.py             # FAISS + BM25 hybrid search
+│   ├── contradiction_engine.py     # Document comparison & diff engine
+│   ├── verification.py             # Number check & claim grounding
+│   ├── llm_service.py              # LLM API connections (Groq, Gemini, etc.)
+│   ├── models.py                   # Pydantic schemas
+│   └── tests/                      # 82 automated unit tests
 ├── frontend/
-│   ├── app/                        # Next.js App Router (root layout, landing screen)
+│   ├── app/                        # Next.js pages
 │   ├── components/
-│   │   ├── audit/                  # Forensic Contradiction Matrix & Risk Scorecard
-│   │   ├── chat/                   # Streaming Chat, citations, & Verification Drawer
-│   │   ├── pdf-viewer/             # PDF.js canvas viewer with coordinate bounding boxes
-│   │   ├── upload/                 # DropZone with animated stage progress ticker
-│   │   └── workspace/              # 3-column resizable workspace shell & FileManager
-│   ├── lib/                        # Typed API client, SSE reader, & Zustand store
-│   ├── next.config.ts              # Next.js & Turbopack workspace configuration
-│   └── package.json                # Frontend dependencies
-├── start.sh                        # Bulletproof one-command startup script (Backend + Frontend)
-├── render.yaml                     # Render cloud deployment blueprint
+│   │   ├── pdf-viewer/             # PDF viewer & canvas highlight drawer
+│   │   ├── audit/                  # Document comparison matrix
+│   │   ├── chat/                   # Chat interface & citation badges
+│   │   └── upload/                 # Drag-and-drop file uploader
+│   └── lib/                        # API client & Zustand state
+├── start.sh                        # One-command startup script
 └── README.md
 ```
 
@@ -296,87 +164,73 @@ Veridocs/
 - **Python 3.11+**
 - **Node.js 18+**
 
-### Single-Command Launch (Recommended)
-
-Clone the repository and start both backend and frontend simultaneously:
+### 1. One-Command Launch (Easiest)
 
 ```bash
 git clone https://github.com/Spidey173/Veridocs.git
 cd Veridocs
 
-# Run unified launcher (automatically provisions virtual environment and starts servers)
+# Automatically sets up Python virtual environment, dependencies, and runs both servers:
 chmod +x start.sh
 ./start.sh
 ```
 
-- **Web UI:** [http://localhost:3000](http://localhost:3000)
-- **API & Interactive Docs:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **API Health Check:** [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health)
+- **Open the App:** [http://localhost:3000](http://localhost:3000)
+- **API Documentation:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 ---
 
-### Manual Setup
+### 2. Manual Setup (Optional)
 
-#### 1. Backend
-
+#### Backend
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r backend/requirements.txt
-
-# Configure your environment
 cp backend/.env.example backend/.env
-```
 
-Edit `backend/.env` with your API key:
-```env
-LLM_PROVIDER=groq
-GROQ_API_KEY=your_groq_api_key_here
-EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
-RERANKER_ENABLED=false
-```
+# Add your free Groq or Gemini API key in backend/.env:
+# GROQ_API_KEY=your_key_here
 
-Start the FastAPI backend:
-```bash
 cd backend
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-#### 2. Frontend
-
+#### Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Visit [http://localhost:3000](http://localhost:3000) to start using the platform.
-
 ---
 
-## 🧪 Testing & Verification
+## 🧪 Testing
 
-The test suite contains **82 automated tests** covering parsing, vector indexing, rank fusion, claim grounding, contradiction auditing, and all REST/SSE endpoints.
+To run the automated test suite:
 
 ```bash
 source .venv/bin/activate
-
-# Run all 82 tests
 pytest
-
-# Run with execution timing & coverage report
-pytest -v --cov=backend --cov-report=term-missing
 ```
 
 ```
 ============================== 82 passed in 0.87s ==============================
 ```
 
-- **100% Offline Capable:** Tests use deterministic mocking for LLM gateways and embedding caches.
-- **Sub-Second Execution:** Entire 82-test suite executes in **under 1 second**.
+All 82 tests run locally in under 1 second without making real API calls.
+
+---
+
+## 💡 Try the Demo Mode
+
+Don't have documents handy?
+1. Start the app and open [http://localhost:3000](http://localhost:3000).
+2. Click **"Try Interactive Demo"** on the home screen.
+3. It will automatically load a sample contract pair, demonstrate visual citation highlights, and show the contract comparison matrix in action.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is open-source under the [MIT License](LICENSE).
