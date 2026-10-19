@@ -2,34 +2,74 @@
 
 # 📑 Veridocs
 
-**Forensic Document Intelligence, Pixel-Level Visual Grounding & Cross-Document Contradiction Audit Engine.**
+**Forensic Document Intelligence, Pixel-Level Visual Grounding & Cross-Document Contradiction Engine.**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2015-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
 [![Tests](https://img.shields.io/badge/Tests-82%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 <br />
 
-[Features](#-key-breakthrough-features) • [Why Veridocs?](#-why-veridocs-vs-generic-rag) • [Architecture](#-system-architecture) • [Engineering Decisions](#-engineering-trade-offs--design-decisions) • [Interview Guide](#-fresher-technical-interview-guide) • [Quick Start](#-quick-start) • [Testing](#-testing--verification)
+[Quick Recruiter Snapshot](#-recruiter-fast-track--candidate-snapshot) • [Key Features](#-key-breakthrough-features) • [Architecture](#-system-architecture) • [Engineering Trade-Offs](#-engineering-trade-offs--design-decisions) • [Interview Q&A](#-fresher-technical-interview-guide) • [Tech Stack](#️-full-tech-stack) • [Quick Start](#-quick-start)
 
 </div>
 
 ---
 
-## 📌 Overview
+## ⚡ Recruiter Fast-Track & Candidate Snapshot
 
-Most "Chat with PDF" tutorials and demos built today suffer from three fundamental limitations:
-1. **Ungrounded Hallucinations:** Naive vector search feeds noisy context chunks to LLMs, causing fabricated numbers and false confidence.
-2. **Missing Evidence & Disconnected Citations:** Answers provide generic citations without pinpointing where the claim actually appears on the physical page.
-3. **Single-Document Myopia:** They cannot compare document revisions (e.g., Contract v1 vs. Amended v2) to detect altered liability caps, slipped deadlines, or contradictory clauses.
+> **🎯 Target Role:** **AI Engineer / Full-Stack ML Engineer / Backend Systems Engineer (Fresher / New Grad)**  
+> **Core Competencies:** Hybrid Information Retrieval (RRF), Local ONNX Inference Optimization, Claim Grounding & Hallucination Mitigation, Full-Stack Architecture (FastAPI + Next.js 16 + TypeScript), Production Automated Testing.
 
-**Veridocs** moves beyond standard chat interfaces to deliver a **forensic document intelligence and discrepancy audit engine**. It couples sub-second local hybrid retrieval with **pixel-level visual grounding** directly on the document canvas and a dedicated **cross-document contradiction matrix**.
+### 📊 Standout Engineering Metrics
+
+```
+┌─────────────────────────────────┬─────────────────────────────────┬─────────────────────────────────┐
+│     ~70 MB RAM FOOTPRINT        │     82 TESTS IN 0.87 SECONDS    │      <10 MS HYBRID RETRIEVAL    │
+│  96% drop vs PyTorch (>1.8GB)   │   100% automated test pass rate │   FAISS FlatIP + BM25Okapi      │
+│  via FastEmbed ONNX runtime     │   with zero-network mocking     │   fused via RRF (k=60) on CPU   │
+└─────────────────────────────────┴─────────────────────────────────┴─────────────────────────────────┘
+```
+
+| Standout Metric | Veridocs Implementation | Concrete Production Impact |
+| :--- | :--- | :--- |
+| **Inference Footprint** | **~70MB RAM** on CPU (`bge-small-en-v1.5` ONNX) | **96% memory reduction** vs standard PyTorch/Transformers (>1.8GB); runs effortlessly on low-cost single-core instances. |
+| **Test Suite Speed** | **82 Unit & Integration Tests in 0.87s** | **100% pass rate**; uses deterministic mocking & in-memory test clients for instantaneous CI/CD verification. |
+| **Retrieval Latency** | **<10ms Local Hybrid Retrieval** | Combines FAISS dense inner-product search with custom BM25Okapi via Reciprocal Rank Fusion ($k=60$). |
+| **Hallucination Defense** | **3-State Claim Grounding (0ms LLM overhead)** | Multi-signal token overlap, phrase windows, and numeric fact-checking with zero secondary LLM latency or cost. |
 
 ---
 
-## ⚡ Why Veridocs vs Generic RAG?
+### 🏆 Top 3 Systems Portfolio
+
+| System | Architecture & Focus Area | Key Technical Highlights |
+| :--- | :--- | :--- |
+| **1. [Veridocs](https://github.com/Spidey173/Veridocs) (This Project)**<br>*(Flagship AI / Full-Stack)* | **Forensic Document Intelligence & Contradiction Audit Engine** | • Sub-second hybrid retrieval (BM25 + FAISS + RRF $k=60$)<br>• Pixel-level PDF.js canvas coordinate transforms (`convertToViewportRectangle`)<br>• Automated 3-state claim grounding & forensic cross-document diffing<br>• FastAPI + Next.js 16 Turbopack + Zustand, 82 automated tests |
+| **2. [Candor (Chronexa)](https://github.com/Spidey173/Chronexa)**<br>*(AI Systems / Memory OS)* | **Temporal Memory Operating System & TextOS** | • Dense BGE embeddings with Reciprocal Rank Fusion for conversational recall<br>• 100% Top-10 historical state retrieval across multi-turn sessions<br>• Episodic state tracking and temporal entity knowledge graphs |
+| **3. [LedgerFlow / Chronos](https://github.com/Spidey173/Chronos)**<br>*(Distributed Data Systems)* | **Core Banking Temporal Lakehouse & Audit Engine (SCD Type 2)** | • Medallion Architecture (Bronze/Silver/Gold) with slowly changing dimensions<br>• Point-in-time historical audit joins (`valid_from`, `valid_to`, `is_current`)<br>• Automated geographic velocity fraud detection with strict schema enforcement |
+
+---
+
+### 💼 Google XYZ Resume Bullets (Copy-Ready)
+
+- **AI / Full-Stack Engineer — Veridocs (Document Intelligence & Contradiction Engine)**
+  - *Engineered an end-to-end forensic document intelligence platform in Python (FastAPI) and Next.js 16, enabling sub-second hybrid document retrieval (BM25 + FAISS + RRF) and cross-document discrepancy auditing.*
+  - *Built a pixel-level visual grounding engine using PDF.js transformation matrices, projecting cited clauses directly onto an interactive document canvas with illuminated coordinate bounding boxes.*
+  - *Developed an automated 3-state claim verification system and RAG Triad observability telemetry, detecting numerical hallucinations and evaluating faithfulness with zero external LLM latency.*
+  - *Authored 82 comprehensive automated unit and integration tests achieving 100% test pass rate in 0.87s, and containerized the platform with FastEmbed ONNX runtime (~70MB RAM footprint).*
+
+---
+
+## 📌 Problem & Solution: Why Veridocs?
+
+Most generic "Chat with PDF" applications built today suffer from three fatal flaws:
+1. **Ungrounded Hallucinations:** Naive vector search feeds noisy chunks to LLMs, causing fabricated numbers and false confidence.
+2. **Missing Evidence & Disconnected Citations:** Answers provide raw text snippets without showing where the claim physically exists on the page.
+3. **Single-Document Myopia:** They cannot compare document revisions (e.g., *Contract 2024 v1* vs. *Amended 2025 v2*) to flag altered liability caps, slipped deadlines, or contradictory clauses.
+
+**Veridocs** is an audit-grade intelligence platform that couples local hybrid search with **pixel-level visual grounding** directly on the document canvas and an automated **cross-document contradiction matrix**.
 
 | Capability | Generic "Chat with PDF" | Veridocs Intelligence Engine |
 | :--- | :--- | :--- |
@@ -40,7 +80,7 @@ Most "Chat with PDF" tutorials and demos built today suffer from three fundament
 | **Hallucination Guard** | Prompt instructions only | **3-State Sentence Claim Verification**: 🟢 Verified, 🟡 Inferred, 🔴 Unsupported |
 | **Telemetry & Evals** | ❌ None | **Live RAG Triad**: Context Relevance, Faithfulness, Answer Relevance, Numeric Accuracy |
 | **Inference Footprint** | Heavy PyTorch / CUDA (>2GB RAM) | **FastEmbed ONNX Runtime** (~70MB RAM, sub-second local CPU encoding) |
-| **Automated Testing** | 0-5 smoke tests | **82 Automated Unit & Integration Tests** (100% pass rate in <1.0s) |
+| **Automated Testing** | 0-5 smoke tests | **82 Automated Unit & Integration Tests** (100% pass rate in 0.87s) |
 
 ---
 
@@ -74,6 +114,19 @@ Most "Chat with PDF" tutorials and demos built today suffer from three fundament
 
 ---
 
+## 💡 Try the Interactive Demo (Zero Files Required)
+
+Want to evaluate the engine immediately without uploading personal documents?
+1. Start the application (`./start.sh`) and open [http://localhost:3000](http://localhost:3000).
+2. Click **"Try Interactive Demo"** on the landing screen (or click **"Try Demo Contract Pair"** in the Contradiction Matrix).
+3. **Instant Experience:**
+   - Pre-loaded split-pane workspace with comparative contracts.
+   - Streaming chat with live claim grounding and citation pills.
+   - Forensic Contradiction Matrix detecting altered liability caps and SLA terms.
+   - Clickable **"Inspect in Canvas"** buttons highlighting exact source coordinates directly on the document canvas.
+
+---
+
 ## 🏗️ System Architecture
 
 ```mermaid
@@ -97,7 +150,6 @@ flowchart TD
         QueryDense & QuerySparse --> RRF[Reciprocal Rank Fusion k=60]
         RRF --> Reranker[Neural Cross-Encoder Re-ranker Top-5]
         Reranker --> LLM[LLM Gateway: Groq / Gemini / OpenRouter / GitHub]
-        
         DocA[Document A Chunks] & DocB[Document B Chunks] --> DiffEngine[Forensic Contradiction Engine]
         DiffEngine --> LLM
     end
@@ -115,8 +167,6 @@ flowchart TD
 ---
 
 ## ⚖️ Engineering Trade-Offs & Design Decisions
-
-As an engineer designing production systems from scratch, choosing the right tools and balancing architectural constraints is critical. Here are the core technical trade-offs made in Veridocs:
 
 | Architectural Decision | Chosen Strategy | Alternative Rejected | Concrete Engineering Trade-Off |
 | :--- | :--- | :--- | :--- |
@@ -178,29 +228,17 @@ If you are a fresher presenting this project in engineering interviews, intervie
 
 ---
 
-## 💼 Resume Bullets (For Fresher Portfolio)
-
-You can copy and adapt these high-impact bullets directly into your resume:
-
-- **AI / Full-Stack Engineer — Veridocs (Document Intelligence & Contradiction Engine)**
-  - *Engineered an end-to-end forensic document intelligence platform in Python (FastAPI) and Next.js 15, enabling sub-second hybrid document retrieval (BM25 + FAISS + RRF) and cross-document discrepancy auditing.*
-  - *Built a pixel-level visual grounding engine using PDF.js transformation matrices, projecting cited clauses directly onto an interactive document canvas with illuminated coordinate bounding boxes.*
-  - *Developed an automated 3-state claim verification system and RAG Triad observability telemetry, detecting numerical hallucinations and evaluating faithfulness with zero external LLM latency.*
-  - *Authored 82 comprehensive automated unit and integration tests achieving 100% test pass rate in <1.0s, and containerized the platform with FastEmbed ONNX runtime (~70MB RAM footprint).*
-
----
-
-## 🛠️ Tech Stack
+## 🛠️ Full Tech Stack
 
 | Layer | Technologies | Role in Platform |
 | :--- | :--- | :--- |
-| **Frontend** | Next.js 15 (Turbopack), React 19, TypeScript, Tailwind CSS | Modern workspace, split-pane layouts, responsive telemetry drawers |
+| **Frontend Framework** | Next.js 16 (Turbopack), React 19, TypeScript, Tailwind CSS | Modern high-density workspace, split-pane layouts, responsive telemetry drawers |
 | **Canvas & Viewer** | PDF.js text layer coordinate transform engine | Pixel-level bounding box rendering, coordinate mapping, smooth zoom & pan |
 | **State Management** | Zustand (with session persistence & local blob caching) | Global state, active highlights, file buffers, and multi-doc session sync |
 | **Backend API** | Python 3.11, FastAPI, Uvicorn, Pydantic v2 | Asynchronous REST and Server-Sent Events (SSE) streaming API |
 | **Retrieval & ML** | FAISS, Custom BM25, FastEmbed ONNX (`bge-small-en-v1.5`) | Zero-PyTorch CPU vector search, lexical indexing, and RRF rank fusion |
 | **LLM Gateway** | Groq (Llama / Qwen), Google Gemini, OpenRouter, GitHub Models | Attributed response generation, executive summaries, and contradiction reasoning |
-| **Testing Suite** | Pytest, Pytest-Asyncio, Pytest-Cov | 82 comprehensive automated unit and integration tests (100% passing) |
+| **Testing Suite** | Pytest, Pytest-Asyncio, Pytest-Cov | 82 comprehensive automated unit and integration tests (100% passing in 0.87s) |
 
 ---
 
@@ -243,6 +281,7 @@ Veridocs/
 │   │   ├── upload/                 # DropZone with animated stage progress ticker
 │   │   └── workspace/              # 3-column resizable workspace shell & FileManager
 │   ├── lib/                        # Typed API client, SSE reader, & Zustand store
+│   ├── next.config.ts              # Next.js & Turbopack workspace configuration
 │   └── package.json                # Frontend dependencies
 ├── start.sh                        # Bulletproof one-command startup script (Backend + Frontend)
 ├── render.yaml                     # Render cloud deployment blueprint
@@ -257,9 +296,9 @@ Veridocs/
 - **Python 3.11+**
 - **Node.js 18+**
 
-### Single-Command Launch
+### Single-Command Launch (Recommended)
 
-Clone the repository and start both the backend and frontend simultaneously:
+Clone the repository and start both backend and frontend simultaneously:
 
 ```bash
 git clone https://github.com/Spidey173/Veridocs.git
@@ -271,17 +310,16 @@ chmod +x start.sh
 ```
 
 - **Web UI:** [http://localhost:3000](http://localhost:3000)
-- **API & Swagger Docs:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **API Health:** [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health)
+- **API & Interactive Docs:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **API Health Check:** [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health)
 
 ---
 
-### Manual Step-by-Step Setup
+### Manual Setup
 
 #### 1. Backend
 
 ```bash
-# From repository root
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r backend/requirements.txt
@@ -321,35 +359,21 @@ Visit [http://localhost:3000](http://localhost:3000) to start using the platform
 The test suite contains **82 automated tests** covering parsing, vector indexing, rank fusion, claim grounding, contradiction auditing, and all REST/SSE endpoints.
 
 ```bash
-# Activate virtual environment
 source .venv/bin/activate
 
 # Run all 82 tests
 pytest
 
-# Run with test execution time & coverage report
+# Run with execution timing & coverage report
 pytest -v --cov=backend --cov-report=term-missing
 ```
 
 ```
-============================== 82 passed in 0.92s ==============================
+============================== 82 passed in 0.87s ==============================
 ```
 
 - **100% Offline Capable:** Tests use deterministic mocking for LLM gateways and embedding caches.
-- **Fast Execution:** Entire 82-test suite executes in **under 1 second**.
-
----
-
-## 💡 Try the Interactive Demo (No Files Required)
-
-Want to evaluate the engine without uploading your own documents?
-1. Open [http://localhost:3000](http://localhost:3000).
-2. Click **"Try Interactive Demo"** on the landing screen (or click **"Try Demo Contract Pair"** in the Contradiction Matrix).
-3. Experience:
-   - Full split-pane workspace with comparative contracts loaded.
-   - Interactive chat with live claim grounding and citation pills.
-   - Forensic Contradiction Matrix detecting altered liability caps and SLA terms.
-   - Clickable **"Inspect in Canvas"** buttons highlighting exact source coordinates directly on the document canvas.
+- **Sub-Second Execution:** Entire 82-test suite executes in **under 1 second**.
 
 ---
 
