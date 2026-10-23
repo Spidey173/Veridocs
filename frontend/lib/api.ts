@@ -23,14 +23,15 @@ export function getAuthToken(): string {
 }
 
 /**
- * Retrieve cached token or fetch a new signed user token from backend.
+ * Retrieve cached token or fetch an ephemeral user token from backend.
+ * In demo mode, acquires a local demo token. In gateway mode, relies on upstream session.
  */
 export async function getOrFetchAuthToken(): Promise<string> {
   if (typeof window === "undefined") return "";
   let token = localStorage.getItem(AUTH_TOKEN_KEY);
   if (!token) {
     try {
-      const res = await fetch(`${getApiBase()}/api/auth/token`, { method: "POST" });
+      const res = await fetch(`${getApiBase()}/api/auth/demo-token`, { method: "POST" });
       if (res.ok) {
         const data = await res.json();
         token = data.access_token;
@@ -308,10 +309,23 @@ export async function getConversationHistory(
   return response.json();
 }
 
+/**
+ * Fetch PDF file with Bearer authorization header and return an in-memory blob URL.
+ * Avoids placing bearer tokens in URLs, browser history, or server access logs.
+ */
+export async function fetchPdfBlobUrl(sessionId: string, documentName: string): Promise<string> {
+  const authHeaders = await getAuthHeaders();
+  const url = `${getApiBase()}/api/documents/${sessionId}/pdf?document_name=${encodeURIComponent(documentName)}`;
+  const res = await fetch(url, { headers: { ...authHeaders } });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch document PDF: ${res.status} ${res.statusText}`);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export function getPdfUrl(sessionId: string, documentName: string): string {
-  const token = getAuthToken();
-  const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : "";
-  return `${getApiBase()}/api/documents/${sessionId}/pdf?document_name=${encodeURIComponent(documentName)}${tokenQuery}`;
+  return `${getApiBase()}/api/documents/${sessionId}/pdf?document_name=${encodeURIComponent(documentName)}`;
 }
 
 export async function deleteSession(sessionId: string): Promise<{ status: string; message: string }> {

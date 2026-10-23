@@ -136,9 +136,14 @@ class TestDataLifecycle:
         assert not file_path.exists()
         assert not session_dir.exists()
 
-    def test_admin_cleanup_endpoint(self, test_client: TestClient):
-        """Verify POST /api/admin/cleanup endpoint can trigger retention purging."""
-        resp = test_client.post("/api/admin/cleanup?max_age_hours=24")
+    def test_admin_cleanup_endpoint(self, sample_txt_bytes):
+        """Verify POST /api/admin/cleanup endpoint triggers retention purging when authorized as admin."""
+        from auth import create_access_token
+        admin_token = create_access_token(user_id="lifecycle_admin", role="admin")
+        admin_client = TestClient(main.app)
+        admin_client.headers["Authorization"] = f"Bearer {admin_token}"
+
+        resp = admin_client.post("/api/admin/cleanup?max_age_hours=24")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "success"

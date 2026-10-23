@@ -27,6 +27,9 @@ import time
 import shutil
 import logging
 import uuid
+import secrets
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Any
 
@@ -73,10 +76,68 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+async def _retention_cleanup_loop():
+    """Background lifecycle task executing periodic retention pruning."""
+    logger.info(
+        f"Automated retention worker initialized (interval: {settings.CLEANUP_INTERVAL_MINUTES}m, "
+        f"retention: {settings.RETENTION_HOURS}h)"
+    )
+    while True:
+        try:
+            await asyncio.sleep(settings.CLEANUP_INTERVAL_MINUTES * 60)
+            res = cleanup_expired_sessions(max_age_hours=settings.RETENTION_HOURS)
+            if res.get("purged_sessions", 0) > 0 or res.get("purged_files", 0) > 0:
+                logger.info(
+                    f"Automated retention cleanup cycle: {res['purged_sessions']} sessions, "
+                    f"{res['purged_files']} files purged."
+                )
+        except asyncio.CancelledError:
+            logger.info("Automated retention worker received shutdown signal.")
+            break
+        except Exception as e:
+            logger.error(f"Error during automated retention cycle: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Enforce strict security validation on production startup
+    settings.validate_production_configuration()
+
+    logger.info(
+        f"Starting {settings.APP_NAME} v{settings.APP_VERSION} "
+        f"[env: {settings.ENVIRONMENT}, auth_mode: {settings.AUTH_MODE}]"
+    )
+
+    # 2. Warm up models in RAM so first query is instantaneous
+    import threading
+    def _warmup():
+        reg = get_model_registry()
+        _ = reg.embedding_model
+        if settings.RERANKER_ENABLED:
+            _ = reg.reranker_model
+    threading.Thread(target=_warmup, daemon=True).start()
+
+    # 3. Launch automatic retention cleanup background task
+    cleanup_task = None
+    if settings.AUTO_CLEANUP_ENABLED:
+        cleanup_task = asyncio.create_task(_retention_cleanup_loop())
+
+    yield
+
+    # Graceful shutdown
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Enterprise AI Document Intelligence Platform"
+    description="Enterprise AI Document Intelligence Platform",
+    lifespan=lifespan
 )
 
 # CORS: Configured whitelist from environment
@@ -95,30 +156,45 @@ Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 # Authentication Models & Endpoints
 # ──────────────────────────────────────────────
 
-class TokenRequest(BaseModel):
-    user_id: Optional[str] = None
-
-class TokenResponse(BaseModel):
+class DemoTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_id: str
     expires_in: int
+    mode: str = "demo"
+    warning: str
 
-@app.post("/api/auth/token", response_model=TokenResponse)
-async def generate_auth_token(req: Optional[TokenRequest] = None, x_api_key: Optional[str] = Header(None)):
-    """Issue a signed, tamper-proof user access token for session isolation and authorization."""
+@app.post("/api/auth/demo-token", response_model=DemoTokenResponse)
+@app.post("/api/auth/token", response_model=DemoTokenResponse)
+async def generate_demo_token(x_api_key: Optional[str] = Header(None)):
+    """
+    Issue an ephemeral, single-user demo access token for local development.
+    Client-chosen identities and roles are rejected. In production/gateway mode,
+    this endpoint is disabled to ensure identity must be asserted via trusted gateways.
+    """
+    if settings.ENVIRONMENT == "production" or settings.AUTH_MODE == "gateway":
+        raise HTTPException(
+            status_code=403,
+            detail="Demo token issuance is disabled in production/gateway mode. "
+                   "Authentication must be provided by your trusted upstream identity provider or API gateway."
+        )
+
     if settings.REQUIRE_API_KEY:
         if not x_api_key or x_api_key != settings.API_KEY:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
-    requested_uid = req.user_id if req and req.user_id else None
-    token = create_access_token(user_id=requested_uid)
+    # Generate a random, server-assigned demo user ID (clients cannot pick their own ID or role)
+    demo_uid = f"demo_usr_{secrets.token_hex(6)}"
+    token = create_access_token(user_id=demo_uid, role="user")
     user_ctx = verify_access_token(token)
-    return TokenResponse(
+
+    return DemoTokenResponse(
         access_token=token,
         token_type="bearer",
         user_id=user_ctx.user_id,
-        expires_in=int(settings.TOKEN_EXPIRE_HOURS * 3600)
+        expires_in=int(settings.TOKEN_EXPIRE_HOURS * 3600),
+        mode="demo",
+        warning="Local demo token only. For multi-tenant production, configure AUTH_MODE=gateway with a trusted identity provider."
     )
 
 # ──────────────────────────────────────────────
@@ -134,24 +210,8 @@ sessions: Dict[str, Dict] = {}
 #   "metadata": List[Dict],
 #   "insights": Optional[DocumentInsights],
 #   "created_at": float,
+#   "owner_id": str,
 # }
-
-
-# ──────────────────────────────────────────────
-# Startup Events
-# ──────────────────────────────────────────────
-
-@app.on_event("startup")
-async def startup_event():
-    """Startup event logic: warm up models in RAM so first query is instantaneous."""
-    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    import threading
-    def _warmup():
-        reg = get_model_registry()
-        _ = reg.embedding_model
-        if settings.RERANKER_ENABLED:
-            _ = reg.reranker_model
-    threading.Thread(target=_warmup, daemon=True).start()
 
 
 def _generate_insights_background(session_id: str, chunks_by_file: Dict, doc_metadata: List[Dict], provider: str):
@@ -1027,11 +1087,27 @@ async def trigger_retention_cleanup(
     max_age_hours: Optional[int] = None,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """Trigger retention policy cleanup of expired sessions and orphaned files."""
-    result = cleanup_expired_sessions(max_age_hours=max_age_hours)
+    """
+    Trigger retention policy cleanup of expired sessions and orphaned files.
+    Restricted to administrator role or admin key. Rejects arbitrary or out-of-bound cleanup ages.
+    """
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Administrator privileges required for retention cleanup."
+        )
+
+    target_max_age = max_age_hours if max_age_hours is not None else settings.RETENTION_HOURS
+    if target_max_age < 1 or target_max_age > 720:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid max_age_hours: Must be between 1 and 720 hours (up to 30 days)."
+        )
+
+    result = cleanup_expired_sessions(max_age_hours=target_max_age)
     return {
         "status": "success",
-        "retention_hours": max_age_hours or settings.RETENTION_HOURS,
+        "retention_hours": target_max_age,
         **result
     }
 
@@ -1082,7 +1158,7 @@ def _safe_delete_file(file_path: Union[str, Path]) -> bool:
     return False
 
 
-def _get_session(session_id: str, current_user: Optional[UserContext] = None) -> Dict:
+def _get_session(session_id: str, current_user: UserContext) -> Dict:
     """Get session data from memory or restore from disk, verifying user ownership."""
     session_data = None
     if session_id in sessions:
@@ -1120,17 +1196,23 @@ def _get_session(session_id: str, current_user: Optional[UserContext] = None) ->
             detail="Session not found or expired. Please upload documents again."
         )
 
-    # Ownership enforcement: verify caller owns this session
-    if current_user is not None:
-        owner_id = session_data.get("owner_id")
-        if owner_id and owner_id != current_user.user_id and current_user.role != "admin":
-            logger.warning(
-                f"Access denied: user {current_user.user_id} attempted access to session {session_id} owned by {owner_id}"
-            )
-            raise HTTPException(
-                status_code=403,
-                detail="Access denied: You do not have permission to access this session or document."
-            )
+    # Ownership enforcement: require explicit ownership on every session
+    owner_id = session_data.get("owner_id")
+    if not owner_id:
+        logger.warning(f"Access denied: Session {session_id} has missing or unknown ownership.")
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Session ownership is missing or unverified."
+        )
+
+    if owner_id != current_user.user_id and current_user.role != "admin":
+        logger.warning(
+            f"Access denied: user {current_user.user_id} attempted access to session {session_id} owned by {owner_id}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You do not have permission to access this session or document."
+        )
 
     return session_data
 
@@ -1159,8 +1241,9 @@ def cleanup_expired_sessions(max_age_hours: Optional[int] = None) -> Dict[str, i
     """
     Purge expired sessions, persisted vector indices, and orphaned files older than RETENTION_HOURS.
     Protects against disk exhaustion and enforces strict privacy data retention.
+    Safe against missing files and partial writes.
     """
-    ttl_hours = max_age_hours or settings.RETENTION_HOURS or 24
+    ttl_hours = max_age_hours if max_age_hours is not None else (settings.RETENTION_HOURS or 24)
     cutoff_time = time.time() - (ttl_hours * 3600)
     purged_sessions = 0
     purged_files = 0
@@ -1187,15 +1270,22 @@ def cleanup_expired_sessions(max_age_hours: Optional[int] = None) -> Dict[str, i
             if session_folder.is_dir():
                 meta_file = session_folder / "session.json"
                 mtime = session_folder.stat().st_mtime
+                file_paths_to_delete = []
                 if meta_file.exists():
                     try:
                         with open(meta_file, "r", encoding="utf-8") as f:
                             meta = json.load(f)
                             mtime = meta.get("created_at", mtime)
+                            file_paths_to_delete = meta.get("file_paths", [])
                     except Exception:
                         pass
                 if mtime < cutoff_time:
+                    for fp in file_paths_to_delete:
+                        if _safe_delete_file(fp):
+                            purged_files += 1
                     _safe_delete_file(session_folder)
+                    get_conversation_manager().clear_history(session_folder.name)
+                    sessions.pop(session_folder.name, None)
                     purged_sessions += 1
 
     # 3. Purge orphaned uploaded files older than cutoff

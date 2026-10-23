@@ -33,10 +33,19 @@ class UserContext(BaseModel):
 
 
 def _get_signing_key() -> str:
-    """Retrieve secret signing key from settings or fallback to ephemeral startup secret."""
+    """
+    Retrieve secret signing key from settings or fallback to ephemeral startup secret in dev/demo.
+    Fails fast in production/gateway mode if secret is unconfigured.
+    """
     settings = get_settings()
     if settings.AUTH_SECRET_KEY and settings.AUTH_SECRET_KEY.strip():
         return settings.AUTH_SECRET_KEY.strip()
+
+    if settings.ENVIRONMENT == "production" or settings.AUTH_MODE == "gateway":
+        raise RuntimeError(
+            "FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is required in production/gateway mode."
+        )
+
     return _EPHEMERAL_SECRET
 
 
@@ -153,19 +162,35 @@ async def get_current_user(
     authorization: Optional[str] = Header(None),
     x_user_token: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None),
-    token: Optional[str] = Query(None)
+    x_admin_key: Optional[str] = Header(None)
 ) -> UserContext:
     """
     FastAPI dependency for endpoint authentication & user identity resolution.
     Accepts:
-    1. Header `Authorization: Bearer <token>`
-    2. Header `X-User-Token: <token>`
-    3. Query parameter `?token=<token>` (for browser PDF views and EventSource SSE)
-    Validates optional `settings.REQUIRE_API_KEY` if configured.
+    1. Header `X-Admin-Key: <key>` for administrative tasks
+    2. Trusted Gateway headers (`X-Consumer-Custom-ID` / `X-Consumer-Role`) in gateway deployment mode
+    3. Header `Authorization: Bearer <token>`
+    4. Header `X-User-Token: <token>`
+
+    Notice: Query parameter tokens (?token=...) are strictly rejected to prevent
+    leakage in browser history, HTTP referrers, and server access logs.
     """
     settings = get_settings()
 
-    # 1. Gateway API Key validation (if enabled)
+    # 1. Admin Key verification (for administrative operations like scheduled retention pruning)
+    if settings.ADMIN_API_KEY:
+        admin_candidate = x_admin_key
+        if not admin_candidate and authorization and authorization.startswith("AdminKey "):
+            admin_candidate = authorization[9:].strip()
+        if admin_candidate and hmac.compare_digest(admin_candidate.strip(), settings.ADMIN_API_KEY):
+            return UserContext(
+                user_id="system_admin",
+                created_at=time.time(),
+                expires_at=time.time() + 3600,
+                role="admin"
+            )
+
+    # 2. Deployment Gateway API Key validation (if enabled)
     if settings.REQUIRE_API_KEY:
         configured_api_key = settings.API_KEY
         client_key = x_api_key
@@ -178,7 +203,19 @@ async def get_current_user(
                 detail="Invalid or missing API key (X-API-Key required by deployment)."
             )
 
-    # 2. Extract User Token
+    # 3. Trusted Gateway Identity Header (in gateway/multi-user mode)
+    if settings.AUTH_MODE == "gateway":
+        gateway_user = request.headers.get(settings.GATEWAY_USER_HEADER)
+        if gateway_user and gateway_user.strip():
+            gateway_role = request.headers.get(settings.GATEWAY_ROLE_HEADER, "user").strip()
+            return UserContext(
+                user_id=gateway_user.strip(),
+                created_at=time.time(),
+                expires_at=time.time() + (settings.TOKEN_EXPIRE_HOURS * 3600),
+                role=gateway_role
+            )
+
+    # 4. Bearer Token Extraction
     candidate_token = None
     if authorization:
         if authorization.lower().startswith("bearer "):
@@ -187,13 +224,17 @@ async def get_current_user(
             candidate_token = authorization.strip()
     elif x_user_token:
         candidate_token = x_user_token.strip()
-    elif token:
-        candidate_token = token.strip()
 
     if not candidate_token:
+        detail_msg = (
+            "Authentication required. Provide a valid Bearer token in the Authorization header "
+            "or route requests through an authenticated API gateway."
+            if settings.AUTH_MODE == "gateway"
+            else "Authentication required. Provide a Bearer token in the Authorization header (or acquire a demo token via POST /api/auth/demo-token)."
+        )
         raise HTTPException(
             status_code=401,
-            detail="Authentication required. Please provide a Bearer token or acquire one via POST /api/auth/token."
+            detail=detail_msg
         )
 
     return verify_access_token(candidate_token)

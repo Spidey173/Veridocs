@@ -72,7 +72,55 @@ class TestGroundingEvaluation:
                 "expected_supported": True,
             },
 
-            # === Category 2: Altered Numbers (Expected: Unsupported / True Negative) ===
+            # === Category 2: Paraphrased Claims (Expected: Supported / True Positive) ===
+            {
+                "id": "paraphrase-1",
+                "category": "paraphrases",
+                "answer": "Visual text layer coordinates are utilized by Veridocs to highlight source passages on document pages [Page 1].",
+                "source_chunks": source_context,
+                "expected_supported": True,
+            },
+            {
+                "id": "paraphrase-2",
+                "category": "paraphrases",
+                "answer": "During fiscal year 2024, the business produced $14.5 million in annual revenue alongside 28% expansion [Page 2].",
+                "source_chunks": source_context,
+                "expected_supported": True,
+            },
+
+            # === Category 3: Negation Inversions (Expected: Unsupported / True Negative) ===
+            {
+                "id": "negation-1",
+                "category": "negation",
+                "answer": "The agreement does not remain in effect for 36 months under standard conditions.",
+                "source_chunks": source_context,
+                "expected_supported": False,
+            },
+            {
+                "id": "negation-2",
+                "category": "negation",
+                "answer": "Dr. Sarah Connor was never appointed Chief Technology Officer in November 2023.",
+                "source_chunks": source_context,
+                "expected_supported": False,
+            },
+            {
+                "id": "negation-3",
+                "category": "negation",
+                "answer": "The company reported no annual revenue in fiscal year 2024.",
+                "source_chunks": source_context,
+                "expected_supported": False,
+            },
+
+            # === Category 4: Role Reversal (Expected: Unsupported / True Negative) ===
+            {
+                "id": "role-reversal-1",
+                "category": "role_reversal",
+                "answer": "Chief Technology Officer Sarah Connor appointed the executive board in November 2023.",
+                "source_chunks": source_context,
+                "expected_supported": False,
+            },
+
+            # === Category 5: Altered Numbers (Expected: Unsupported / True Negative) ===
             {
                 "id": "altered-num-1",
                 "category": "altered_numbers",
@@ -95,24 +143,24 @@ class TestGroundingEvaluation:
                 "expected_supported": False,
             },
 
-            # === Category 3: Subtle Unsupported Claims (Expected: Unsupported / True Negative) ===
+            # === Category 6: Subtle Unsupported / Fabricated Claims (Expected: Unsupported / True Negative) ===
             {
                 "id": "unsupported-1",
-                "category": "subtle_unsupported",
+                "category": "unrelated_claims",
                 "answer": "Veridocs was completely acquired by Adobe to replace their PDF rendering engine.",
                 "source_chunks": source_context,
                 "expected_supported": False,
             },
             {
                 "id": "unsupported-2",
-                "category": "subtle_unsupported",
+                "category": "unrelated_claims",
                 "answer": "The company filed for bankruptcy in 2024 due to catastrophic financial losses.",
                 "source_chunks": source_context,
                 "expected_supported": False,
             },
             {
                 "id": "unsupported-3",
-                "category": "subtle_unsupported",
+                "category": "unrelated_claims",
                 "answer": "Dr. Sarah Connor resigned in disgrace after an internal audit investigation.",
                 "source_chunks": source_context,
                 "expected_supported": False,
@@ -121,25 +169,25 @@ class TestGroundingEvaluation:
 
     def test_deterministic_grounding_metrics(self, benchmark_cases):
         """
-        Run the grounding evaluation suite, asserting precision >= 0.80 and recall >= 0.80,
-        and verifying category breakdown statistics.
+        Run the grounding evaluation suite across 16 test cases, asserting precision and recall,
+        and verifying category breakdowns across paraphrases, negations, role reversals, and altered numbers.
         """
         metrics = evaluate_grounding_benchmark(benchmark_cases)
 
         print("\n=== Grounding Heuristic Evaluation Report ===")
-        print(f"Total Test Cases: {metrics['total_cases']}")
-        print(f"Precision:        {metrics['precision']:.3f} (TP={metrics['true_positives']}, FP={metrics['false_positives']})")
-        print(f"Recall:           {metrics['recall']:.3f} (TP={metrics['true_positives']}, FN={metrics['false_negatives']})")
-        print(f"Accuracy:         {metrics['accuracy']:.3f}")
-        print(f"F1-Score:         {metrics['f1_score']:.3f}")
+        print(f"Total Benchmark Cases: {metrics['total_cases']}")
+        print(f"Precision:             {metrics['precision']:.3f} (TP={metrics['true_positives']}, FP={metrics['false_positives']})")
+        print(f"Recall:                {metrics['recall']:.3f} (TP={metrics['true_positives']}, FN={metrics['false_negatives']})")
+        print(f"Accuracy:              {metrics['accuracy']:.3f}")
+        print(f"F1-Score:              {metrics['f1_score']:.3f}")
         print("Category Breakdown:")
         for cat, stats in metrics["category_breakdown"].items():
             print(f"  - {cat:20s}: {stats['correct']}/{stats['total']} correct ({stats['accuracy']*100:.1f}%)")
 
         # Performance assertions
-        assert metrics["total_cases"] == 10
-        assert metrics["recall"] >= 0.75, "Recall for grounded claims should be high"
-        assert metrics["precision"] >= 0.75, "Precision must reject altered numbers and unsupported claims"
+        assert metrics["total_cases"] == 16
+        assert metrics["recall"] >= 0.80, "Recall for factual and paraphrased grounded claims should be high"
+        assert metrics["precision"] >= 0.80, "Precision must reject altered numbers, polar inversions, and unsupported claims"
         assert metrics["accuracy"] >= 0.80, "Overall accuracy should exceed 80%"
 
         # Number violation check: altered numbers must be caught

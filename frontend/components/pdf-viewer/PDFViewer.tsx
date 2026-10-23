@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask, PageViewport } from "pdfjs-dist";
 import { useAppStore } from "@/lib/store";
-import { getPdfUrl } from "@/lib/api";
+import { fetchPdfBlobUrl } from "@/lib/api";
 
 interface BoundingBoxRect {
   x: number;
@@ -142,10 +142,15 @@ export default function PDFViewer() {
     let isMounted = true;
     setIsLoadingDoc(true);
 
+    let createdBlobUrl: string | null = null;
+
     async function loadPdf() {
       try {
-        const localUrl = localFileUrls ? localFileUrls[activeDocumentName!] : undefined;
-        const url = localUrl || getPdfUrl(sessionId!, activeDocumentName!);
+        let url = localFileUrls ? localFileUrls[activeDocumentName!] : undefined;
+        if (!url) {
+          url = await fetchPdfBlobUrl(sessionId!, activeDocumentName!);
+          createdBlobUrl = url;
+        }
         const doc = await currentLib.getDocument({ url }).promise;
         if (!isMounted) return;
         setPdfDoc(doc);
@@ -161,6 +166,9 @@ export default function PDFViewer() {
 
     return () => {
       isMounted = false;
+      if (createdBlobUrl) {
+        URL.revokeObjectURL(createdBlobUrl);
+      }
     };
   }, [pdfLib, sessionId, activeDocumentName, localFileUrls, files, setTotalPages]);
 

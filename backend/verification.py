@@ -140,11 +140,21 @@ def calculate_grounding_score(
         if not numeric_grounded:
             best_score = max(0.0, best_score - 0.35)
 
+        # Polarity / Negation heuristic check:
+        # Detect whether the claim explicitly inverts the predicate using negation tokens
+        best_source_text = source_texts[best_source_idx] if best_source_idx >= 0 else ""
+        claim_negations = set(re.findall(r"\b(?:not|never|no|neither|nor|cannot|n't)\b", claim_lower))
+        source_negations = set(re.findall(r"\b(?:not|never|no|neither|nor|cannot|n't)\b", best_source_text.lower()))
+        has_polarity_conflict = bool(claim_negations != source_negations and (claim_negations or source_negations))
+
+        if has_polarity_conflict:
+            best_score = max(0.0, best_score - 0.40)
+
         # 3-State Claim Grounding:
-        # 🟢 Verified: direct lexical match (>= 0.32) and all asserted numbers match
+        # 🟢 Verified: direct lexical match (>= 0.32) and all asserted numbers match without polarity conflict
         # 🟡 Inferred: logical extrapolation or synthesis (0.22 - 0.31) and all numbers match
-        # 🔴 Hallucinated: unsupported assertion (< 0.22) or ungrounded/altered numbers
-        if not numeric_grounded:
+        # 🔴 Hallucinated: unsupported assertion (< 0.22), ungrounded numbers, or polarity conflict
+        if not numeric_grounded or has_polarity_conflict:
             status = "hallucinated"
             is_supported = False
         elif best_score >= 0.32:
@@ -168,6 +178,7 @@ def calculate_grounding_score(
             "status": status,
             "is_supported": is_supported,
             "numeric_grounded": numeric_grounded,
+            "polarity_conflict": has_polarity_conflict,
             "best_source_page": source_chunks[best_source_idx]["page"] if best_source_idx >= 0 else None,
             "source_file": source_chunks[best_source_idx].get("source_file") if best_source_idx >= 0 else None,
         })

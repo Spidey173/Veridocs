@@ -91,15 +91,55 @@ class Settings:
             if origin.strip()
         ]
 
+        # === Deployment & Environment ===
+        self.ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
+        self.AUTH_MODE: str = os.getenv(
+            "AUTH_MODE", "demo" if self.ENVIRONMENT != "production" else "gateway"
+        ).lower()
+
         # === Security & Access Control ===
         self.AUTH_SECRET_KEY: str = os.getenv("AUTH_SECRET_KEY", "").strip()
+        self.ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "").strip()
         self.REQUIRE_API_KEY: bool = os.getenv("REQUIRE_API_KEY", "false").lower() in ("true", "1", "yes")
         self.API_KEY: str = os.getenv("API_KEY", "").strip()
         self.TOKEN_EXPIRE_HOURS: int = int(os.getenv("TOKEN_EXPIRE_HOURS", "24"))
+        self.GATEWAY_USER_HEADER: str = os.getenv("GATEWAY_USER_HEADER", "X-Consumer-Custom-ID")
+        self.GATEWAY_ROLE_HEADER: str = os.getenv("GATEWAY_ROLE_HEADER", "X-Consumer-Role")
 
         # === Data Lifecycle & Retention ===
         self.RETENTION_HOURS: int = int(os.getenv("RETENTION_HOURS", "24"))
         self.AUTO_CLEANUP_ENABLED: bool = os.getenv("AUTO_CLEANUP_ENABLED", "true").lower() in ("true", "1", "yes")
+        self.CLEANUP_INTERVAL_MINUTES: int = int(os.getenv("CLEANUP_INTERVAL_MINUTES", "60"))
+
+    def validate_production_configuration(self):
+        """
+        Validate critical security parameters for production deployments.
+        Fails fast if production is configured with insecure or missing secrets.
+        """
+        is_prod = self.ENVIRONMENT == "production" or self.AUTH_MODE == "gateway"
+        if is_prod:
+            insecure_placeholders = {
+                "veridocs-default-secret-key-change-in-production",
+                "change-me",
+                "secret",
+                "password",
+                "default",
+            }
+            if not self.AUTH_SECRET_KEY:
+                raise RuntimeError(
+                    "FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is required in production/gateway mode "
+                    "but was not set. Define a strong secret of at least 32 characters in your environment."
+                )
+            if len(self.AUTH_SECRET_KEY) < 32:
+                raise RuntimeError(
+                    f"FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is too short ({len(self.AUTH_SECRET_KEY)} chars). "
+                    "Production deployments require at least 32 characters for HMAC-SHA256 signing security."
+                )
+            if self.AUTH_SECRET_KEY.lower() in insecure_placeholders:
+                raise RuntimeError(
+                    "FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is set to an insecure default placeholder. "
+                    "You must provide a unique, random secret in production."
+                )
 
 
 @lru_cache()

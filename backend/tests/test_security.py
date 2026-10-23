@@ -5,6 +5,7 @@ gateway API key enforcement, and strict user ownership isolation (anti-IDOR).
 """
 
 import time
+import json
 import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
@@ -48,14 +49,67 @@ class TestSecurityAndAccessControl:
         assert "401" in str(excinfo.value) or "expired" in str(excinfo.value).lower()
 
     def test_auth_token_endpoint(self, test_client: TestClient):
-        """Verify POST /api/auth/token generates a valid signed bearer token."""
-        response = test_client.post("/api/auth/token", json={"user_id": "test_user_42"})
+        """Verify POST /api/auth/demo-token generates a valid signed demo bearer token."""
+        response = test_client.post("/api/auth/demo-token")
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
         assert data["token_type"] == "bearer"
-        assert data["user_id"] == "test_user_42"
+        assert data["mode"] == "demo"
+        assert "demo_usr_" in data["user_id"]
         assert data["expires_in"] > 0
+
+    def test_demo_token_disabled_in_production(self, test_client: TestClient, monkeypatch):
+        """Verify demo token issuance is rejected with 403 in production or gateway mode."""
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        resp = test_client.post("/api/auth/demo-token")
+        assert resp.status_code == 403
+        assert "disabled in production" in resp.json()["detail"].lower()
+
+    def test_production_fails_without_strong_secret(self, monkeypatch):
+        """Verify validation fails fast on startup in production if secret is missing or insecure."""
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+
+        monkeypatch.setattr(settings, "AUTH_SECRET_KEY", "")
+        with pytest.raises(RuntimeError) as excinfo:
+            settings.validate_production_configuration()
+        assert "AUTH_SECRET_KEY is required" in str(excinfo.value)
+
+        monkeypatch.setattr(settings, "AUTH_SECRET_KEY", "too-short-secret")
+        with pytest.raises(RuntimeError) as excinfo:
+            settings.validate_production_configuration()
+        assert "too short" in str(excinfo.value)
+
+        monkeypatch.setattr(settings, "AUTH_SECRET_KEY", "veridocs-default-secret-key-change-in-production")
+        with pytest.raises(RuntimeError) as excinfo:
+            settings.validate_production_configuration()
+        assert "insecure default placeholder" in str(excinfo.value)
+
+    def test_gateway_trusted_identity_header(self, monkeypatch, sample_txt_bytes, patch_models, mock_llm_service):
+        """Verify gateway mode authenticates through trusted upstream headers without client tokens."""
+        settings = get_settings()
+        monkeypatch.setattr(settings, "AUTH_MODE", "gateway")
+
+        gw_client = TestClient(main.app)
+        gw_client.headers["X-Consumer-Custom-ID"] = "corp_employee_99"
+        gw_client.headers["X-Consumer-Role"] = "user"
+
+        files = [("files", ("corp_policy.txt", sample_txt_bytes, "text/plain"))]
+        resp = gw_client.post("/api/upload", files=files)
+        assert resp.status_code == 200
+        session_id = resp.json()["session_id"]
+
+        # Read session info as same employee
+        info_resp = gw_client.get(f"/api/sessions/{session_id}")
+        assert info_resp.status_code == 200
+
+        # Different employee trying to access session -> 403 Forbidden
+        other_gw_client = TestClient(main.app)
+        other_gw_client.headers["X-Consumer-Custom-ID"] = "different_employee_12"
+        other_resp = other_gw_client.get(f"/api/sessions/{session_id}")
+        assert other_resp.status_code == 403
 
     def test_unauthenticated_request_rejected(self, sample_txt_bytes, patch_models, mock_llm_service):
         """Verify endpoints reject requests with 401 when no token is supplied."""
@@ -116,8 +170,28 @@ class TestSecurityAndAccessControl:
         idor_delete = client_b.delete(f"/api/sessions/{session_id}")
         assert idor_delete.status_code == 403
 
-    def test_query_param_token_for_browser_views(self, sample_txt_bytes, patch_models, mock_llm_service):
-        """Verify ?token=<token> allows browser PDF and stream requests without headers."""
+    def test_session_missing_ownership_rejected(self, test_client: TestClient, sample_txt_bytes):
+        """Verify sessions on disk or in memory with missing or null ownership are denied (403)."""
+        files = [("files", ("test.txt", sample_txt_bytes, "text/plain"))]
+        upload_resp = test_client.post("/api/upload", files=files)
+        session_id = upload_resp.json()["session_id"]
+
+        # Strip ownership from session
+        main.sessions[session_id]["owner_id"] = None
+        session_dir = Path(get_settings().UPLOAD_DIR) / "sessions" / session_id
+        meta_file = session_dir / "session.json"
+        if meta_file.exists():
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta["owner_id"] = None
+            meta_file.write_text(json.dumps(meta), encoding="utf-8")
+
+        # Subsequent access must be rejected with 403 Forbidden
+        resp = test_client.get(f"/api/sessions/{session_id}")
+        assert resp.status_code == 403
+        assert "ownership is missing" in resp.json()["detail"].lower()
+
+    def test_query_param_token_rejected_for_urls(self, sample_txt_bytes, patch_models, mock_llm_service):
+        """Verify ?token=<token> in URLs is rejected to prevent token leakage in history and logs."""
         token_a = create_access_token(user_id="browser_user")
         client_a = TestClient(main.app)
         client_a.headers["Authorization"] = f"Bearer {token_a}"
@@ -127,10 +201,11 @@ class TestSecurityAndAccessControl:
         upload_resp = client_a.post("/api/upload", files=files)
         session_id = upload_resp.json()["session_id"]
 
-        # Request PDF using query param token with a clean client
+        # Request PDF using query param token with a clean client (no header)
         clean_client = TestClient(main.app)
         resp = clean_client.get(f"/api/documents/{session_id}/pdf?token={token_a}")
-        assert resp.status_code == 200
+        assert resp.status_code == 401
+        assert "authentication required" in resp.json()["detail"].lower()
 
     def test_cors_origin_headers(self, test_client: TestClient):
         """Verify CORS allows configured origins and handles preflight OPTIONS."""
@@ -169,3 +244,38 @@ class TestSecurityAndAccessControl:
         client.headers["X-API-Key"] = "gateway_secret_key_999"
         resp_authed = client.post("/api/upload", files=files)
         assert resp_authed.status_code == 200
+
+    def test_retention_cleanup_requires_admin_role_and_valid_bounds(self, test_client: TestClient, monkeypatch):
+        """Verify ordinary users cannot trigger admin cleanup, and retention bounds are strictly enforced."""
+        # Regular user token (role="user") -> 403 Forbidden
+        resp = test_client.post("/api/admin/cleanup")
+        assert resp.status_code == 403
+        assert "administrator privileges required" in resp.json()["detail"].lower()
+
+        # Admin token (role="admin")
+        admin_token = create_access_token(user_id="sys_admin", role="admin")
+        admin_client = TestClient(main.app)
+        admin_client.headers["Authorization"] = f"Bearer {admin_token}"
+
+        # Invalid bounds (< 1 hour)
+        resp_bad_min = admin_client.post("/api/admin/cleanup?max_age_hours=0")
+        assert resp_bad_min.status_code == 400
+        assert "between 1 and 720" in resp_bad_min.json()["detail"]
+
+        # Invalid bounds (> 720 hours)
+        resp_bad_max = admin_client.post("/api/admin/cleanup?max_age_hours=1000")
+        assert resp_bad_max.status_code == 400
+
+        # Valid bounds
+        resp_ok = admin_client.post("/api/admin/cleanup?max_age_hours=24")
+        assert resp_ok.status_code == 200
+        assert resp_ok.json()["status"] == "success"
+
+        # Admin API Key header
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ADMIN_API_KEY", "cron_admin_secret_key_456")
+        cron_client = TestClient(main.app)
+        cron_client.headers["X-Admin-Key"] = "cron_admin_secret_key_456"
+        cron_resp = cron_client.post("/api/admin/cleanup?max_age_hours=48")
+        assert cron_resp.status_code == 200
+        assert cron_resp.json()["status"] == "success"

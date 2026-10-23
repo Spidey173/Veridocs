@@ -7,13 +7,13 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
-[![Tests](https://img.shields.io/badge/Tests-98%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
+[![Tests](https://img.shields.io/badge/Tests-103%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
 [![CI](https://img.shields.io/badge/CI-Full--Stack%20(Pytest%20+%20Next.js%20Build)-success?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/Spidey173/Veridocs)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 <br />
 
-[Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [Security & Privacy](#-security-privacy--data-retention) • [Grounding Methodology & Limits](#-grounding-methodology--limitations) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Testing & CI](#-testing--ci) • [Quick Start](#-quick-start)
+[Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [Security & Privacy](#-security-privacy--data-retention) • [Grounding Methodology & Limits](#-grounding-methodology-limitations--benchmark) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Testing & CI](#-testing--ci) • [Quick Start](#-quick-start)
 
 </div>
 
@@ -28,8 +28,8 @@
 1. **Visual Source Grounding:** When the AI gives an answer, clicking the citation scrolls the PDF and draws a visual highlight box over the exact sentence on the page using PDF.js.
 2. **Hybrid Search on CPU:** Combines keyword search (BM25 for exact terms/IDs) with vector search (FAISS for meaning) using FastEmbed ONNX (~70MB RAM, no heavy GPU needed).
 3. **Multi-Tenant Security & Anti-IDOR:** Signed HMAC-SHA256 user session tokens isolate customer documents so one user cannot access, query, or delete another user's files or history.
-4. **Data Lifecycle & Ephemeral Cleanup:** Automatic 24-hour retention purge and explicit deletion endpoints protect user privacy and prevent disk exhaustion.
-5. **98 Automated Tests & Full-Stack CI:** Pytest backend suite + Next.js TypeScript check, linting, and production build run on every push in GitHub Actions.
+4. **Data Lifecycle & Ephemeral Cleanup:** Automatic background retention purge and explicit deletion endpoints protect user privacy and prevent disk exhaustion.
+5. **103 Automated Tests & Full-Stack CI:** Pytest backend suite + Next.js TypeScript check, linting, and production build run on every push in GitHub Actions.
 
 ---
 
@@ -70,53 +70,74 @@ I built **Veridocs** to solve these two practical problems with a clean full-sta
 
 ---
 
+---
+
 ## 🔒 Security, Privacy & Data Retention
 
-Veridocs is engineered with security and tenant isolation principles:
+Veridocs is engineered with clear security boundaries, access controls, and data lifecycle policies:
 
-1. **Authentication & Tenant Isolation:**
-   - Every client request requires a signed HMAC-SHA256 session token (`Authorization: Bearer <token>` or `?token=<token>`).
-   - Sessions and uploaded documents are tagged with an `owner_id`. Any attempt by User B to query, view, download, or delete User A's session results in `403 Forbidden` (Insecure Direct Object Reference protection).
-2. **Configurable CORS Whitelist:**
-   - Wildcard CORS is disabled. Allowed origins are configured via the `CORS_ORIGINS` environment variable (defaults to `http://localhost:3000,http://localhost:8000`).
-3. **Data Lifecycle & Ephemeral Retention:**
-   - **Explicit Deletion:** Users can delete entire sessions (`DELETE /api/sessions/{id}`) or individual documents (`DELETE /api/sessions/{id}/documents/{filename}`). Deletion purges disk files, FAISS vector indexes, and conversation history.
-   - **Path Traversal Protection:** All file deletion operations resolve paths strictly against the canonical upload root; traversal sequences (`../`) are safely rejected.
-   - **Automated Retention Purge:** Background maintenance cleans up sessions and orphaned files older than `RETENTION_HOURS` (default: 24h).
-4. **Gateway API Key Protection (Optional):**
-   - For enterprise gateway deployments, setting `REQUIRE_API_KEY=true` enforces an `X-API-Key` check on all API routes.
+1. **Trustworthy Identity & Deployment Modes:**
+   - **Local Demo Mode (`AUTH_MODE=demo`):** Designed for local single-user evaluation. Generates ephemeral demo tokens (`POST /api/auth/demo-token`). Clients cannot arbitrarily choose their user ID or claim admin privileges; demo tokens assign a fixed `user` role and are labeled as demo-only.
+   - **Multi-Tenant Gateway Mode (`AUTH_MODE=gateway`):** Designed for production deployments behind a trusted reverse proxy or API gateway (e.g., Kong, Envoy, Cloudflare Access, AWS API Gateway, GCP IAP). Client-minted demo tokens are strictly disabled (`403 Forbidden`). Identity is validated from trusted upstream gateway headers (`X-Consumer-Custom-ID` and `X-Consumer-Role`).
+   - **Strict Production Secret Enforcement:** When running in production mode (`ENVIRONMENT=production` or `AUTH_MODE=gateway`), the server validates `AUTH_SECRET_KEY` on startup. If the secret is missing, default, or shorter than 32 characters, server startup fails immediately with a `RuntimeError`.
+2. **Consistent Ownership Enforcement (Anti-IDOR):**
+   - Every session and document operation requires an authenticated caller identity.
+   - Sessions restored from disk or in-memory must have explicit, verified ownership. Missing or unknown ownership is treated as denied (`403 Forbidden`).
+   - Cross-user access (reading, querying, inspecting, downloading PDFs, or deleting sessions) is strictly blocked with `403 Forbidden`.
+3. **Protected Administrative Operations:**
+   - Retention cleanup (`POST /api/admin/cleanup`) is restricted to users with the `admin` role or authorized automated cron jobs passing the `X-Admin-Key` header.
+   - Arbitrary cleanup intervals from clients are rejected; retention bounds are strictly validated between 1 and 720 hours (30 days).
+4. **Tokenless URLs & Header-Only Authentication:**
+   - Authentication tokens are **strictly rejected in query parameters** (`?token=...`) across all endpoints to prevent token leakage in browser history, HTTP referrers, and server access logs.
+   - For PDF rendering, the frontend uses an authenticated HTTP request (`fetchPdfBlobUrl`) transmitting `Authorization: Bearer <token>` in the header, converting the response into an in-memory browser `blob:` URL that is securely revoked on unmount.
+5. **Genuinely Automated Lifecycle Retention:**
+   - Veridocs features an automated background retention worker running inside the application lifespan.
+   - Every `CLEANUP_INTERVAL_MINUTES` (default: 60m), the worker purges sessions, persisted FAISS vector indexes, uploaded files, and conversation history older than `RETENTION_HOURS` (default: 24h).
+   - Safe against path traversal and gracefully tolerates missing or partially deleted files.
+6. **Configurable CORS Whitelist:**
+   - Wildcard CORS is disabled. Allowed origins are configured via `CORS_ORIGINS` (defaults to `http://localhost:3000,http://localhost:8000`).
 
 ---
 
-## 🔬 Grounding Methodology & Limitations
+## 🔬 Grounding Methodology, Limitations & Benchmark
 
 > [!IMPORTANT]
-> **Heuristic Disclosure:** The grounding verification in Veridocs is a fast, deterministic surface alignment check, **not proof of semantic truth or formal factual correctness**.
+> **Heuristic Disclosure:** The grounding verification in Veridocs is a fast, deterministic surface alignment check, **not proof of semantic truth or formal factual correctness**. It serves as a real-time signal to catch ungrounded numbers and obvious hallucinated topics in <5ms on CPU.
 
 ### How the Heuristic Works:
-- **Meaningful Token Overlap (60%):** Measures non-stopword token overlap between the answer claim and candidate source passages.
+- **Meaningful Token Overlap (60%):** Measures non-stopword token overlap between answer claims and candidate source passages.
 - **Phrase Substring Similarity (25%):** Assesses multi-word n-gram window preservation.
 - **Sequence Matching (15%):** Uses Levenshtein-style ratio for typographical similarity.
 - **Exact Numeric Grounding:** Every asserted number, percentage, date, or financial figure must be present in source chunks; missing or altered numbers automatically mark the claim as unsupported.
+- **Negation Polarity Check:** Detects whether a claim introduces negation tokens (`not`, `never`, `cannot`, `no`) that invert the assertion relative to the source passage.
 
-### Known Limitations:
-1. **Semantic Role Inversion:** *"Company A acquired Company B"* and *"Company B acquired Company A"* share 100% of tokens and numbers, but have opposite factual meanings.
-2. **Paraphrasing Nuance:** Highly accurate answers phrased with completely different vocabulary may receive lower overlap scores.
-3. **Negation:** Simple bag-of-words heuristics cannot verify complex inverted clauses.
-*For mission-critical production legal or medical workflows, this heuristic should be paired with an NLI (Natural Language Inference) model or an LLM-as-a-judge pipeline.*
+### Known Theoretical Limitations:
+1. **Semantic Role Inversion:** *"Chief Technology Officer Sarah Connor appointed the Board"* and *"The Board appointed Sarah Connor Chief Technology Officer"* share identical tokens and entities. Lexical bag-of-words heuristics cannot determine syntactic agent vs. patient relationships.
+2. **Deep Paraphrasing:** Accurate semantic answers phrased with completely different vocabulary may receive lower overlap scores.
+3. **Complex Discourse:** Nuanced hedge phrases ("it may be plausible that...") cannot be evaluated for semantic entailment without a language model.
+*For mission-critical production workflows, pair this fast heuristic with a cross-encoder NLI (Natural Language Inference) model or an LLM-as-a-judge evaluation suite.*
 
 ### Deterministic Benchmark Results (`backend/tests/test_grounding_eval.py`):
+Evaluated across **16 deterministic benchmark challenge cases**:
+
 ```
-Total Test Cases: 10
-Precision:        1.000 (TP=4, FP=0)
-Recall:           1.000 (TP=4, FN=0)
-Accuracy:         1.000
-F1-Score:         1.000
+=== Grounding Heuristic Evaluation Report ===
+Total Benchmark Cases: 16
+Precision:             0.857 (TP=6, FP=1)
+Recall:                1.000 (TP=6, FN=0)
+Accuracy:              0.938 (15/16 correct)
+F1-Score:              0.923
+
 Category Breakdown:
   - grounded claims     : 4/4 correct (100.0%)
+  - paraphrased claims  : 2/2 correct (100.0%)
+  - negation inversions : 3/3 correct (100.0%)
   - altered numbers     : 3/3 correct (100.0%)
-  - subtle unsupported  : 3/3 correct (100.0%)
+  - unrelated claims    : 3/3 correct (100.0%)
+  - role reversal       : 0/1 correct (0.0% — correctly highlights lexical heuristic limit!)
 ```
+
+*(Note: Synthetic test benchmarks measure specific heuristic boundary behaviors and do not imply real-world natural language perfection.)*
 
 ---
 
@@ -260,7 +281,7 @@ pytest -v
 ```
 
 ```
-============================== 98 passed in 5.90s ==============================
+============================== 103 passed in 1.94s ==============================
 ```
 
 To run the frontend validation locally:
@@ -274,11 +295,21 @@ npm run build
 
 ---
 
-## ⚠️ Remaining Production Roadmap & Limitations
+## ⚠️ Deployment Scope, Assumptions & Limitations
 
-While Veridocs now includes strong multi-tenant security, safe data retention, and full-stack CI, enterprise production deployments should consider:
-1. **Multi-Instance Shared Persistence:** For horizontally auto-scaled clusters across multiple container nodes (e.g., AWS ECS or Kubernetes), local disk storage (`UPLOAD_DIR`) should be backed by an S3/GCS bucket, and in-memory session metadata should be backed by a shared Redis or PostgreSQL instance.
-2. **Semantic NLI Verification:** For critical legal or financial compliance, pair the existing <5ms lexical grounding check with an NLI model or an LLM-as-a-judge entailment evaluator.
+### Current Deployment Model: Scoped Single-Instance
+Veridocs is currently architected and validated for **Single-Instance Deployment** (e.g., a standalone Docker container, single VM, or single Kubernetes pod with persistent volume storage).
+
+**Single-Instance Architectural Assumptions:**
+1. **In-Memory Session Caching & Local File Storage:** Active session metadata, chunk indexes, and vector stores are maintained in process memory and persisted to local disk (`UPLOAD_DIR`).
+2. **Ephemeral Multi-Tenancy:** In multi-tenant gateway mode, user isolation is strictly enforced within the instance. However, without shared external storage, requests in a multi-pod cluster without session stickiness could land on an instance lacking the local session files.
+
+### Enterprise Multi-Instance Scaling Roadmap
+To scale horizontally across multi-instance clusters (e.g. AWS ECS, Kubernetes multi-replica deployments):
+1. **Shared Session State:** Replace the in-memory `sessions` dict with Redis or PostgreSQL.
+2. **Cloud Object Storage:** Replace local disk `UPLOAD_DIR` with an Amazon S3 or Google Cloud Storage bucket.
+3. **Distributed Vector Database:** Migrate FAISS CPU indexes to a distributed vector engine (e.g., Qdrant, Milvus, or pgvector).
+4. **Semantic NLI Entailment:** Complement the CPU lexical heuristic with a cross-encoder NLI model for high-stakes legal/compliance verification.
 
 ---
 
