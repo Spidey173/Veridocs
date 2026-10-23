@@ -57,7 +57,7 @@ class TestSecurityAndAccessControl:
         assert data["user_id"] == "test_user_42"
         assert data["expires_in"] > 0
 
-    def test_unauthenticated_request_rejected(self, sample_txt_bytes):
+    def test_unauthenticated_request_rejected(self, sample_txt_bytes, patch_models, mock_llm_service):
         """Verify endpoints reject requests with 401 when no token is supplied."""
         unauthed_client = TestClient(main.app)  # No Authorization header
         files = [("files", ("secret.txt", sample_txt_bytes, "text/plain"))]
@@ -65,7 +65,7 @@ class TestSecurityAndAccessControl:
         assert resp.status_code == 401
         assert "authentication required" in resp.json()["detail"].lower()
 
-    def test_cross_user_isolation_anti_idor(self, sample_txt_bytes):
+    def test_cross_user_isolation_anti_idor(self, sample_txt_bytes, patch_models, mock_llm_service):
         """
         Verify multi-tenant isolation:
         User A creates a session. User B cannot read, query, inspect, download, or delete User A's session.
@@ -116,7 +116,7 @@ class TestSecurityAndAccessControl:
         idor_delete = client_b.delete(f"/api/sessions/{session_id}")
         assert idor_delete.status_code == 403
 
-    def test_query_param_token_for_browser_views(self, sample_txt_bytes):
+    def test_query_param_token_for_browser_views(self, sample_txt_bytes, patch_models, mock_llm_service):
         """Verify ?token=<token> allows browser PDF and stream requests without headers."""
         token_a = create_access_token(user_id="browser_user")
         client_a = TestClient(main.app)
@@ -149,7 +149,7 @@ class TestSecurityAndAccessControl:
         assert response.status_code == 200
         assert response.headers.get("access-control-allow-origin") == allowed_origin
 
-    def test_api_key_gateway_enforcement(self, monkeypatch, sample_txt_bytes):
+    def test_api_key_gateway_enforcement(self, monkeypatch, sample_txt_bytes, patch_models, mock_llm_service):
         """Verify REQUIRE_API_KEY restricts requests when configured."""
         settings = get_settings()
         monkeypatch.setattr(settings, "REQUIRE_API_KEY", True)
