@@ -50,7 +50,9 @@ export default function DropZone() {
         setError("Please upload PDF, DOCX, or TXT files.");
         return;
       }
-      setSelectedFiles((prev) => [...prev, ...valid]);
+      setSelectedFiles(valid);
+      // Auto-trigger instant upload on file drop
+      executeUpload(valid);
     },
     []
   );
@@ -70,41 +72,42 @@ export default function DropZone() {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleUpload = async () => {
-    if (selectedFiles.length === 0) return;
+  const executeUpload = async (targetFiles?: File[]) => {
+    const filesToUpload = targetFiles || selectedFiles;
+    if (filesToUpload.length === 0) return;
 
     setUploading(true);
-    setUploadProgress(15, "Uploading documents & generating local blobs...");
+    setUploadProgress(25, "Extracting text chunks & generating embeddings...");
     setError(null);
 
-    // Dynamic progress ticker during server processing & vector indexing
-    let currentPct = 15;
+    // Fast, responsive progress indicator (<150ms)
+    let currentPct = 25;
     const progressTicker = setInterval(() => {
-      if (currentPct < 88) {
-        currentPct += Math.floor(Math.random() * 8) + 4;
+      if (currentPct < 90) {
+        currentPct += 25;
         let stage = "Extracting text chunks & coordinates...";
-        if (currentPct > 40 && currentPct <= 70) {
+        if (currentPct >= 50 && currentPct < 80) {
           stage = "Generating FastEmbed vectors & neural embeddings...";
-        } else if (currentPct > 70) {
+        } else if (currentPct >= 80) {
           stage = "Finalizing hybrid BM25 + FAISS structures...";
         }
-        setUploadProgress(Math.min(currentPct, 92), stage);
+        setUploadProgress(Math.min(currentPct, 95), stage);
       }
-    }, 160);
+    }, 25);
 
     try {
       const blobUrls: Record<string, string> = {};
-      selectedFiles.forEach((f) => {
+      filesToUpload.forEach((f) => {
         blobUrls[f.name] = URL.createObjectURL(f);
       });
       setLocalFileUrls(blobUrls);
 
-      const result = await uploadDocuments(selectedFiles);
+      const result = await uploadDocuments(filesToUpload);
 
       clearInterval(progressTicker);
       setUploadProgress(100, "Workspace ready!");
 
-      const files: UploadedFile[] = selectedFiles.map((f) => ({
+      const files: UploadedFile[] = filesToUpload.map((f) => ({
         name: f.name,
         size: f.size,
         type: f.type,
@@ -130,7 +133,7 @@ export default function DropZone() {
     } catch (err: unknown) {
       clearInterval(progressTicker);
       console.warn("Backend not available, initializing interactive client session:", err);
-      const uploaded: UploadedFile[] = selectedFiles.map((f) => ({
+      const uploaded: UploadedFile[] = filesToUpload.map((f) => ({
         name: f.name,
         size: f.size,
         type: f.type,
@@ -138,6 +141,7 @@ export default function DropZone() {
       }));
       setSession(`session-${Date.now()}`, uploaded);
       setUploading(false);
+      setSelectedFiles([]);
     }
   };
 
@@ -420,7 +424,7 @@ export default function DropZone() {
             </div>
 
             <button
-              onClick={handleUpload}
+              onClick={() => executeUpload()}
               disabled={isUploading}
               className="w-full mt-3 py-2.5 px-4 rounded-xl font-semibold text-xs text-midnight-950
                 bg-gradient-to-r from-accent-primary to-accent-secondary hover:opacity-95 transition-all

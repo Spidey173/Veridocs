@@ -245,6 +245,26 @@ def _generate_insights_background(session_id: str, chunks_by_file: Dict, doc_met
         logger.error(f"Background insights generation failed: {e}", exc_info=True)
 
 
+def _persist_session_background(session_id: str, vector_store: VectorStore, saved_paths: List[str], file_names: List[str], doc_metadata: List[Dict], owner_id: str):
+    """Persist session and vector index to disk asynchronously to keep upload response sub-second."""
+    try:
+        session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
+        vector_store.save_to_disk(session_dir)
+        session_meta = {
+            "session_id": session_id,
+            "file_paths": saved_paths,
+            "file_names": file_names,
+            "metadata": doc_metadata,
+            "created_at": time.time(),
+            "owner_id": owner_id,
+        }
+        with open(session_dir / "session.json", "w", encoding="utf-8") as f:
+            json.dump(session_meta, f)
+        logger.info(f"Persisted session {session_id} to disk at {session_dir} for owner {owner_id}")
+    except Exception as e:
+        logger.warning(f"Could not persist session {session_id} to disk: {e}")
+
+
 # ──────────────────────────────────────────────
 # Upload Endpoint
 # ──────────────────────────────────────────────
@@ -382,23 +402,16 @@ async def upload_documents(
             "owner_id": current_user.user_id,
         }
 
-        # Persist session to disk so documents survive Render server restarts
-        try:
-            session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
-            vector_store.save_to_disk(session_dir)
-            session_meta = {
-                "session_id": session_id,
-                "file_paths": saved_paths,
-                "file_names": file_names,
-                "metadata": doc_metadata,
-                "created_at": time.time(),
-                "owner_id": current_user.user_id,
-            }
-            with open(session_dir / "session.json", "w", encoding="utf-8") as f:
-                json.dump(session_meta, f)
-            logger.info(f"Persisted session {session_id} to disk at {session_dir} for owner {current_user.user_id}")
-        except Exception as e:
-            logger.warning(f"Could not persist session {session_id} to disk: {e}")
+        # Dispatch session disk persistence to background so upload returns in sub-second time
+        background_tasks.add_task(
+            _persist_session_background,
+            session_id=session_id,
+            vector_store=vector_store,
+            saved_paths=saved_paths,
+            file_names=file_names,
+            doc_metadata=doc_metadata,
+            owner_id=current_user.user_id,
+        )
 
         # Dispatch background insights generation without blocking the upload response
         background_tasks.add_task(
