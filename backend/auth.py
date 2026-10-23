@@ -162,35 +162,21 @@ async def get_current_user(
     authorization: Optional[str] = Header(None),
     x_user_token: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None),
-    x_admin_key: Optional[str] = Header(None)
 ) -> UserContext:
     """
-    FastAPI dependency for endpoint authentication & user identity resolution.
+    FastAPI dependency for user endpoint authentication & user identity resolution.
     Accepts:
-    1. Header `X-Admin-Key: <key>` for administrative tasks
-    2. Trusted Gateway headers (`X-Consumer-Custom-ID` / `X-Consumer-Role`) in gateway deployment mode
-    3. Header `Authorization: Bearer <token>`
-    4. Header `X-User-Token: <token>`
+    1. Deployment Gateway API Key validation (if REQUIRE_API_KEY=true)
+    2. Trusted Gateway headers (X-Consumer-Custom-ID / X-Consumer-Role) in gateway deployment mode
+    3. Header Authorization: Bearer <token>
+    4. Header X-User-Token: <token>
 
-    Notice: Query parameter tokens (?token=...) are strictly rejected to prevent
-    leakage in browser history, HTTP referrers, and server access logs.
+    Notice: Administrative keys (X-Admin-Key) are strictly NOT accepted here to prevent
+    privilege escalation or using maintenance credentials as an omnipotent user identity.
     """
     settings = get_settings()
 
-    # 1. Admin Key verification (for administrative operations like scheduled retention pruning)
-    if settings.ADMIN_API_KEY:
-        admin_candidate = x_admin_key
-        if not admin_candidate and authorization and authorization.startswith("AdminKey "):
-            admin_candidate = authorization[9:].strip()
-        if admin_candidate and hmac.compare_digest(admin_candidate.strip(), settings.ADMIN_API_KEY):
-            return UserContext(
-                user_id="system_admin",
-                created_at=time.time(),
-                expires_at=time.time() + 3600,
-                role="admin"
-            )
-
-    # 2. Deployment Gateway API Key validation (if enabled)
+    # 1. Deployment Gateway API Key validation (if enabled)
     if settings.REQUIRE_API_KEY:
         configured_api_key = settings.API_KEY
         client_key = x_api_key
@@ -203,7 +189,7 @@ async def get_current_user(
                 detail="Invalid or missing API key (X-API-Key required by deployment)."
             )
 
-    # 3. Trusted Gateway Identity Header (in gateway/multi-user mode)
+    # 2. Trusted Gateway Identity Header (in gateway/multi-user mode)
     if settings.AUTH_MODE == "gateway":
         gateway_user = request.headers.get(settings.GATEWAY_USER_HEADER)
         if gateway_user and gateway_user.strip():
@@ -226,7 +212,7 @@ async def get_current_user(
                 role=gateway_role
             )
 
-    # 4. Bearer Token Extraction
+    # 3. Bearer Token Extraction
     candidate_token = None
     if authorization:
         if authorization.lower().startswith("bearer "):
@@ -249,3 +235,48 @@ async def get_current_user(
         )
 
     return verify_access_token(candidate_token)
+
+
+async def require_admin_or_maintenance(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    x_user_token: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None),
+    x_admin_key: Optional[str] = Header(None),
+) -> UserContext:
+    """
+    Dedicated FastAPI dependency scoped strictly to administrative maintenance endpoints
+    (e.g., retention pruning).
+
+    Allows access if:
+    1. Request provides a valid X-Admin-Key matching ADMIN_API_KEY, OR
+    2. Request is authenticated by a trusted user identity whose role is explicitly "admin".
+    """
+    settings = get_settings()
+
+    # 1. Check scoped Admin Key for maintenance automation / cron jobs
+    if settings.ADMIN_API_KEY:
+        admin_candidate = x_admin_key
+        if not admin_candidate and authorization and authorization.startswith("AdminKey "):
+            admin_candidate = authorization[9:].strip()
+        if admin_candidate and hmac.compare_digest(admin_candidate.strip(), settings.ADMIN_API_KEY):
+            return UserContext(
+                user_id="maintenance_worker",
+                created_at=time.time(),
+                expires_at=time.time() + 3600,
+                role="admin"
+            )
+
+    # 2. Otherwise authenticate caller identity via standard user authentication
+    user = await get_current_user(
+        request=request,
+        authorization=authorization,
+        x_user_token=x_user_token,
+        x_api_key=x_api_key
+    )
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Administrator privileges required for this maintenance operation."
+        )
+    return user

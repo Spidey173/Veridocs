@@ -40,7 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import get_settings, get_model_registry
-from auth import get_current_user, create_access_token, verify_access_token, UserContext
+from auth import get_current_user, require_admin_or_maintenance, create_access_token, verify_access_token, UserContext
 from pdf_processor import (
     extract_text_from_file,
     chunk_text,
@@ -1085,18 +1085,12 @@ async def delete_document_from_session(
 @app.post("/api/admin/cleanup")
 async def trigger_retention_cleanup(
     max_age_hours: Optional[int] = None,
-    current_user: UserContext = Depends(get_current_user)
+    admin_user: UserContext = Depends(require_admin_or_maintenance)
 ):
     """
     Trigger retention policy cleanup of expired sessions and orphaned files.
-    Restricted to administrator role or admin key. Rejects arbitrary or out-of-bound cleanup ages.
+    Restricted to administrator role or admin maintenance key. Rejects arbitrary or out-of-bound cleanup ages.
     """
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=403,
-            detail="Access denied: Administrator privileges required for retention cleanup."
-        )
-
     target_max_age = max_age_hours if max_age_hours is not None else settings.RETENTION_HOURS
     if target_max_age < 1 or target_max_age > 720:
         raise HTTPException(

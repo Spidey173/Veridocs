@@ -85,8 +85,9 @@ Veridocs is engineered with clear security boundaries, access controls, and data
    - Every session and document operation requires an authenticated caller identity.
    - Sessions restored from disk or in-memory must have explicit, verified ownership. Missing or unknown ownership is treated as denied (`403 Forbidden`).
    - Cross-user access (reading, querying, inspecting, downloading PDFs, or deleting sessions) is strictly blocked with `403 Forbidden`.
-3. **Protected Administrative Operations:**
-   - Retention cleanup (`POST /api/admin/cleanup`) is restricted to users with the `admin` role or authorized automated cron jobs passing the `X-Admin-Key` header.
+3. **Tightly Scoped Administrative Operations:**
+   - The admin maintenance key (`X-Admin-Key`) is strictly confined to maintenance tasks (`POST /api/admin/cleanup`) via a dedicated `require_admin_or_maintenance` dependency. It is rejected across standard user endpoints (`/api/upload`, `/api/query`, `/api/sessions`) to prevent privilege escalation or acting as an omnipotent user identity.
+   - Retention cleanup is restricted to authenticated users with the `admin` role or automated cron jobs passing the `X-Admin-Key` header.
    - Arbitrary cleanup intervals from clients are rejected; retention bounds are strictly validated between 1 and 720 hours (30 days).
 4. **Tokenless URLs & Header-Only Authentication:**
    - Authentication tokens are **strictly rejected in query parameters** (`?token=...`) across all endpoints to prevent token leakage in browser history, HTTP referrers, and server access logs.
@@ -166,7 +167,7 @@ Category Breakdown:
 
 #### Q4: "How is your CI/CD pipeline structured?"
 > **Your Answer:**  
-> *"Our GitHub Actions workflow runs two parallel jobs on every push: a Python 3.11 job that runs 104 Pytest tests with code coverage, and a Node.js 20 job that runs `npm ci` using our lockfile, executes ESLint, checks TypeScript types with `tsc --noEmit`, and builds the Next.js production bundle."*
+> *"Our GitHub Actions workflow runs two parallel jobs on every push: a Python 3.11 job that runs 105 Pytest tests with code coverage, and a Node.js 20 job that runs `npm ci` using our lockfile, executes ESLint, checks TypeScript types with `tsc --noEmit`, and builds the Next.js production bundle."*
 
 ---
 
@@ -195,7 +196,7 @@ flowchart LR
 | **Search & Vectors** | **FAISS, BM25, FastEmbed (ONNX)** | Fast, lightweight semantic + keyword search running entirely on CPU. |
 | **Security & Auth** | **HMAC-SHA256 Signed Tokens** | Tamper-proof tenant isolation and anti-IDOR protection. |
 | **LLM Gateway** | **Groq, Google Gemini, OpenRouter** | Multi-provider support for generating answers and summaries. |
-| **Testing & CI** | **Pytest (104 tests), GitHub Actions, Next.js Build** | Full-stack automated validation in CI. |
+| **Testing & CI** | **Pytest (105 tests), GitHub Actions, Next.js Build** | Full-stack automated validation in CI. |
 
 ---
 
@@ -213,7 +214,7 @@ Veridocs/
 │   ├── verification.py             # Numeric check & lexical grounding heuristic
 │   ├── llm_service.py              # LLM gateway (Groq, Gemini, OpenRouter)
 │   ├── models.py                   # Pydantic schemas & observability models
-│   └── tests/                      # 104 automated unit & integration tests
+│   └── tests/                      # 105 automated unit & integration tests
 ├── frontend/
 │   ├── app/                        # Next.js pages & layouts
 │   ├── components/                 # PDF viewer, chat, audit & upload components
@@ -283,7 +284,7 @@ pytest -v
 ```
 
 ```
-============================== 104 passed in 2.56s ==============================
+============================== 105 passed in 2.02s ==============================
 ```
 
 To run the frontend validation locally:

@@ -315,3 +315,28 @@ class TestSecurityAndAccessControl:
         cron_resp = cron_client.post("/api/admin/cleanup?max_age_hours=48")
         assert cron_resp.status_code == 200
         assert cron_resp.json()["status"] == "success"
+
+    def test_admin_key_cannot_access_user_endpoints(self, monkeypatch, sample_txt_bytes):
+        """
+        Verify that ADMIN_API_KEY is strictly scoped to maintenance endpoints (cleanup),
+        and cannot be used to upload files, query sessions, or act as an omnipotent user.
+        """
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ADMIN_API_KEY", "cron_admin_secret_key_456")
+
+        # Client presenting only X-Admin-Key to a standard user endpoint
+        admin_key_client = TestClient(main.app)
+        admin_key_client.headers["X-Admin-Key"] = "cron_admin_secret_key_456"
+
+        files = [("files", ("test.txt", sample_txt_bytes, "text/plain"))]
+        upload_resp = admin_key_client.post("/api/upload", files=files)
+        # Must be rejected with 401 Unauthorized (not accepted as user identity)
+        assert upload_resp.status_code == 401
+        assert "authentication required" in upload_resp.json()["detail"].lower()
+
+        # Query endpoint must also reject it
+        query_resp = admin_key_client.post(
+            "/api/query",
+            json={"session_id": "non_existent_session", "question": "What is this?"}
+        )
+        assert query_resp.status_code == 401
