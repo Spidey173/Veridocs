@@ -11,7 +11,10 @@ from contradiction_engine import (
     AuditDiffReport,
 )
 
+from auth import create_access_token
+
 client = TestClient(app)
+client.headers["Authorization"] = f"Bearer {create_access_token('audit_test_user')}"
 
 
 class TestContradictionEngine:

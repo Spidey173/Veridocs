@@ -1,12 +1,27 @@
 """
-Citation Verification module for Veridocs.
-Validates that generated answers are grounded in source citations,
-detects unsupported claims, and calculates confidence scores.
+Heuristic Grounding & Citation Alignment module for Veridocs.
+
+METHODOLOGY & LIMITATION DISCLOSURE:
+This module evaluates whether generated answers exhibit lexical and numeric
+surface alignment with retrieved source chunks. It uses a composite scoring heuristic:
+  - Meaningful token overlap (60%)
+  - Substring phrase preservation (25%)
+  - Sequence matching ratio (15%)
+  - Exact regex matching for numbers, percentages, and financial figures
+
+LIMITATIONS:
+This is a fast, deterministic lexical heuristic designed for CPU execution (<5ms).
+It does NOT establish semantic entailment or formal factual correctness:
+  1. Role Inversion: "A acquired B" vs "B acquired A" yields high token overlap but opposite truth.
+  2. Paraphrasing: Accurate semantic rephrasing with different vocabulary may receive lower scores.
+  3. Negation: In complex sentences, simple bag-of-words heuristics may miss inverted predicates.
+For mission-critical production environments, this heuristic should be paired with
+an NLI (Natural Language Inference) model or an LLM-as-a-judge evaluation suite.
 """
 
 import re
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from difflib import SequenceMatcher
 
 logging.basicConfig(level=logging.INFO)
@@ -17,9 +32,10 @@ def calculate_grounding_score(
     answer: str,
     source_chunks: List[Dict],
     threshold: float = 0.3
-) -> Dict:
+) -> Dict[str, Any]:
     """
-    Verify how well an answer is grounded in the source documents.
+    Evaluate lexical and numerical surface grounding of an answer against source documents.
+    Operates as a fast deterministic heuristic, not formal semantic truth proof.
 
     Process:
     1. Split answer into claims/sentences
@@ -93,9 +109,9 @@ def calculate_grounding_score(
         claim_numbers = re.findall(r'(\$?\b\d+[\d,.]*(?:%|\b))', claim)
         numeric_grounded = True
         if claim_numbers:
-            # Check if at least some numbers appear in the combined sources
-            matched_numbers = [num for num in claim_numbers if num.lower() in combined_source]
-            if len(matched_numbers) == 0 and len(claim_numbers) > 0:
+            # All asserted numbers/percentages must exist in source chunks
+            unmatched_numbers = [num for num in claim_numbers if num.lower() not in combined_source]
+            if unmatched_numbers:
                 numeric_grounded = False
 
         for idx, source_text in enumerate(source_texts):
@@ -125,13 +141,16 @@ def calculate_grounding_score(
             best_score = max(0.0, best_score - 0.35)
 
         # 3-State Claim Grounding:
-        # 🟢 Verified: true direct factual match (>= 0.28) and numbers match
-        # 🟡 Inferred: logical extrapolation or synthesis (0.15 - 0.27)
-        # 🔴 Hallucinated: unsupported assertion (< 0.15) or fabricated numbers
-        if best_score >= 0.28 and numeric_grounded:
+        # 🟢 Verified: direct lexical match (>= 0.32) and all asserted numbers match
+        # 🟡 Inferred: logical extrapolation or synthesis (0.22 - 0.31) and all numbers match
+        # 🔴 Hallucinated: unsupported assertion (< 0.22) or ungrounded/altered numbers
+        if not numeric_grounded:
+            status = "hallucinated"
+            is_supported = False
+        elif best_score >= 0.32:
             status = "verified"
             is_supported = True
-        elif best_score >= 0.15:
+        elif best_score >= 0.22:
             status = "inferred"
             is_supported = True
         else:
@@ -172,7 +191,9 @@ def calculate_grounding_score(
         "hallucinated_claims": hallucinated_count,
         "numeric_accuracy": round(max(0.0, numeric_accuracy), 3),
         "unsupported_claims": unsupported_claims[:5],  # Limit to first 5
-        "claim_details": claim_details
+        "claim_details": claim_details,
+        "verification_method": "heuristic_lexical_numeric",
+        "method_limitations": "Surface token overlap and regex numeric matching heuristic; does not prove semantic truth or detect role inversion.",
     }
 
 
@@ -338,3 +359,73 @@ def extract_citations_from_answer(
                 break
 
     return citations
+
+
+def evaluate_grounding_benchmark(test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Run deterministic evaluation cases across:
+      - Grounded claims (true assertions from context)
+      - Subtle unsupported claims (same entities/vocabulary, but unsupported relationship)
+      - Altered numbers (figures or percentages altered from source)
+
+    Computes True Positives (TP), False Positives (FP), True Negatives (TN), False Negatives (FN),
+    Precision, Recall, Accuracy, and F1 score for the heuristic pipeline.
+    """
+    tp = 0  # Expected supported, predicted supported
+    fp = 0  # Expected unsupported, predicted supported (heuristic false positive)
+    tn = 0  # Expected unsupported, predicted unsupported
+    fn = 0  # Expected supported, predicted unsupported (heuristic false negative)
+
+    category_stats: Dict[str, Dict[str, int]] = {}
+
+    for case in test_cases:
+        category = case.get("category", "general")
+        expected_supported = case["expected_supported"]
+        answer = case["answer"]
+        source_chunks = case["source_chunks"]
+
+        if category not in category_stats:
+            category_stats[category] = {"total": 0, "correct": 0}
+        category_stats[category]["total"] += 1
+
+        result = calculate_grounding_score(answer, source_chunks)
+        # Prediction: consider supported if confidence >= 0.5 and no hallucinated claims
+        predicted_supported = result["confidence_score"] >= 0.5 and result["hallucinated_claims"] == 0
+
+        is_correct = (predicted_supported == expected_supported)
+        if is_correct:
+            category_stats[category]["correct"] += 1
+
+        if expected_supported and predicted_supported:
+            tp += 1
+        elif not expected_supported and predicted_supported:
+            fp += 1
+        elif not expected_supported and not predicted_supported:
+            tn += 1
+        else:
+            fn += 1
+
+    precision = tp / max(tp + fp, 1)
+    recall = tp / max(tp + fn, 1)
+    accuracy = (tp + tn) / max(tp + tn + fp + fn, 1)
+    f1 = (2 * precision * recall) / max(precision + recall, 1e-6)
+
+    return {
+        "total_cases": len(test_cases),
+        "true_positives": tp,
+        "false_positives": fp,
+        "true_negatives": tn,
+        "false_negatives": fn,
+        "precision": round(precision, 3),
+        "recall": round(recall, 3),
+        "accuracy": round(accuracy, 3),
+        "f1_score": round(f1, 3),
+        "category_breakdown": {
+            cat: {
+                "total": stats["total"],
+                "correct": stats["correct"],
+                "accuracy": round(stats["correct"] / max(stats["total"], 1), 3),
+            }
+            for cat, stats in category_stats.items()
+        },
+    }

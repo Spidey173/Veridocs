@@ -11,6 +11,7 @@ import type {
   RagTriadMetrics,
   AuditDiffReport,
 } from "./api";
+import { deleteSession } from "./api";
 
 // === Types ===
 
@@ -195,6 +196,12 @@ export const useAppStore = create<AppState>((set) => ({
 
   clearSession: () =>
     set((state) => {
+      const oldSessionId = state.sessionId;
+      if (oldSessionId && oldSessionId !== "demo-session") {
+        deleteSession(oldSessionId).catch((e) => {
+          console.warn("Could not delete session on backend:", e);
+        });
+      }
       try {
         Object.values(state.localFileUrls).forEach((url) => {
           if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);

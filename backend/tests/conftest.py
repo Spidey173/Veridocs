@@ -227,6 +227,9 @@ def mock_llm_service(monkeypatch):
 
 @pytest.fixture
 def test_client(patch_models, mock_llm_service):
-    """FastAPI TestClient with patched models and mocked LLM services."""
+    """FastAPI TestClient with patched models, mocked LLM services, and default auth token."""
+    from auth import create_access_token
     client = TestClient(main.app)
+    token = create_access_token(user_id="default_test_user")
+    client.headers["Authorization"] = f"Bearer {token}"
     return client

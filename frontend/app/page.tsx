@@ -120,7 +120,7 @@ function LandingScreen() {
           {[
             { icon: <Search className="w-3.5 h-3.5 text-accent-primary" />, text: "Hybrid Search (BM25 + FAISS)" },
             { icon: <Layers className="w-3.5 h-3.5 text-accent-primary" />, text: "Neural Re-Ranking" },
-            { icon: <Shield className="w-3.5 h-3.5 text-emerald-400" />, text: "Claim Fact-Checking" },
+            { icon: <Shield className="w-3.5 h-3.5 text-emerald-400" />, text: "Lexical & Numeric Grounding" },
             { icon: <Zap className="w-3.5 h-3.5 text-accent-secondary" />, text: "RAG Triad Telemetry" },
           ].map((feature, i) => (
             <span

@@ -213,6 +213,10 @@ export default function VerificationDrawer({
             {/* View 1: Sentence-by-Sentence Claim Audit */}
             {activeTab === "claims" && claimVerifications.length > 0 && (
               <div className="space-y-2">
+                <div className="text-[10px] text-text-muted bg-white/[0.02] border border-white/5 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
+                  <span>Method: Lexical token & numeric overlap heuristic</span>
+                  <span className="text-[9px] text-amber-400/80">Surface check, does not prove semantic truth</span>
+                </div>
                 {claimVerifications.map((item, idx) => {
                   const isVerified = item.status === "verified";
                   const isInferred = item.status === "inferred";

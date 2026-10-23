@@ -1,6 +1,7 @@
 /**
  * Veridocs AI — API Client
- * Handles all communication with the FastAPI backend.
+ * Handles communication with the FastAPI backend, including
+ * authentication, multi-tenant session isolation, and data lifecycle management.
  */
 
 export function getApiBase(): string {
@@ -9,6 +10,42 @@ export function getApiBase(): string {
     return envUrl.trim().replace(/\/$/, "");
   }
   return "http://localhost:8000";
+}
+
+const AUTH_TOKEN_KEY = "veridocs_auth_token";
+
+/**
+ * Retrieve active authentication token from localStorage.
+ */
+export function getAuthToken(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(AUTH_TOKEN_KEY) || "";
+}
+
+/**
+ * Retrieve cached token or fetch a new signed user token from backend.
+ */
+export async function getOrFetchAuthToken(): Promise<string> {
+  if (typeof window === "undefined") return "";
+  let token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (!token) {
+    try {
+      const res = await fetch(`${getApiBase()}/api/auth/token`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        token = data.access_token;
+        if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
+      }
+    } catch (e) {
+      console.warn("Could not fetch auth token:", e);
+    }
+  }
+  return token || "";
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const token = await getOrFetchAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 // === Types ===
@@ -120,6 +157,7 @@ export async function uploadDocuments(
   onProgress?: (progress: number) => void,
   sessionId?: string
 ): Promise<UploadResponse> {
+  const token = await getOrFetchAuthToken();
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
   if (sessionId) {
@@ -150,6 +188,9 @@ export async function uploadDocuments(
 
     xhr.onerror = () => reject(new Error("Network error during upload (is backend running at http://localhost:8000?)"));
     xhr.open("POST", `${getApiBase()}/api/upload`);
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
     xhr.send(formData);
   });
 }
@@ -159,9 +200,10 @@ export async function queryDocuments(
   question: string,
   history?: Array<{ role: string; content: string }>
 ): Promise<QueryResponse> {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch(`${getApiBase()}/api/query`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({
       session_id: sessionId,
       question,
@@ -183,9 +225,10 @@ export async function* streamQuery(
   history?: Array<{ role: string; content: string }>,
   activeFiles?: string[]
 ): AsyncGenerator<StreamEvent> {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch(`${getApiBase()}/api/query/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({
       session_id: sessionId,
       question,
@@ -235,10 +278,11 @@ export async function getInsights(
   sessionId: string,
   documentName?: string
 ): Promise<InsightsResponse> {
+  const authHeaders = await getAuthHeaders();
   const url = documentName
     ? `${getApiBase()}/api/documents/${sessionId}/insights?document_name=${encodeURIComponent(documentName)}`
     : `${getApiBase()}/api/documents/${sessionId}/insights`;
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: { ...authHeaders } });
   if (!response.ok) throw new Error("Failed to fetch insights");
   return response.json();
 }
@@ -246,7 +290,8 @@ export async function getInsights(
 export async function getSessionInfo(
   sessionId: string
 ): Promise<SessionInfo> {
-  const response = await fetch(`${getApiBase()}/api/sessions/${sessionId}`);
+  const authHeaders = await getAuthHeaders();
+  const response = await fetch(`${getApiBase()}/api/sessions/${sessionId}`, { headers: { ...authHeaders } });
   if (!response.ok) throw new Error("Failed to fetch session info");
   return response.json();
 }
@@ -254,15 +299,51 @@ export async function getSessionInfo(
 export async function getConversationHistory(
   sessionId: string
 ): Promise<{ messages: ConversationMessage[] }> {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch(
-    `${getApiBase()}/api/sessions/${sessionId}/history`
+    `${getApiBase()}/api/sessions/${sessionId}/history`,
+    { headers: { ...authHeaders } }
   );
   if (!response.ok) throw new Error("Failed to fetch conversation history");
   return response.json();
 }
 
 export function getPdfUrl(sessionId: string, documentName: string): string {
-  return `${getApiBase()}/api/documents/${sessionId}/pdf?document_name=${encodeURIComponent(documentName)}`;
+  const token = getAuthToken();
+  const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : "";
+  return `${getApiBase()}/api/documents/${sessionId}/pdf?document_name=${encodeURIComponent(documentName)}${tokenQuery}`;
+}
+
+export async function deleteSession(sessionId: string): Promise<{ status: string; message: string }> {
+  const authHeaders = await getAuthHeaders();
+  const response = await fetch(`${getApiBase()}/api/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: { ...authHeaders },
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Session deletion failed");
+  }
+  return response.json();
+}
+
+export async function deleteDocument(
+  sessionId: string,
+  documentName: string
+): Promise<{ status: string; removed_document: string }> {
+  const authHeaders = await getAuthHeaders();
+  const response = await fetch(
+    `${getApiBase()}/api/sessions/${sessionId}/documents/${encodeURIComponent(documentName)}`,
+    {
+      method: "DELETE",
+      headers: { ...authHeaders },
+    }
+  );
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || "Document deletion failed");
+  }
+  return response.json();
 }
 
 // === Cross-Document Contradiction Audit ===
@@ -301,9 +382,10 @@ export async function auditContradictions(
   docB: string,
   focusTopic: string = "all"
 ): Promise<AuditDiffReport> {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch(`${getApiBase()}/api/audit/contradictions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({
       session_id: sessionId,
       doc_a: docA,

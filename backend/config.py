@@ -91,6 +91,16 @@ class Settings:
             if origin.strip()
         ]
 
+        # === Security & Access Control ===
+        self.AUTH_SECRET_KEY: str = os.getenv("AUTH_SECRET_KEY", "").strip()
+        self.REQUIRE_API_KEY: bool = os.getenv("REQUIRE_API_KEY", "false").lower() in ("true", "1", "yes")
+        self.API_KEY: str = os.getenv("API_KEY", "").strip()
+        self.TOKEN_EXPIRE_HOURS: int = int(os.getenv("TOKEN_EXPIRE_HOURS", "24"))
+
+        # === Data Lifecycle & Retention ===
+        self.RETENTION_HOURS: int = int(os.getenv("RETENTION_HOURS", "24"))
+        self.AUTO_CLEANUP_ENABLED: bool = os.getenv("AUTO_CLEANUP_ENABLED", "true").lower() in ("true", "1", "yes")
+
 
 @lru_cache()
 def get_settings() -> Settings:

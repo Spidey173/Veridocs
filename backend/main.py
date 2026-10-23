@@ -24,17 +24,20 @@ os.environ["ONNXRUNTIME_INTRA_OP_NUM_THREADS"] = "1"
 
 import json
 import time
+import shutil
 import logging
 import uuid
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union, Any
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Depends, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from config import get_settings, get_model_registry
+from auth import get_current_user, create_access_token, verify_access_token, UserContext
 from pdf_processor import (
     extract_text_from_file,
     chunk_text,
@@ -76,17 +79,47 @@ app = FastAPI(
     description="Enterprise AI Document Intelligence Platform"
 )
 
-# CORS
+# CORS: Configured whitelist from environment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
 
 # Ensure upload directory exists
 Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+
+# ──────────────────────────────────────────────
+# Authentication Models & Endpoints
+# ──────────────────────────────────────────────
+
+class TokenRequest(BaseModel):
+    user_id: Optional[str] = None
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user_id: str
+    expires_in: int
+
+@app.post("/api/auth/token", response_model=TokenResponse)
+async def generate_auth_token(req: Optional[TokenRequest] = None, x_api_key: Optional[str] = Header(None)):
+    """Issue a signed, tamper-proof user access token for session isolation and authorization."""
+    if settings.REQUIRE_API_KEY:
+        if not x_api_key or x_api_key != settings.API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+    requested_uid = req.user_id if req and req.user_id else None
+    token = create_access_token(user_id=requested_uid)
+    user_ctx = verify_access_token(token)
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        user_id=user_ctx.user_id,
+        expires_in=int(settings.TOKEN_EXPIRE_HOURS * 3600)
+    )
 
 # ──────────────────────────────────────────────
 # In-Memory Session Storage
@@ -160,7 +193,8 @@ def _generate_insights_background(session_id: str, chunks_by_file: Dict, doc_met
 async def upload_documents(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
-    session_id: Optional[str] = Form(None)
+    session_id: Optional[str] = Form(None),
+    current_user: UserContext = Depends(get_current_user)
 ):
     """
     Upload and process documents (PDF, DOCX, TXT).
@@ -193,7 +227,7 @@ async def upload_documents(
                 failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")
                 continue
 
-            logger.info(f"Processing upload: {filename} ({len(contents)} bytes)")
+            logger.info(f"Processing upload for user {current_user.user_id}: {filename} ({len(contents)} bytes)")
 
             # Save file to disk for PDF viewer
             session_file_id = str(uuid.uuid4())
@@ -251,13 +285,15 @@ async def upload_documents(
         raise HTTPException(status_code=400, detail=error_msg)
 
     try:
-        # If we have an existing session, merge files, paths, metadata, and chunks
-        if session_id and session_id in sessions:
-            existing_session = sessions[session_id]
+        # If we have an existing session, verify ownership before merging
+        existing_insights = {}
+        if session_id:
+            existing_session = _get_session(session_id, current_user)
             saved_paths = existing_session.get("file_paths", []) + saved_paths
             file_names = existing_session.get("file_names", []) + file_names
             doc_metadata = existing_session.get("metadata", []) + doc_metadata
             all_chunks = existing_session.get("chunks", []) + all_chunks
+            existing_insights = existing_session.get("insights", {})
 
         # Create vector store and index with all combined chunks
         vector_store = VectorStore()
@@ -274,11 +310,6 @@ async def upload_documents(
             fn = chunk.get("source_file", "unknown")
             chunks_by_file[fn].append(chunk)
 
-        # Existing insights if appending to session
-        existing_insights = {}
-        if session_id and session_id in sessions:
-            existing_insights = sessions[session_id].get("insights", {})
-
         # Store session immediately so client gets sub-second response
         sessions[session_id] = {
             "vector_store": vector_store,
@@ -288,6 +319,7 @@ async def upload_documents(
             "metadata": doc_metadata,
             "insights": existing_insights,
             "created_at": time.time(),
+            "owner_id": current_user.user_id,
         }
 
         # Persist session to disk so documents survive Render server restarts
@@ -300,10 +332,11 @@ async def upload_documents(
                 "file_names": file_names,
                 "metadata": doc_metadata,
                 "created_at": time.time(),
+                "owner_id": current_user.user_id,
             }
             with open(session_dir / "session.json", "w", encoding="utf-8") as f:
                 json.dump(session_meta, f)
-            logger.info(f"Persisted session {session_id} to disk at {session_dir}")
+            logger.info(f"Persisted session {session_id} to disk at {session_dir} for owner {current_user.user_id}")
         except Exception as e:
             logger.warning(f"Could not persist session {session_id} to disk: {e}")
 
@@ -346,9 +379,12 @@ async def upload_documents(
 # ──────────────────────────────────────────────
 
 @app.post("/api/query", response_model=QueryResponse)
-async def answer_query(request: QueryRequest):
+async def answer_query(
+    request: QueryRequest,
+    current_user: UserContext = Depends(get_current_user)
+):
     """Answer a question using uploaded documents. Returns full JSON response."""
-    session_data = _get_session(request.session_id)
+    session_data = _get_session(request.session_id, current_user)
     vector_store = session_data["vector_store"]
     question = request.question.strip()
 
@@ -465,12 +501,15 @@ async def answer_query(request: QueryRequest):
 # ──────────────────────────────────────────────
 
 @app.post("/api/query/stream")
-async def stream_query(request: StreamQueryRequest):
+async def stream_query(
+    request: StreamQueryRequest,
+    current_user: UserContext = Depends(get_current_user)
+):
     """
     Stream answer tokens via Server-Sent Events.
     Emits: token, citation, confidence, done events.
     """
-    session_data = _get_session(request.session_id)
+    session_data = _get_session(request.session_id, current_user)
     vector_store = session_data["vector_store"]
     question = request.question.strip()
 
@@ -586,12 +625,15 @@ async def stream_query(request: StreamQueryRequest):
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(request: StreamQueryRequest):
+async def chat_stream(
+    request: StreamQueryRequest,
+    current_user: UserContext = Depends(get_current_user)
+):
     """
     Alias endpoint for /api/query/stream for high-speed SSE streaming.
     Provides sub-400ms Time-To-First-Token (TTFT) and citation grounding.
     """
-    return await stream_query(request)
+    return await stream_query(request, current_user=current_user)
 
 
 # ──────────────────────────────────────────────
@@ -602,10 +644,11 @@ async def chat_stream(request: StreamQueryRequest):
 async def get_document_pdf(
     session_id: str,
     file_index: int = 0,
-    document_name: Optional[str] = None
+    document_name: Optional[str] = None,
+    current_user: UserContext = Depends(get_current_user)
 ):
     """Serve the uploaded PDF for the viewer."""
-    session_data = _get_session(session_id)
+    session_data = _get_session(session_id, current_user)
     file_paths = session_data.get("file_paths", [])
     file_names = session_data.get("file_names", [])
 
@@ -638,9 +681,13 @@ async def get_document_pdf(
 # ──────────────────────────────────────────────
 
 @app.get("/api/documents/{session_id}/insights")
-async def get_document_insights(session_id: str, document_name: Optional[str] = None):
+async def get_document_insights(
+    session_id: str,
+    document_name: Optional[str] = None,
+    current_user: UserContext = Depends(get_current_user)
+):
     """Get pre-generated document insights (summary, questions, entities)."""
-    session_data = _get_session(session_id)
+    session_data = _get_session(session_id, current_user)
     insights_dict = session_data.get("insights", {})
 
     if not isinstance(insights_dict, dict):
@@ -686,7 +733,10 @@ async def get_document_insights(session_id: str, document_name: Optional[str] = 
 # ──────────────────────────────────────────────
 
 @app.post("/api/audit/contradictions", response_model=AuditDiffReport)
-async def audit_contradictions(req: CrossDocAuditRequest):
+async def audit_contradictions(
+    req: CrossDocAuditRequest,
+    current_user: UserContext = Depends(get_current_user)
+):
     """
     Forensic Cross-Document Contradiction & Diff Engine.
     Compares two documents within a session and detects conflicting clauses,
@@ -765,7 +815,7 @@ async def audit_contradictions(req: CrossDocAuditRequest):
             ]
         )
 
-    session_data = _get_session(req.session_id)
+    session_data = _get_session(req.session_id, current_user)
     chunks = session_data.get("chunks", [])
 
     doc_a_chunks = [c for c in chunks if c.get("source_file") == req.doc_a]
@@ -808,9 +858,12 @@ async def audit_contradictions(req: CrossDocAuditRequest):
 # ──────────────────────────────────────────────
 
 @app.get("/api/sessions/{session_id}/history")
-async def get_conversation_history(session_id: str):
+async def get_conversation_history(
+    session_id: str,
+    current_user: UserContext = Depends(get_current_user)
+):
     """Get conversation history for a session."""
-    _get_session(session_id)  # Validate session exists
+    _get_session(session_id, current_user)  # Validate session exists
     conversation = get_conversation_manager()
     messages = conversation.get_history(session_id)
 
@@ -860,9 +913,12 @@ async def health_check():
 # ──────────────────────────────────────────────
 
 @app.get("/api/sessions/{session_id}")
-async def get_session_info(session_id: str):
+async def get_session_info(
+    session_id: str,
+    current_user: UserContext = Depends(get_current_user)
+):
     """Get session metadata."""
-    session_data = _get_session(session_id)
+    session_data = _get_session(session_id, current_user)
     return {
         "session_id": session_id,
         "file_names": session_data.get("file_names", []),
@@ -870,6 +926,113 @@ async def get_session_info(session_id: str):
         "metadata": session_data.get("metadata", []),
         "created_at": session_data.get("created_at"),
         "has_insights": session_data.get("insights") is not None,
+    }
+
+
+# ──────────────────────────────────────────────
+# Data Lifecycle & Deletion Endpoints
+# ──────────────────────────────────────────────
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    current_user: UserContext = Depends(get_current_user)
+):
+    """
+    Securely delete an active session, its uploaded files, persisted vector indices,
+    and conversation history with path traversal protection.
+    """
+    session_data = _get_session(session_id, current_user)
+    deleted_files = 0
+
+    # 1. Delete associated uploaded files
+    for path_str in session_data.get("file_paths", []):
+        if _safe_delete_file(path_str):
+            deleted_files += 1
+
+    # 2. Delete persisted session directory on disk
+    session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
+    _safe_delete_file(session_dir)
+
+    # 3. Clear conversation manager
+    conversation = get_conversation_manager()
+    conversation.clear_history(session_id)
+
+    # 4. Remove from in-memory sessions
+    if session_id in sessions:
+        del sessions[session_id]
+
+    logger.info(f"User {current_user.user_id} deleted session {session_id} ({deleted_files} files purged)")
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "deleted_files_count": deleted_files,
+        "message": "Session, documents, vector indices, and conversation history permanently deleted."
+    }
+
+
+@app.delete("/api/sessions/{session_id}/documents/{document_name}")
+async def delete_document_from_session(
+    session_id: str,
+    document_name: str,
+    current_user: UserContext = Depends(get_current_user)
+):
+    """Delete a single document from an active session and update the index."""
+    session_data = _get_session(session_id, current_user)
+    file_names = session_data.get("file_names", [])
+    file_paths = session_data.get("file_paths", [])
+
+    if document_name not in file_names:
+        raise HTTPException(status_code=404, detail=f"Document '{document_name}' not found in session.")
+
+    idx = file_names.index(document_name)
+    target_path = file_paths[idx] if idx < len(file_paths) else None
+    if target_path:
+        _safe_delete_file(target_path)
+
+    # Remove from lists
+    file_names.pop(idx)
+    if idx < len(file_paths):
+        file_paths.pop(idx)
+
+    # Filter chunks
+    remaining_chunks = [c for c in session_data.get("chunks", []) if c.get("source_file") != document_name]
+    session_data["chunks"] = remaining_chunks
+    session_data["file_names"] = file_names
+    session_data["file_paths"] = file_paths
+    session_data.get("insights", {}).pop(document_name, None)
+
+    # Re-index remaining chunks
+    vector_store = VectorStore()
+    if remaining_chunks:
+        vector_store.add_documents(remaining_chunks)
+    session_data["vector_store"] = vector_store
+
+    # Persist updated session to disk
+    session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
+    if session_dir.exists():
+        vector_store.save_to_disk(session_dir)
+
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "removed_document": document_name,
+        "remaining_documents": file_names,
+        "remaining_chunks": len(remaining_chunks)
+    }
+
+
+@app.post("/api/admin/cleanup")
+async def trigger_retention_cleanup(
+    max_age_hours: Optional[int] = None,
+    current_user: UserContext = Depends(get_current_user)
+):
+    """Trigger retention policy cleanup of expired sessions and orphaned files."""
+    result = cleanup_expired_sessions(max_age_hours=max_age_hours)
+    return {
+        "status": "success",
+        "retention_hours": max_age_hours or settings.RETENTION_HOURS,
+        **result
     }
 
 
@@ -893,43 +1056,83 @@ async def root():
 
 
 # ──────────────────────────────────────────────
-# Helper Functions
+# Helper Functions & Retention Cleanup
 # ──────────────────────────────────────────────
 
-def _get_session(session_id: str) -> Dict:
-    """Get session data from memory or restore from disk."""
-    if session_id in sessions:
-        return sessions[session_id]
-
-    # Try restoring session from disk if backend restarted
+def _safe_delete_file(file_path: Union[str, Path]) -> bool:
+    """
+    Safely delete a file or directory with path traversal protection.
+    Verifies that the target path resolves strictly within settings.UPLOAD_DIR.
+    """
     try:
-        session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
-        session_meta_file = session_dir / "session.json"
-        if session_dir.exists() and session_meta_file.exists():
-            with open(session_meta_file, "r", encoding="utf-8") as f:
-                meta = json.load(f)
+        target = Path(file_path).resolve()
+        base = Path(settings.UPLOAD_DIR).resolve()
+        if base not in target.parents and target != base:
+            logger.warning(f"Security Alert: Prevented deletion outside upload directory: {target}")
+            return False
 
-            vector_store = VectorStore.load_from_disk(session_dir)
-            if vector_store:
-                restored_session = {
-                    "vector_store": vector_store,
-                    "chunks": vector_store.chunks,
-                    "file_paths": meta.get("file_paths", []),
-                    "file_names": meta.get("file_names", []),
-                    "metadata": meta.get("metadata", []),
-                    "insights": meta.get("insights", {}),
-                    "created_at": meta.get("created_at", time.time()),
-                }
-                sessions[session_id] = restored_session
-                logger.info(f"Successfully restored session {session_id} from disk")
-                return restored_session
+        if target.is_file() or target.is_symlink():
+            target.unlink(missing_ok=True)
+            return True
+        elif target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+            return True
     except Exception as e:
-        logger.error(f"Error restoring session {session_id} from disk: {e}")
+        logger.warning(f"Error during safe deletion of {file_path}: {e}")
+    return False
 
-    raise HTTPException(
-        status_code=404,
-        detail="Session not found or expired. Please upload documents again."
-    )
+
+def _get_session(session_id: str, current_user: Optional[UserContext] = None) -> Dict:
+    """Get session data from memory or restore from disk, verifying user ownership."""
+    session_data = None
+    if session_id in sessions:
+        session_data = sessions[session_id]
+    else:
+        # Try restoring session from disk if backend restarted
+        try:
+            session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
+            session_meta_file = session_dir / "session.json"
+            if session_dir.exists() and session_meta_file.exists():
+                with open(session_meta_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+
+                vector_store = VectorStore.load_from_disk(session_dir)
+                if vector_store:
+                    restored_session = {
+                        "vector_store": vector_store,
+                        "chunks": vector_store.chunks,
+                        "file_paths": meta.get("file_paths", []),
+                        "file_names": meta.get("file_names", []),
+                        "metadata": meta.get("metadata", []),
+                        "insights": meta.get("insights", {}),
+                        "created_at": meta.get("created_at", time.time()),
+                        "owner_id": meta.get("owner_id"),
+                    }
+                    sessions[session_id] = restored_session
+                    session_data = restored_session
+                    logger.info(f"Successfully restored session {session_id} from disk")
+        except Exception as e:
+            logger.error(f"Error restoring session {session_id} from disk: {e}")
+
+    if not session_data:
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found or expired. Please upload documents again."
+        )
+
+    # Ownership enforcement: verify caller owns this session
+    if current_user is not None:
+        owner_id = session_data.get("owner_id")
+        if owner_id and owner_id != current_user.user_id and current_user.role != "admin":
+            logger.warning(
+                f"Access denied: user {current_user.user_id} attempted access to session {session_id} owned by {owner_id}"
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: You do not have permission to access this session or document."
+            )
+
+    return session_data
 
 
 def _validate_question(question: str):
@@ -941,17 +1144,71 @@ def _validate_question(question: str):
 
 
 def _cleanup_session(session_id: str):
-    """Clean up session data including saved files."""
+    """Clean up session data including saved files, vector indices, and history."""
     if session_id in sessions:
         session_data = sessions[session_id]
-        # Delete saved files
         for path in session_data.get("file_paths", []):
-            try:
-                Path(path).unlink(missing_ok=True)
-            except Exception:
-                pass
+            _safe_delete_file(path)
+        _safe_delete_file(Path(settings.UPLOAD_DIR) / "sessions" / session_id)
+        get_conversation_manager().clear_history(session_id)
         del sessions[session_id]
         logger.info(f"Cleaned up session {session_id[:8]}")
+
+
+def cleanup_expired_sessions(max_age_hours: Optional[int] = None) -> Dict[str, int]:
+    """
+    Purge expired sessions, persisted vector indices, and orphaned files older than RETENTION_HOURS.
+    Protects against disk exhaustion and enforces strict privacy data retention.
+    """
+    ttl_hours = max_age_hours or settings.RETENTION_HOURS or 24
+    cutoff_time = time.time() - (ttl_hours * 3600)
+    purged_sessions = 0
+    purged_files = 0
+
+    # 1. Purge expired in-memory sessions
+    expired_session_ids = [
+        sid for sid, data in list(sessions.items())
+        if data.get("created_at", 0) < cutoff_time
+    ]
+    for sid in expired_session_ids:
+        session_data = sessions.get(sid, {})
+        for p in session_data.get("file_paths", []):
+            if _safe_delete_file(p):
+                purged_files += 1
+        _safe_delete_file(Path(settings.UPLOAD_DIR) / "sessions" / sid)
+        get_conversation_manager().clear_history(sid)
+        sessions.pop(sid, None)
+        purged_sessions += 1
+
+    # 2. Purge expired persisted sessions on disk
+    sessions_root = Path(settings.UPLOAD_DIR) / "sessions"
+    if sessions_root.exists():
+        for session_folder in list(sessions_root.iterdir()):
+            if session_folder.is_dir():
+                meta_file = session_folder / "session.json"
+                mtime = session_folder.stat().st_mtime
+                if meta_file.exists():
+                    try:
+                        with open(meta_file, "r", encoding="utf-8") as f:
+                            meta = json.load(f)
+                            mtime = meta.get("created_at", mtime)
+                    except Exception:
+                        pass
+                if mtime < cutoff_time:
+                    _safe_delete_file(session_folder)
+                    purged_sessions += 1
+
+    # 3. Purge orphaned uploaded files older than cutoff
+    upload_root = Path(settings.UPLOAD_DIR)
+    if upload_root.exists():
+        for f in list(upload_root.iterdir()):
+            if f.is_file() and f.suffix.lower() in settings.ALLOWED_EXTENSIONS:
+                if f.stat().st_mtime < cutoff_time:
+                    if _safe_delete_file(f):
+                        purged_files += 1
+
+    logger.info(f"Retention cleanup completed: {purged_sessions} sessions, {purged_files} files purged.")
+    return {"purged_sessions": purged_sessions, "purged_files": purged_files}
 
 
 def _generate_followups(question: str, answer: str) -> List[str]:

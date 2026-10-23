@@ -85,6 +85,10 @@ class ConversationManager:
             del self._conversations[session_id]
             logger.info(f"Cleared conversation for session {session_id[:8]}")
 
+    def clear_history(self, session_id: str):
+        """Alias for clear_session."""
+        self.clear_session(session_id)
+
     def _evict_if_needed(self):
         """Evict oldest session if over capacity."""
         while len(self._conversations) > self._max_sessions:

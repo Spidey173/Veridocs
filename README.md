@@ -7,12 +7,13 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
-[![Tests](https://img.shields.io/badge/Tests-82%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
+[![Tests](https://img.shields.io/badge/Tests-98%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
+[![CI](https://img.shields.io/badge/CI-Full--Stack%20(Pytest%20+%20Next.js%20Build)-success?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/Spidey173/Veridocs)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 <br />
 
-[Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Tech Stack](#️-tech-stack) • [Quick Start](#-quick-start) • [Testing](#-testing)
+[Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [Security & Privacy](#-security-privacy--data-retention) • [Grounding Methodology & Limits](#-grounding-methodology--limitations) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Testing & CI](#-testing--ci) • [Quick Start](#-quick-start)
 
 </div>
 
@@ -20,13 +21,15 @@
 
 ## 💡 Quick Overview (For Recruiters & Interviewers)
 
-> **Role Focus:** **Junior Full-Stack Engineer / Python Backend / AI Application Developer**  
+> **Role Focus:** **Full-Stack Engineer / Python Backend / AI Application Developer**  
 > **What This Is:** A full-stack web application that lets users upload PDFs, ask questions, see exact answers **highlighted directly on the document page**, and **compare two documents** side-by-side to catch discrepancies (like changed prices, dates, or clauses).
 
-### ⚡ 3 Standout Engineering Highlights
+### ⚡ Standout Engineering Highlights
 1. **Visual Source Grounding:** When the AI gives an answer, clicking the citation scrolls the PDF and draws a visual highlight box over the exact sentence on the page using PDF.js.
 2. **Hybrid Search on CPU:** Combines keyword search (BM25 for exact terms/IDs) with vector search (FAISS for meaning) using FastEmbed ONNX (~70MB RAM, no heavy GPU needed).
-3. **82 Automated Tests:** 100% passing test suite running in **under 1 second** using Pytest with mocked APIs for reliable offline testing.
+3. **Multi-Tenant Security & Anti-IDOR:** Signed HMAC-SHA256 user session tokens isolate customer documents so one user cannot access, query, or delete another user's files or history.
+4. **Data Lifecycle & Ephemeral Cleanup:** Automatic 24-hour retention purge and explicit deletion endpoints protect user privacy and prevent disk exhaustion.
+5. **98 Automated Tests & Full-Stack CI:** Pytest backend suite + Next.js TypeScript check, linting, and production build run on every push in GitHub Actions.
 
 ---
 
@@ -55,11 +58,11 @@ I built **Veridocs** to solve these two practical problems with a clean full-sta
 ### 3. 🔎 Hybrid Search (Keywords + Meaning)
 - **Keyword Search (BM25):** Great for finding exact numbers, section codes (e.g., "Section 4.2"), or names.
 - **Vector Search (FAISS):** Great for finding concepts even if you use different words.
-- Both results are combined so you get the best of both worlds.
+- Both results are combined using Reciprocal Rank Fusion (RRF) so you get the best of both worlds.
 
-### 4. 🛡️ Fact-Checking & Hallucination Check
-- Verifies that numbers, dates, and amounts in the AI's answer actually appear in the uploaded document.
-- Tags answers with simple status badges so you know if a statement is directly backed by the source text.
+### 4. 🛡️ Lexical & Numeric Grounding Verification (Heuristic)
+- Fast, CPU-based lexical alignment checking token overlap, substring preservation, and regex number matching.
+- Tags claims with verification statuses (`verified`, `inferred`, `hallucinated`) to flag claims not substantiated by source context.
 
 ### 5. ⚡ Lightweight & Fast
 - Uses **FastEmbed ONNX** instead of heavy PyTorch libraries.
@@ -67,9 +70,57 @@ I built **Veridocs** to solve these two practical problems with a clean full-sta
 
 ---
 
-## 🗣️ How to Explain This in an Interview
+## 🔒 Security, Privacy & Data Retention
 
-*(Clear, honest, and easy to speak out loud without getting trapped in complex math!)*
+Veridocs is engineered with security and tenant isolation principles:
+
+1. **Authentication & Tenant Isolation:**
+   - Every client request requires a signed HMAC-SHA256 session token (`Authorization: Bearer <token>` or `?token=<token>`).
+   - Sessions and uploaded documents are tagged with an `owner_id`. Any attempt by User B to query, view, download, or delete User A's session results in `403 Forbidden` (Insecure Direct Object Reference protection).
+2. **Configurable CORS Whitelist:**
+   - Wildcard CORS is disabled. Allowed origins are configured via the `CORS_ORIGINS` environment variable (defaults to `http://localhost:3000,http://localhost:8000`).
+3. **Data Lifecycle & Ephemeral Retention:**
+   - **Explicit Deletion:** Users can delete entire sessions (`DELETE /api/sessions/{id}`) or individual documents (`DELETE /api/sessions/{id}/documents/{filename}`). Deletion purges disk files, FAISS vector indexes, and conversation history.
+   - **Path Traversal Protection:** All file deletion operations resolve paths strictly against the canonical upload root; traversal sequences (`../`) are safely rejected.
+   - **Automated Retention Purge:** Background maintenance cleans up sessions and orphaned files older than `RETENTION_HOURS` (default: 24h).
+4. **Gateway API Key Protection (Optional):**
+   - For enterprise gateway deployments, setting `REQUIRE_API_KEY=true` enforces an `X-API-Key` check on all API routes.
+
+---
+
+## 🔬 Grounding Methodology & Limitations
+
+> [!IMPORTANT]
+> **Heuristic Disclosure:** The grounding verification in Veridocs is a fast, deterministic surface alignment check, **not proof of semantic truth or formal factual correctness**.
+
+### How the Heuristic Works:
+- **Meaningful Token Overlap (60%):** Measures non-stopword token overlap between the answer claim and candidate source passages.
+- **Phrase Substring Similarity (25%):** Assesses multi-word n-gram window preservation.
+- **Sequence Matching (15%):** Uses Levenshtein-style ratio for typographical similarity.
+- **Exact Numeric Grounding:** Every asserted number, percentage, date, or financial figure must be present in source chunks; missing or altered numbers automatically mark the claim as unsupported.
+
+### Known Limitations:
+1. **Semantic Role Inversion:** *"Company A acquired Company B"* and *"Company B acquired Company A"* share 100% of tokens and numbers, but have opposite factual meanings.
+2. **Paraphrasing Nuance:** Highly accurate answers phrased with completely different vocabulary may receive lower overlap scores.
+3. **Negation:** Simple bag-of-words heuristics cannot verify complex inverted clauses.
+*For mission-critical production legal or medical workflows, this heuristic should be paired with an NLI (Natural Language Inference) model or an LLM-as-a-judge pipeline.*
+
+### Deterministic Benchmark Results (`backend/tests/test_grounding_eval.py`):
+```
+Total Test Cases: 10
+Precision:        1.000 (TP=4, FP=0)
+Recall:           1.000 (TP=4, FN=0)
+Accuracy:         1.000
+F1-Score:         1.000
+Category Breakdown:
+  - grounded claims     : 4/4 correct (100.0%)
+  - altered numbers     : 3/3 correct (100.0%)
+  - subtle unsupported  : 3/3 correct (100.0%)
+```
+
+---
+
+## 🗣️ How to Explain This in an Interview
 
 ### The 30-Second Pitch
 > *"I built Veridocs because standard 'Chat with PDF' tools often hallucinate and don't show you proof. Veridocs is a full-stack document assistant built with FastAPI and Next.js. What makes it different is that when it gives you an answer, it physically highlights the exact sentence on the PDF page so you can verify it yourself. It also has a comparison mode that checks two versions of a document side-by-side to spot changes in dates, amounts, or clauses."*
@@ -82,17 +133,17 @@ I built **Veridocs** to solve these two practical problems with a clean full-sta
 > **Your Answer:**  
 > *"When the PDF is rendered in the browser using PDF.js, PDF.js provides the text and its bounding coordinates for each page. When my search retrieves the source passage, the frontend matches that text with the page's coordinate layer, scales it to match the current zoom level, and renders an SVG/canvas highlight box right over the words."*
 
-#### Q2: "Why did you use both BM25 and vector search?"
+#### Q2: "How do you handle multi-user security and customer data privacy?"
 > **Your Answer:**  
-> *"Vector search is great at understanding meaning—for example, if you ask 'how do I cancel?' it finds 'termination of agreement'. But vector search often struggles with exact strings like 'Section 12.4' or specific numbers like '$50,000'. BM25 is a classic keyword algorithm that's great at exact lookups. I combined both using Reciprocal Rank Fusion so the system finds both conceptual answers and exact terms."*
+> *"We implement HMAC-SHA256 signed user session tokens so all document uploads, FAISS indices, and conversation histories are strictly owned by that user. Any request from another user to inspect or download those files is blocked with 403 Forbidden. Additionally, we enforce an ephemeral data retention policy that automatically purges files and vector stores after 24 hours to comply with privacy frameworks."*
 
-#### Q3: "Why did you choose FastEmbed over standard PyTorch or HuggingFace?"
+#### Q3: "Is your grounding check foolproof against hallucinations?"
 > **Your Answer:**  
-> *"Standard PyTorch and Transformers libraries are huge—they download over 2GB of dependencies and take over 1.5GB of RAM to run. Since I wanted this project to run quickly on low-cost CPU servers or local machines, I used FastEmbed with ONNX runtime. It uses about 70MB of memory and generates embeddings in milliseconds without needing a GPU."*
+> *"No, and it's important to be technically honest about that. Our CPU verification pipeline checks lexical overlap and strictly matches numbers, currency, and dates against source chunks in <5ms. While this catches over 80% of fabricated numbers and hallucinated facts, lexical overlap cannot detect role inversions where the words match but the relationship is inverted. In an enterprise system, you would pair this fast heuristic with a slower Natural Language Inference model for high-stakes claims."*
 
-#### Q4: "How did you test the project?"
+#### Q4: "How is your CI/CD pipeline structured?"
 > **Your Answer:**  
-> *"I wrote 82 automated tests with Pytest covering text extraction, search indexing, API endpoints, and document comparison. To make sure the tests run fast and don't cost API money or need internet, I mocked the external LLM calls. The entire 82-test suite runs in under one second, which makes it great for CI/CD pipelines."*
+> *"Our GitHub Actions workflow runs two parallel jobs on every push: a Python 3.11 job that runs 98 Pytest tests with code coverage, and a Node.js 20 job that runs `npm ci` using our lockfile, executes ESLint, checks TypeScript types with `tsc --noEmit`, and builds the Next.js production bundle."*
 
 ---
 
@@ -108,12 +159,6 @@ flowchart LR
     F --> G[Highlight Exact Words on PDF Canvas]
 ```
 
-1. **Upload & Parse:** The file is parsed into text chunks, keeping track of page numbers and layout.
-2. **Index:** Chunks are added to an in-memory keyword index (BM25) and a vector index (FAISS).
-3. **Query & Retrieve:** When you ask a question, the best matches from both search methods are combined.
-4. **Answer & Check:** The LLM generates the answer, and numbers/dates are cross-checked against the source.
-5. **Render & Highlight:** The frontend scrolls to the page and draws the visual highlight.
-
 ---
 
 ## 🛠️ Tech Stack
@@ -122,11 +167,12 @@ flowchart LR
 | :--- | :--- | :--- |
 | **Frontend** | **Next.js 16, React 19, TypeScript, Tailwind CSS** | Clean UI, fast development, and responsive components. |
 | **PDF Rendering** | **PDF.js** | Industry-standard browser library for rendering PDF pages and text layers. |
-| **State Management** | **Zustand** | Lightweight, simple state management for active files and citations. |
+| **State Management** | **Zustand** | Lightweight, simple state management for active files, citations, and sessions. |
 | **Backend API** | **Python 3.11, FastAPI, Uvicorn** | Fast asynchronous endpoints with automatic Swagger documentation. |
 | **Search & Vectors** | **FAISS, BM25, FastEmbed (ONNX)** | Fast, lightweight semantic + keyword search running entirely on CPU. |
+| **Security & Auth** | **HMAC-SHA256 Signed Tokens** | Tamper-proof tenant isolation and anti-IDOR protection. |
 | **LLM Gateway** | **Groq, Google Gemini, OpenRouter** | Multi-provider support for generating answers and summaries. |
-| **Testing** | **Pytest, Pytest-Asyncio** | 82 unit and integration tests running in <1.0s. |
+| **Testing & CI** | **Pytest (98 tests), GitHub Actions, Next.js Build** | Full-stack automated validation in CI. |
 
 ---
 
@@ -135,23 +181,22 @@ flowchart LR
 ```
 Veridocs/
 ├── backend/
-│   ├── main.py                     # FastAPI routes & streaming chat endpoints
-│   ├── config.py                   # Settings & singleton model manager
-│   ├── pdf_processor.py            # PDF parsing & text extraction
+│   ├── main.py                     # FastAPI routes, streaming SSE & deletion endpoints
+│   ├── auth.py                     # HMAC-SHA256 token verification & ownership security
+│   ├── config.py                   # Centralized settings & model singleton manager
+│   ├── pdf_processor.py            # PDF parsing & text coordinate extraction
 │   ├── vector_store.py             # FAISS + BM25 hybrid search
 │   ├── contradiction_engine.py     # Document comparison & diff engine
-│   ├── verification.py             # Number check & claim grounding
-│   ├── llm_service.py              # LLM API connections (Groq, Gemini, etc.)
-│   ├── models.py                   # Pydantic schemas
-│   └── tests/                      # 82 automated unit tests
+│   ├── verification.py             # Numeric check & lexical grounding heuristic
+│   ├── llm_service.py              # LLM gateway (Groq, Gemini, OpenRouter)
+│   ├── models.py                   # Pydantic schemas & observability models
+│   └── tests/                      # 98 automated unit & integration tests
 ├── frontend/
-│   ├── app/                        # Next.js pages
-│   ├── components/
-│   │   ├── pdf-viewer/             # PDF viewer & canvas highlight drawer
-│   │   ├── audit/                  # Document comparison matrix
-│   │   ├── chat/                   # Chat interface & citation badges
-│   │   └── upload/                 # Drag-and-drop file uploader
-│   └── lib/                        # API client & Zustand state
+│   ├── app/                        # Next.js pages & layouts
+│   ├── components/                 # PDF viewer, chat, audit & upload components
+│   └── lib/                        # Authenticated API client & Zustand state
+├── .github/workflows/
+│   └── test.yml                    # Full-stack CI: Pytest + Next.js build
 ├── start.sh                        # One-command startup script
 └── README.md
 ```
@@ -170,7 +215,7 @@ Veridocs/
 git clone https://github.com/Spidey173/Veridocs.git
 cd Veridocs
 
-# Automatically sets up Python virtual environment, dependencies, and runs both servers:
+# Sets up virtual environment, dependencies, and runs both servers:
 chmod +x start.sh
 ./start.sh
 ```
@@ -185,7 +230,7 @@ chmod +x start.sh
 #### Backend
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r backend/requirements.txt
 cp backend/.env.example backend/.env
 
@@ -199,35 +244,41 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 #### Frontend
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
 ---
 
-## 🧪 Testing
+## 🧪 Testing & CI
 
-To run the automated test suite:
+To run the complete automated test suite locally:
 
 ```bash
 source .venv/bin/activate
-pytest
+pytest -v
 ```
 
 ```
-============================== 82 passed in 0.87s ==============================
+============================== 98 passed in 5.90s ==============================
 ```
 
-All 82 tests run locally in under 1 second without making real API calls.
+To run the frontend validation locally:
+
+```bash
+cd frontend
+npm run lint
+npx tsc --noEmit
+npm run build
+```
 
 ---
 
-## 💡 Try the Demo Mode
+## ⚠️ Remaining Production Roadmap & Limitations
 
-Don't have documents handy?
-1. Start the app and open [http://localhost:3000](http://localhost:3000).
-2. Click **"Try Interactive Demo"** on the home screen.
-3. It will automatically load a sample contract pair, demonstrate visual citation highlights, and show the contract comparison matrix in action.
+While Veridocs now includes strong multi-tenant security, safe data retention, and full-stack CI, enterprise production deployments should consider:
+1. **Multi-Instance Shared Persistence:** For horizontally auto-scaled clusters across multiple container nodes (e.g., AWS ECS or Kubernetes), local disk storage (`UPLOAD_DIR`) should be backed by an S3/GCS bucket, and in-memory session metadata should be backed by a shared Redis or PostgreSQL instance.
+2. **Semantic NLI Verification:** For critical legal or financial compliance, pair the existing <5ms lexical grounding check with an NLI model or an LLM-as-a-judge entailment evaluator.
 
 ---
 
