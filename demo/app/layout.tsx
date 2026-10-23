@@ -5,11 +5,11 @@ export const metadata: Metadata = {
   title: "Veridocs — Forensic Document Intelligence & Visual Grounding",
   description:
     "Interactive portfolio demo for Veridocs: Smart QA with physical canvas word highlighting, side-by-side contract contradiction auditing, and 3-state sentence claim verification.",
-  metadataBase: new URL("https://veridocs.vercel.app"),
+  metadataBase: new URL("https://veridocs-demo.vercel.app"),
   openGraph: {
     title: "Veridocs — Forensic Document QA & Grounding Engine",
     description: "Physical visual document highlighting & side-by-side contract contradiction matrix.",
-    url: "https://veridocs.vercel.app",
+    url: "https://veridocs-demo.vercel.app",
     siteName: "Veridocs Demo",
     locale: "en_US",
     type: "website",
