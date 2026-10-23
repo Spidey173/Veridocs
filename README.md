@@ -4,7 +4,7 @@
 
 **Smart Document QA & Comparison with Visual Source Highlighting**
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-veridocs--demo.vercel.app-0070F3?style=flat-square&logo=vercel&logoColor=white)](https://veridocs-demo.vercel.app/)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-veridocs17.vercel.app-0070F3?style=flat-square&logo=vercel&logoColor=white)](https://veridocs17.vercel.app/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
@@ -14,7 +14,7 @@
 
 <br />
 
-[🌐 Live Demo](https://veridocs-demo.vercel.app/) • [Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [Security & Privacy](#-security-privacy--data-retention) • [Grounding Methodology & Limits](#-grounding-methodology-limitations--benchmark) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Testing & CI](#-testing--ci) • [Quick Start](#-quick-start)
+[🌐 Live Demo](https://veridocs17.vercel.app/) • [Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [Security & Privacy](#-security-privacy--data-retention) • [Grounding Methodology & Limits](#-grounding-methodology-limitations--benchmark) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Testing & CI](#-testing--ci) • [Quick Start](#-quick-start)
 
 </div>
 
@@ -22,7 +22,7 @@
 
 ## 🌐 Live Interactive Demo (Vercel)
 
-> 🚀 **Explore the live interactive portfolio demo:** **[https://veridocs-demo.vercel.app/](https://veridocs-demo.vercel.app/)** *(also mirrored at [veridocs-app.vercel.app](https://veridocs-app.vercel.app/))*  
+> 🚀 **Explore the live interactive portfolio demo:** **[https://veridocs17.vercel.app/](https://veridocs17.vercel.app/)** *(also accessible via [veridocs-demo.vercel.app](https://veridocs-demo.vercel.app/))*  
 > Built as a self-contained, high-performance showcase in [`demo/`](./demo) to allow recruiters and hiring managers to interact immediately with:
 > - **Visual Document Canvas Grounding:** Click citations to jump to coordinates and trigger animated word highlighting.
 > - **Forensic Contradiction Matrix:** Side-by-side legal diffing between 2023 MSA vs 2024 Amendment with clause discrepancy cards.
@@ -249,7 +249,7 @@ Veridocs/
 ### 1. 🌐 Live Interactive Demo (Instant — No Installation Required)
 
 Experience the live app right now directly in your browser:
-👉 **[https://veridocs-demo.vercel.app/](https://veridocs-demo.vercel.app/)** *(or [veridocs-app.vercel.app](https://veridocs-app.vercel.app/))*
+👉 **[https://veridocs17.vercel.app/](https://veridocs17.vercel.app/)** *(or [veridocs-demo.vercel.app](https://veridocs-demo.vercel.app/))*
 
 The live demo showcases:
 - Visual PDF bounding box highlight navigation

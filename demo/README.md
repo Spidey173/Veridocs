@@ -1,7 +1,7 @@
 # Veridocs — Interactive Portfolio Demo
 
 This folder contains the standalone, zero-config interactive showcase for **Veridocs**, pre-configured and live on [Vercel](https://vercel.com) at:
-**`https://veridocs-demo.vercel.app/`** *(also mirrored at `https://veridocs-app.vercel.app/`)*
+**`https://veridocs17.vercel.app/`** *(also accessible via `https://veridocs-demo.vercel.app/`)*
 
 ---
 
