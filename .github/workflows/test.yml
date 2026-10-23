@@ -60,3 +60,26 @@ jobs:
       - name: Run Next.js production build
         working-directory: ./frontend
         run: npm run build
+
+  demo-checks:
+    name: Portfolio Demo (Vercel) Production Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: demo/package-lock.json
+
+      - name: Install demo dependencies via lockfile
+        working-directory: ./demo
+        run: npm ci
+
+      - name: Run demo production build
+        working-directory: ./demo
+        run: npm run build

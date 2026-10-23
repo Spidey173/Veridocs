@@ -4,18 +4,30 @@
 
 **Smart Document QA & Comparison with Visual Source Highlighting**
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-veridocs.vercel.app-0070F3?style=flat-square&logo=vercel&logoColor=white)](https://veridocs.vercel.app/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
-[![Tests](https://img.shields.io/badge/Tests-103%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
+[![Tests](https://img.shields.io/badge/Tests-105%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
 [![CI](https://img.shields.io/badge/CI-Full--Stack%20(Pytest%20+%20Next.js%20Build)-success?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/Spidey173/Veridocs)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 <br />
 
-[Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [Security & Privacy](#-security-privacy--data-retention) • [Grounding Methodology & Limits](#-grounding-methodology-limitations--benchmark) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Testing & CI](#-testing--ci) • [Quick Start](#-quick-start)
+[🌐 Live Demo](https://veridocs.vercel.app/) • [Why I Built This](#-why-i-built-this) • [Key Features](#-key-features) • [Security & Privacy](#-security-privacy--data-retention) • [Grounding Methodology & Limits](#-grounding-methodology-limitations--benchmark) • [How to Explain in an Interview](#-how-to-explain-this-in-an-interview) • [Architecture](#-how-it-works-architecture) • [Testing & CI](#-testing--ci) • [Quick Start](#-quick-start)
 
 </div>
+
+---
+
+## 🌐 Live Interactive Demo (Vercel)
+
+> 🚀 **Explore the live interactive portfolio demo:** **[https://veridocs.vercel.app/](https://veridocs.vercel.app/)**  
+> Built as a self-contained, high-performance showcase in [`demo/`](./demo) to allow recruiters and hiring managers to interact immediately with:
+> - **Visual Document Canvas Grounding:** Click citations to jump to coordinates and trigger animated word highlighting.
+> - **Forensic Contradiction Matrix:** Side-by-side legal diffing between 2023 MSA vs 2024 Amendment with clause discrepancy cards.
+> - **Sentence-by-Sentence Claim Audit:** 3-state confidence classification (`verified`, `inferred`, `hallucinated`).
+> - **Real-Time RAG Triad Telemetry:** Context Relevance, Groundedness, Answer Relevance, and Numeric Token Fidelity.
 
 ---
 
@@ -29,7 +41,7 @@
 2. **Hybrid Search on CPU:** Combines keyword search (BM25 for exact terms/IDs) with vector search (FAISS for meaning) using FastEmbed ONNX (~70MB RAM, no heavy GPU needed).
 3. **Multi-Tenant Security & Anti-IDOR:** Signed HMAC-SHA256 user session tokens isolate customer documents so one user cannot access, query, or delete another user's files or history.
 4. **Data Lifecycle & Ephemeral Cleanup:** Automatic background retention purge and explicit deletion endpoints protect user privacy and prevent disk exhaustion.
-5. **103 Automated Tests & Full-Stack CI:** Pytest backend suite + Next.js TypeScript check, linting, and production build run on every push in GitHub Actions.
+5. **105 Automated Tests & Full-Stack CI:** Pytest backend suite + Next.js TypeScript check, linting, and production build run on every push in GitHub Actions.
 
 ---
 
@@ -219,8 +231,13 @@ Veridocs/
 │   ├── app/                        # Next.js pages & layouts
 │   ├── components/                 # PDF viewer, chat, audit & upload components
 │   └── lib/                        # Authenticated API client & Zustand state
+├── demo/                           # Standalone live interactive portfolio showcase for Vercel
+│   ├── app/                        # Next.js portfolio presentation page & styles
+│   ├── components/                 # Visual document canvas, contradiction matrix & audit drawer
+│   ├── lib/demoData.ts             # Realistic multi-scenario contract & financial audit dataset
+│   └── vercel.json                 # Vercel deployment configuration
 ├── .github/workflows/
-│   └── test.yml                    # Full-stack CI: Pytest + Next.js build
+│   └── test.yml                    # Full-stack CI: Pytest + Next.js build + Demo build
 ├── start.sh                        # One-command startup script
 └── README.md
 ```
@@ -229,11 +246,26 @@ Veridocs/
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### 1. 🌐 Live Interactive Demo (Instant — No Installation Required)
+
+Experience the live app right now directly in your browser:
+👉 **[https://veridocs.vercel.app/](https://veridocs.vercel.app/)**
+
+The live demo showcases:
+- Visual PDF bounding box highlight navigation
+- Forensic cross-contract contradiction matrix
+- 3-state sentence-by-sentence claim audit
+- Real-time RAG Triad observability telemetry
+
+---
+
+### 2. Run Locally with Full-Stack Backend (Optional)
+
+#### Prerequisites
 - **Python 3.11+**
 - **Node.js 18+**
 
-### 1. One-Command Launch (Easiest)
+#### One-Command Launch (Easiest)
 
 ```bash
 git clone https://github.com/Spidey173/Veridocs.git
@@ -244,12 +276,8 @@ chmod +x start.sh
 ./start.sh
 ```
 
-- **Open the App:** [http://localhost:3000](http://localhost:3000)
+- **Frontend App:** [http://localhost:3000](http://localhost:3000)
 - **API Documentation:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-
----
-
-### 2. Manual Setup (Optional)
 
 #### Backend
 ```bash
