@@ -78,7 +78,8 @@ Veridocs is engineered with clear security boundaries, access controls, and data
 
 1. **Trustworthy Identity & Deployment Modes:**
    - **Local Demo Mode (`AUTH_MODE=demo`):** Designed for local single-user evaluation. Generates ephemeral demo tokens (`POST /api/auth/demo-token`). Clients cannot arbitrarily choose their user ID or claim admin privileges; demo tokens assign a fixed `user` role and are labeled as demo-only.
-   - **Multi-Tenant Gateway Mode (`AUTH_MODE=gateway`):** Designed for production deployments behind a trusted reverse proxy or API gateway (e.g., Kong, Envoy, Cloudflare Access, AWS API Gateway, GCP IAP). Client-minted demo tokens are strictly disabled (`403 Forbidden`). Identity is validated from trusted upstream gateway headers (`X-Consumer-Custom-ID` and `X-Consumer-Role`).
+   - **Multi-Tenant Gateway Mode (`AUTH_MODE=gateway`):** Designed for production deployments behind a trusted reverse proxy or API gateway (e.g., Kong, Envoy, Cloudflare Access, AWS API Gateway, GCP IAP). Client-minted demo tokens are strictly disabled (`403 Forbidden`). Identity is validated from upstream gateway headers (`X-Consumer-Custom-ID` and `X-Consumer-Role`).
+   - **Gateway Trust Boundary & Anti-Spoofing (`GATEWAY_SHARED_SECRET`):** If the backend were directly accessible on the public internet, a malicious client could attempt to forge gateway identity headers. To prevent header spoofing, Veridocs supports a pre-shared secret (`GATEWAY_SHARED_SECRET` passed via `X-Gateway-Secret`). In production gateway mode, server startup fails fast if this secret is missing, unless explicitly running in a private VPC with `ALLOW_UNPROTECTED_GATEWAY_HEADERS=true`.
    - **Strict Production Secret Enforcement:** When running in production mode (`ENVIRONMENT=production` or `AUTH_MODE=gateway`), the server validates `AUTH_SECRET_KEY` on startup. If the secret is missing, default, or shorter than 32 characters, server startup fails immediately with a `RuntimeError`.
 2. **Consistent Ownership Enforcement (Anti-IDOR):**
    - Every session and document operation requires an authenticated caller identity.
@@ -99,7 +100,7 @@ Veridocs is engineered with clear security boundaries, access controls, and data
 
 ---
 
-## 🔬 Grounding Methodology, Limitations & Benchmark
+## 🔬 Grounding Methodology, Limitations & Synthetic Regression Suite
 
 > [!IMPORTANT]
 > **Heuristic Disclosure:** The grounding verification in Veridocs is a fast, deterministic surface alignment check, **not proof of semantic truth or formal factual correctness**. It serves as a real-time signal to catch ungrounded numbers and obvious hallucinated topics in <5ms on CPU.
@@ -117,8 +118,8 @@ Veridocs is engineered with clear security boundaries, access controls, and data
 3. **Complex Discourse:** Nuanced hedge phrases ("it may be plausible that...") cannot be evaluated for semantic entailment without a language model.
 *For mission-critical production workflows, pair this fast heuristic with a cross-encoder NLI (Natural Language Inference) model or an LLM-as-a-judge evaluation suite.*
 
-### Deterministic Benchmark Results (`backend/tests/test_grounding_eval.py`):
-Evaluated across **16 deterministic benchmark challenge cases**:
+### Synthetic Regression Suite Results (`backend/tests/test_grounding_eval.py`):
+Evaluated across **16 synthetic regression challenge cases**:
 
 ```
 === Grounding Heuristic Evaluation Report ===
@@ -137,7 +138,8 @@ Category Breakdown:
   - role reversal       : 0/1 correct (0.0% — correctly highlights lexical heuristic limit!)
 ```
 
-*(Note: Synthetic test benchmarks measure specific heuristic boundary behaviors and do not imply real-world natural language perfection.)*
+> [!NOTE]
+> **Scope of the Benchmark:** This 16-case suite functions as an **automated regression and unit test suite** ensuring that polarity and numeric filtering logic does not regress. It is **not** evidence of broad real-world accuracy across complex, diverse, or messy unstructured documents.
 
 ---
 
@@ -164,7 +166,7 @@ Category Breakdown:
 
 #### Q4: "How is your CI/CD pipeline structured?"
 > **Your Answer:**  
-> *"Our GitHub Actions workflow runs two parallel jobs on every push: a Python 3.11 job that runs 98 Pytest tests with code coverage, and a Node.js 20 job that runs `npm ci` using our lockfile, executes ESLint, checks TypeScript types with `tsc --noEmit`, and builds the Next.js production bundle."*
+> *"Our GitHub Actions workflow runs two parallel jobs on every push: a Python 3.11 job that runs 104 Pytest tests with code coverage, and a Node.js 20 job that runs `npm ci` using our lockfile, executes ESLint, checks TypeScript types with `tsc --noEmit`, and builds the Next.js production bundle."*
 
 ---
 
@@ -193,7 +195,7 @@ flowchart LR
 | **Search & Vectors** | **FAISS, BM25, FastEmbed (ONNX)** | Fast, lightweight semantic + keyword search running entirely on CPU. |
 | **Security & Auth** | **HMAC-SHA256 Signed Tokens** | Tamper-proof tenant isolation and anti-IDOR protection. |
 | **LLM Gateway** | **Groq, Google Gemini, OpenRouter** | Multi-provider support for generating answers and summaries. |
-| **Testing & CI** | **Pytest (98 tests), GitHub Actions, Next.js Build** | Full-stack automated validation in CI. |
+| **Testing & CI** | **Pytest (104 tests), GitHub Actions, Next.js Build** | Full-stack automated validation in CI. |
 
 ---
 
@@ -211,7 +213,7 @@ Veridocs/
 │   ├── verification.py             # Numeric check & lexical grounding heuristic
 │   ├── llm_service.py              # LLM gateway (Groq, Gemini, OpenRouter)
 │   ├── models.py                   # Pydantic schemas & observability models
-│   └── tests/                      # 98 automated unit & integration tests
+│   └── tests/                      # 104 automated unit & integration tests
 ├── frontend/
 │   ├── app/                        # Next.js pages & layouts
 │   ├── components/                 # PDF viewer, chat, audit & upload components
@@ -281,7 +283,7 @@ pytest -v
 ```
 
 ```
-============================== 103 passed in 1.94s ==============================
+============================== 104 passed in 2.56s ==============================
 ```
 
 To run the frontend validation locally:
@@ -303,6 +305,7 @@ Veridocs is currently architected and validated for **Single-Instance Deployment
 **Single-Instance Architectural Assumptions:**
 1. **In-Memory Session Caching & Local File Storage:** Active session metadata, chunk indexes, and vector stores are maintained in process memory and persisted to local disk (`UPLOAD_DIR`).
 2. **Ephemeral Multi-Tenancy:** In multi-tenant gateway mode, user isolation is strictly enforced within the instance. However, without shared external storage, requests in a multi-pod cluster without session stickiness could land on an instance lacking the local session files.
+3. **Gateway Trust Boundary & Network Isolation:** In `AUTH_MODE=gateway`, the backend assumes incoming traffic arrives either through a protected private network (e.g., internal VPC, Docker network) or includes the pre-shared `GATEWAY_SHARED_SECRET` (`X-Gateway-Secret`). If the backend is directly exposed to the public internet without a gateway secret, clients could spoof gateway identity headers.
 
 ### Enterprise Multi-Instance Scaling Roadmap
 To scale horizontally across multi-instance clusters (e.g. AWS ECS, Kubernetes multi-replica deployments):

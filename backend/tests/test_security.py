@@ -87,10 +87,20 @@ class TestSecurityAndAccessControl:
             settings.validate_production_configuration()
         assert "insecure default placeholder" in str(excinfo.value)
 
+        # In production gateway mode, fail if GATEWAY_SHARED_SECRET is not configured to prevent header spoofing
+        monkeypatch.setattr(settings, "AUTH_SECRET_KEY", "strong-32-character-secret-key-for-test-suite")
+        monkeypatch.setattr(settings, "AUTH_MODE", "gateway")
+        monkeypatch.setattr(settings, "GATEWAY_SHARED_SECRET", "")
+        monkeypatch.setattr(settings, "REQUIRE_API_KEY", False)
+        with pytest.raises(RuntimeError) as excinfo:
+            settings.validate_production_configuration()
+        assert "GATEWAY_SHARED_SECRET" in str(excinfo.value)
+
     def test_gateway_trusted_identity_header(self, monkeypatch, sample_txt_bytes, patch_models, mock_llm_service):
         """Verify gateway mode authenticates through trusted upstream headers without client tokens."""
         settings = get_settings()
         monkeypatch.setattr(settings, "AUTH_MODE", "gateway")
+        monkeypatch.setattr(settings, "GATEWAY_SHARED_SECRET", "")  # Unrestricted gateway mode (internal VPC)
 
         gw_client = TestClient(main.app)
         gw_client.headers["X-Consumer-Custom-ID"] = "corp_employee_99"
@@ -110,6 +120,32 @@ class TestSecurityAndAccessControl:
         other_gw_client.headers["X-Consumer-Custom-ID"] = "different_employee_12"
         other_resp = other_gw_client.get(f"/api/sessions/{session_id}")
         assert other_resp.status_code == 403
+
+    def test_gateway_shared_secret_enforcement(self, monkeypatch, sample_txt_bytes, patch_models, mock_llm_service):
+        """Verify that when GATEWAY_SHARED_SECRET is set, requests without valid gateway secret header are rejected."""
+        settings = get_settings()
+        monkeypatch.setattr(settings, "AUTH_MODE", "gateway")
+        monkeypatch.setattr(settings, "GATEWAY_SHARED_SECRET", "super-secret-gateway-token-1234")
+
+        # 1. Attacker tries to send gateway identity headers directly without gateway secret -> 401 Unauthorized
+        spoof_client = TestClient(main.app)
+        spoof_client.headers["X-Consumer-Custom-ID"] = "victim_user"
+        files = [("files", ("spoof.txt", sample_txt_bytes, "text/plain"))]
+        resp = spoof_client.post("/api/upload", files=files)
+        assert resp.status_code == 401
+        assert "untrusted gateway" in resp.json()["detail"].lower()
+
+        # 2. Attacker provides wrong gateway secret -> 401 Unauthorized
+        spoof_client.headers["X-Gateway-Secret"] = "wrong-secret"
+        resp = spoof_client.post("/api/upload", files=files)
+        assert resp.status_code == 401
+
+        # 3. Legitimate gateway provides matching gateway secret -> 200 OK
+        valid_gw_client = TestClient(main.app)
+        valid_gw_client.headers["X-Consumer-Custom-ID"] = "corp_employee_1"
+        valid_gw_client.headers["X-Gateway-Secret"] = "super-secret-gateway-token-1234"
+        resp = valid_gw_client.post("/api/upload", files=files)
+        assert resp.status_code == 200
 
     def test_unauthenticated_request_rejected(self, sample_txt_bytes, patch_models, mock_llm_service):
         """Verify endpoints reject requests with 401 when no token is supplied."""

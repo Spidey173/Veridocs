@@ -207,6 +207,17 @@ async def get_current_user(
     if settings.AUTH_MODE == "gateway":
         gateway_user = request.headers.get(settings.GATEWAY_USER_HEADER)
         if gateway_user and gateway_user.strip():
+            # If GATEWAY_SHARED_SECRET is configured, verify that the gateway authenticated itself
+            if settings.GATEWAY_SHARED_SECRET:
+                provided_gw_secret = request.headers.get(settings.GATEWAY_SECRET_HEADER)
+                if not provided_gw_secret or not hmac.compare_digest(
+                    provided_gw_secret.strip(), settings.GATEWAY_SHARED_SECRET
+                ):
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Untrusted gateway request: missing or invalid gateway authentication secret."
+                    )
+
             gateway_role = request.headers.get(settings.GATEWAY_ROLE_HEADER, "user").strip()
             return UserContext(
                 user_id=gateway_user.strip(),

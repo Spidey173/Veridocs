@@ -1,11 +1,12 @@
 """
-Deterministic Grounding Evaluation Suite for Veridocs.
-Evaluates the lexical and numerical grounding heuristic against:
-  1. Grounded claims (true assertions directly supported by context)
-  2. Subtle unsupported claims (vocabulary overlap with unsupported relations)
-  3. Altered numbers (dates, percentages, currency modified from source)
+Synthetic Grounding Heuristic Regression Suite for Veridocs.
 
-Computes and asserts Precision, Recall, Accuracy, and F1-score.
+This 16-case synthetic suite serves strictly as a deterministic unit/regression test
+harness to verify that fast algorithmic heuristics (polarity inversion detection,
+regex numeric mismatches, n-gram overlap) operate as designed on targeted edge cases.
+
+It does NOT constitute or claim evidence of broad real-world factual accuracy
+across unstructured, domain-complex, or noisy human documents.
 """
 
 import pytest
@@ -13,11 +14,11 @@ from verification import calculate_grounding_score, evaluate_grounding_benchmark
 
 
 class TestGroundingEvaluation:
-    """Deterministic evaluation suite reporting precision, recall, and category breakdowns."""
+    """Synthetic regression suite evaluating precision, recall, and category breakdowns."""
 
     @pytest.fixture
     def benchmark_cases(self):
-        """Standardized test benchmark for grounding heuristic."""
+        """Standardized synthetic regression cases for grounding heuristic."""
         source_context = [
             {
                 "page": 1,

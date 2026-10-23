@@ -105,6 +105,8 @@ class Settings:
         self.TOKEN_EXPIRE_HOURS: int = int(os.getenv("TOKEN_EXPIRE_HOURS", "24"))
         self.GATEWAY_USER_HEADER: str = os.getenv("GATEWAY_USER_HEADER", "X-Consumer-Custom-ID")
         self.GATEWAY_ROLE_HEADER: str = os.getenv("GATEWAY_ROLE_HEADER", "X-Consumer-Role")
+        self.GATEWAY_SHARED_SECRET: str = os.getenv("GATEWAY_SHARED_SECRET", "").strip()
+        self.GATEWAY_SECRET_HEADER: str = os.getenv("GATEWAY_SECRET_HEADER", "X-Gateway-Secret")
 
         # === Data Lifecycle & Retention ===
         self.RETENTION_HOURS: int = int(os.getenv("RETENTION_HOURS", "24"))
@@ -140,6 +142,18 @@ class Settings:
                     "FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is set to an insecure default placeholder. "
                     "You must provide a unique, random secret in production."
                 )
+
+            # In gateway mode under production, protect against direct internet header spoofing
+            if self.AUTH_MODE == "gateway":
+                allow_unprotected = os.getenv("ALLOW_UNPROTECTED_GATEWAY_HEADERS", "false").lower() in ("true", "1", "yes")
+                if not self.GATEWAY_SHARED_SECRET and not self.REQUIRE_API_KEY and not allow_unprotected:
+                    raise RuntimeError(
+                        "FATAL SECURITY CONFIGURATION: When AUTH_MODE=gateway in production, GATEWAY_SHARED_SECRET "
+                        "(or REQUIRE_API_KEY=true) must be configured to verify that gateway identity headers "
+                        f"({self.GATEWAY_USER_HEADER}) originate from an authentic gateway rather than directly from an "
+                        "untrusted client. If network isolation (e.g. private VPC, ingress firewall) guarantees the "
+                        "backend cannot be reached directly from the public internet, set ALLOW_UNPROTECTED_GATEWAY_HEADERS=true."
+                    )
 
 
 @lru_cache()
