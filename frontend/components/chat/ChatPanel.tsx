@@ -84,7 +84,7 @@ export default function ChatPanel() {
       if (sessionId === "demo-session" || sessionId.startsWith("session-")) {
         let answerText = "";
         let demoCitations: CitationInfo[] = [];
-        let demoConfidence = 0.98;
+        const demoConfidence = 0.98;
         let demoClaims: ClaimVerificationItem[] = [];
 
         const lower = question.toLowerCase();

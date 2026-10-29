@@ -39,6 +39,96 @@ export default function DropZone() {
     setActiveDiffReport,
   } = useAppStore();
 
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const executeUpload = useCallback(
+    async (targetFiles?: File[]) => {
+      const filesToUpload = targetFiles || selectedFiles;
+      if (filesToUpload.length === 0) return;
+
+      setUploading(true);
+      setUploadProgress(25, "Extracting text chunks & generating embeddings...");
+      setError(null);
+
+      // Fast, responsive progress indicator (<150ms)
+      let currentPct = 25;
+      const progressTicker = setInterval(() => {
+        if (currentPct < 90) {
+          currentPct += 25;
+          let stage = "Extracting text chunks & coordinates...";
+          if (currentPct >= 50 && currentPct < 80) {
+            stage = "Generating FastEmbed vectors & neural embeddings...";
+          } else if (currentPct >= 80) {
+            stage = "Finalizing hybrid BM25 + FAISS structures...";
+          }
+          setUploadProgress(Math.min(currentPct, 95), stage);
+        }
+      }, 25);
+
+      try {
+        const blobUrls: Record<string, string> = {};
+        filesToUpload.forEach((f) => {
+          blobUrls[f.name] = URL.createObjectURL(f);
+        });
+        setLocalFileUrls(blobUrls);
+
+        const result = await uploadDocuments(filesToUpload);
+
+        clearInterval(progressTicker);
+        setUploadProgress(100, "Workspace ready!");
+
+        const files: UploadedFile[] = filesToUpload.map((f) => ({
+          name: f.name,
+          size: f.size,
+          type: f.type,
+        }));
+
+        // Immediately enter workspace in sub-second time
+        setSession(result.session_id, files);
+        setUploading(false);
+        setSelectedFiles([]);
+
+        // Fetch insights asynchronously in background without blocking UI
+        setLoadingInsights(true);
+        getInsights(result.session_id)
+          .then((insights) => {
+            if (insights) setInsights(insights);
+          })
+          .catch((err) => {
+            console.warn("Background insights load:", err);
+          })
+          .finally(() => {
+            setLoadingInsights(false);
+          });
+      } catch (err: unknown) {
+        clearInterval(progressTicker);
+        console.warn("Backend not available, initializing interactive client session:", err);
+        const uploaded: UploadedFile[] = filesToUpload.map((f) => ({
+          name: f.name,
+          size: f.size,
+          type: f.type,
+          pages: 3,
+        }));
+        setSession(`session-${Date.now()}`, uploaded);
+        setUploading(false);
+        setSelectedFiles([]);
+      }
+    },
+    [
+      selectedFiles,
+      setUploading,
+      setUploadProgress,
+      setError,
+      setLocalFileUrls,
+      setSession,
+      setSelectedFiles,
+      setLoadingInsights,
+      setInsights,
+    ]
+  );
+
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       setError(null);
@@ -54,7 +144,7 @@ export default function DropZone() {
       // Auto-trigger instant upload on file drop
       executeUpload(valid);
     },
-    []
+    [executeUpload]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -67,83 +157,6 @@ export default function DropZone() {
     },
     multiple: true,
   });
-
-  const removeFile = (index: number) => {
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const executeUpload = async (targetFiles?: File[]) => {
-    const filesToUpload = targetFiles || selectedFiles;
-    if (filesToUpload.length === 0) return;
-
-    setUploading(true);
-    setUploadProgress(25, "Extracting text chunks & generating embeddings...");
-    setError(null);
-
-    // Fast, responsive progress indicator (<150ms)
-    let currentPct = 25;
-    const progressTicker = setInterval(() => {
-      if (currentPct < 90) {
-        currentPct += 25;
-        let stage = "Extracting text chunks & coordinates...";
-        if (currentPct >= 50 && currentPct < 80) {
-          stage = "Generating FastEmbed vectors & neural embeddings...";
-        } else if (currentPct >= 80) {
-          stage = "Finalizing hybrid BM25 + FAISS structures...";
-        }
-        setUploadProgress(Math.min(currentPct, 95), stage);
-      }
-    }, 25);
-
-    try {
-      const blobUrls: Record<string, string> = {};
-      filesToUpload.forEach((f) => {
-        blobUrls[f.name] = URL.createObjectURL(f);
-      });
-      setLocalFileUrls(blobUrls);
-
-      const result = await uploadDocuments(filesToUpload);
-
-      clearInterval(progressTicker);
-      setUploadProgress(100, "Workspace ready!");
-
-      const files: UploadedFile[] = filesToUpload.map((f) => ({
-        name: f.name,
-        size: f.size,
-        type: f.type,
-      }));
-
-      // Immediately enter workspace in sub-second time
-      setSession(result.session_id, files);
-      setUploading(false);
-      setSelectedFiles([]);
-
-      // Fetch insights asynchronously in background without blocking UI
-      setLoadingInsights(true);
-      getInsights(result.session_id)
-        .then((insights) => {
-          if (insights) setInsights(insights);
-        })
-        .catch((err) => {
-          console.warn("Background insights load:", err);
-        })
-        .finally(() => {
-          setLoadingInsights(false);
-        });
-    } catch (err: unknown) {
-      clearInterval(progressTicker);
-      console.warn("Backend not available, initializing interactive client session:", err);
-      const uploaded: UploadedFile[] = filesToUpload.map((f) => ({
-        name: f.name,
-        size: f.size,
-        type: f.type,
-        pages: 3,
-      }));
-      setSession(`session-${Date.now()}`, uploaded);
-      setUploading(false);
-      setSelectedFiles([]);
-    }
-  };
 
   const handleTryDemo = () => {
     const demoFiles: UploadedFile[] = [

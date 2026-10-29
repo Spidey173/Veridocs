@@ -11,6 +11,8 @@ from pdf_processor import (
     get_document_metadata,
     extract_text_from_file,
     get_pdf_metadata,
+    _is_table_line,
+    _extract_blocks,
 )
 
 
@@ -130,3 +132,31 @@ class TestPDFProcessor:
     def test_get_pdf_metadata_invalid(self):
         """Verify get_pdf_metadata returns None for corrupted data."""
         assert get_pdf_metadata(b"corrupt") is None
+
+    def test_table_line_and_block_extraction(self):
+        """Verify markdown and tab-separated table detection and atomic block grouping."""
+        table_text = (
+            "Standard paragraph before table.\n\n"
+            "| Quarter | Revenue | Growth |\n"
+            "| --- | --- | --- |\n"
+            "| Q1 2024 | $10M | 12% |\n"
+            "| Q2 2024 | $14M | 18% |\n\n"
+            "Paragraph after table."
+        )
+        blocks = _extract_blocks(table_text)
+        assert len(blocks) == 3
+        assert blocks[0][1] is False  # not table
+        assert blocks[1][1] is True   # table block
+        assert "| Q1 2024 | $10M | 12% |" in blocks[1][0]
+        assert blocks[2][1] is False  # not table
+
+    def test_chunk_text_preserves_table_metadata(self):
+        """Verify chunk_text tags table chunks with is_table flag."""
+        pages = [{
+            "page": 1,
+            "text": "| Feature | Supported |\n| --- | --- |\n| OCR | Yes |\n| Tables | Yes |",
+            "sections": [],
+        }]
+        chunks = chunk_text(pages, chunk_size=200)
+        assert len(chunks) >= 1
+        assert any(c.get("is_table") for c in chunks)

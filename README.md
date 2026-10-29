@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
-[![Tests](https://img.shields.io/badge/Tests-105%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
+[![Tests](https://img.shields.io/badge/Tests-107%20Passing%20(100%25)-success?style=flat-square&logo=pytest&logoColor=white)](https://github.com/Spidey173/Veridocs)
 [![CI](https://img.shields.io/badge/CI-Full--Stack%20(Pytest%20+%20Next.js%20Build)-success?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/Spidey173/Veridocs)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
@@ -41,7 +41,7 @@
 2. **Hybrid Search on CPU:** Combines keyword search (BM25 for exact terms/IDs) with vector search (FAISS for meaning) using FastEmbed ONNX (~70MB RAM, no heavy GPU needed).
 3. **Multi-Tenant Security & Anti-IDOR:** Signed HMAC-SHA256 user session tokens isolate customer documents so one user cannot access, query, or delete another user's files or history.
 4. **Data Lifecycle & Ephemeral Cleanup:** Automatic background retention purge and explicit deletion endpoints protect user privacy and prevent disk exhaustion.
-5. **105 Automated Tests & Full-Stack CI:** Pytest backend suite + Next.js TypeScript check, linting, and production build run on every push in GitHub Actions.
+5. **107 Automated Tests & Full-Stack CI:** Pytest backend suite + Next.js TypeScript check, linting, and production build run on every push in GitHub Actions.
 
 ---
 
@@ -154,6 +154,16 @@ Category Breakdown:
 > [!NOTE]
 > **Scope of the Benchmark:** This 16-case suite functions as an **automated regression and unit test suite** ensuring that polarity and numeric filtering logic does not regress. It is **not** evidence of broad real-world accuracy across complex, diverse, or messy unstructured documents.
 
+### 📑 PDF Extraction & Visual Grounding Limits: Scans, Tables & Complex Layouts
+
+While digital text extraction operates reliably on standard single-column programmatic PDFs, real-world enterprise documents frequently introduce physical and structural irregularities. Here is an honest breakdown of where extraction and grounding can degrade, along with our active mitigations and architectural boundaries:
+
+| Document Challenge | Why/How Extraction & Grounding Can Fail | How Veridocs Handles / Mitigates It |
+| :--- | :--- | :--- |
+| **Scanned PDFs & Rasterized Images** | • Scanned documents lack an embedded text stream; `pypdf` extracts empty text (`""` or `<10` chars).<br>• OCR can inject optical noise (`l` vs `1`, `O` vs `0`), skew, and artifact substitutions.<br>• Standard OCR detaches glyphs from precise coordinate matrices, breaking exact browser canvas word-bounding. | • **Automatic OCR Fallback:** If $\ge 50\%$ of pages have $<10$ characters, `pdf_processor.py` triggers an EasyOCR + PyMuPDF pipeline at 200 DPI.<br>• **Scan Telemetry:** Chunks are explicitly flagged with `is_scanned: True` in metadata.<br>• **Canvas Highlight Fallback:** When bounding boxes cannot be computed on the PDF.js text layer, `PDFViewer.tsx` gracefully falls back to an anchored amber whole-page indicator (`ring-4 ring-amber-400/80`) and citation toast rather than failing silently.<br>• **Fail-Fast Boundary:** If OCR dependencies are missing or images are unreadable, the API returns a structured error instructing the user. |
+| **Complex Tables & Spreadsheets** | • PDFs store tables as visual lines and detached text coordinates—not semantic `<table>` elements.<br>• Linear text streams flatten rows into disorganized strings or interleave adjacent column headers.<br>• Arbitrary token chunking (e.g. 500 characters) can cut across table rows, severing column headers from cell values during vector retrieval. | • **Atomic Table Block Preservation:** `pdf_processor.py` implements `_is_table_line()` and `_extract_blocks()` to detect markdown and tab-separated table structures.<br>• **Adaptive Chunk Sizing:** Table blocks are kept contiguous as single intact units (up to $2\times$ chunk size) to prevent orphan cell values.<br>• **Hierarchical Breadcrumbs:** Injects `[Document: ... > Section: ...]` onto chunks so isolated numerical cells retain parent section scope.<br>• **Strict Regex Numeric Verification:** `verification.py` ensures all numerical metrics in an answer match the source table exactly. |
+| **Layout-Heavy & Multi-Column Documents** | • Research papers and 2-column contracts read across columns horizontally in raw stream order, scrambling sentences (`Col 1 Line 1` + `Col 2 Line 1`).<br>• Running headers, page numbers, and footnotes contaminate text flow.<br>• Hyphenated line breaks across column margins mismatch search queries. | • **Kerning & Spaced-Text Recovery:** `fix_spaced_text()` reconstructs words separated by kerning gaps without touching valid text.<br>• **Structural Section Anchoring:** `detect_sections()` anchors chunks to numbered, Roman numeral, and uppercase headings.<br>• **3-Tier Visual Grounding Cascade (`PDFViewer.tsx`):**<br>&nbsp;&nbsp;1. *Exact Phrase Search:* `pageLower.indexOf(cleanSnippet)`<br>&nbsp;&nbsp;2. *Prefix N-Gram Search:* Anchors on the first 4 key words ($>3$ chars)<br>&nbsp;&nbsp;3. *Fuzzy Keyword/Number Search:* Highlights individual matched entity tokens<br>&nbsp;&nbsp;4. *Page Perimeter Halo:* Highlights the full page if coordinate tokens differ from rendered DOM text. |
+
 ---
 
 ## 🗣️ How to Explain This in an Interview
@@ -208,7 +218,7 @@ flowchart LR
 | **Search & Vectors** | **FAISS, BM25, FastEmbed (ONNX)** | Fast, lightweight semantic + keyword search running entirely on CPU. |
 | **Security & Auth** | **HMAC-SHA256 Signed Tokens** | Tamper-proof tenant isolation and anti-IDOR protection. |
 | **LLM Gateway** | **Groq, Google Gemini, OpenRouter** | Multi-provider support for generating answers and summaries. |
-| **Testing & CI** | **Pytest (105 tests), GitHub Actions, Next.js Build** | Full-stack automated validation in CI. |
+| **Testing & CI** | **Pytest (107 tests), GitHub Actions, Next.js Build** | Full-stack automated validation in CI. |
 
 ---
 
@@ -226,7 +236,7 @@ Veridocs/
 │   ├── verification.py             # Numeric check & lexical grounding heuristic
 │   ├── llm_service.py              # LLM gateway (Groq, Gemini, OpenRouter)
 │   ├── models.py                   # Pydantic schemas & observability models
-│   └── tests/                      # 105 automated unit & integration tests
+│   └── tests/                      # 107 automated unit & integration tests
 ├── frontend/
 │   ├── app/                        # Next.js pages & layouts
 │   ├── components/                 # PDF viewer, chat, audit & upload components
@@ -312,7 +322,7 @@ pytest -v
 ```
 
 ```
-============================== 105 passed in 2.02s ==============================
+============================== 107 passed in 1.91s ==============================
 ```
 
 To run the frontend validation locally:
