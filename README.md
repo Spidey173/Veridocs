@@ -18,7 +18,7 @@
 | **Problem** | Traditional document bots output detached floating text without visual evidence, and fail to detect altered liability caps or SLA downgrades across multiple contract versions. |
 | **Architecture** | **Pixel-level canvas coordinate grounding** mapping PDF.js text layer transform matrices (`convertToViewportRectangle`) onto canvas viewports, **sub-second hybrid retrieval** (BM25 + FAISS via FastEmbed ONNX), and an automated clause contradiction diff matrix. |
 | **Evidence & Benchmarks** | Sub-second hybrid retrieval latency on CPU (~70MB RAM footprint), exact pixel coordinate alignment, backed by **107 automated unit and integration tests**. |
-| **Scope & Boundaries** | **Synthetic Benchmarks**: Standard legal/financial PDFs paired with synthetic cross-version tampering benchmarks. **Deployment**: Interactive forensic viewer live on Vercel; FastAPI hybrid analysis backend runs with client-side document processing. |
+| **Scope & Boundaries** | **Synthetic Data**: Standard legal/financial PDFs paired with synthetic cross-version tampering benchmarks. **Local Benchmark Environment**: Sub-second hybrid retrieval and coordinate bounding boxes mapped via PDF.js viewport scaling in local Python benchmark environment. **Live UI + Local Backend**: Interactive viewer live on Vercel with client-side coordinate rendering; multi-document diffing engine runs in local container backend. |
 | **Verified Test Suite** | **107 / 107 Tests passing** (FastAPI backend tests, coordinate transforms, FAISS/BM25 retrieval, contradiction diffing, Next.js build). |
 
 ---
