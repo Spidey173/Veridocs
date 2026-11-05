@@ -103,7 +103,6 @@ Veridocs/
 │   ├── contradiction_engine.py # Clause contradiction diffing engine
 │   └── tests/              # 115 automated unit & integration tests
 ├── frontend/               # Next.js 16 interactive viewer & PDF.js canvas
-├── demo/                   # Standalone Vercel showcase deployment
 └── requirements.txt
 ```
 - **Anti-IDOR Security**: Session tokens and job ownership are cryptographically validated to isolate user documents.

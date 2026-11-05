@@ -25,6 +25,9 @@ frontend-next/node_modules/
 frontend-next/.next/
 frontend/node_modules/
 
+# Standalone Recruiter Demo (Vercel Showcase)
+demo/
+
 # OS / IDE
 .DS_Store
 .vscode/
