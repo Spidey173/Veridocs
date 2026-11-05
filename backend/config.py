@@ -71,6 +71,13 @@ class Settings:
         self.OCR_ENABLED: bool = os.getenv("OCR_ENABLED", "false").lower() == "true"
         self.OCR_MIN_TEXT_LENGTH: int = int(os.getenv("OCR_MIN_TEXT_LENGTH", "30"))
 
+        # === Celery & Redis Background Processing (SEC 10-K & Heavy OCR) ===
+        self.CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0").strip()
+        self.CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0").strip()
+        self.CELERY_TASK_ALWAYS_EAGER: bool = os.getenv("CELERY_TASK_ALWAYS_EAGER", "false").lower() in ("true", "1", "yes")
+        self.JOB_TIMEOUT_SECONDS: int = int(os.getenv("JOB_TIMEOUT_SECONDS", "3600"))
+        self.ASYNC_WORKER_CONCURRENCY: int = int(os.getenv("ASYNC_WORKER_CONCURRENCY", "4"))
+
         # === Application ===
         self.APP_NAME: str = os.getenv("APP_NAME", "Veridocs")
         self.APP_VERSION: str = "2.0.0"

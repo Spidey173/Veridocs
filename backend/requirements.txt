@@ -25,6 +25,10 @@ groq==0.18.0
 # === HTTP ===
 httpx==0.28.1
 
+# === Async Background Job Processing (Multi-hundred page SEC 10-K / Heavy OCR) ===
+celery>=5.3.0
+redis>=5.0.0
+
 # === Testing ===
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

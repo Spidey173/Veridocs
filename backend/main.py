@@ -62,7 +62,14 @@ from models import (
     DocumentInsights,
     RagTriadMetrics,
     CrossDocAuditRequest,
+    JobStatus,
+    JobProgress,
+    JobResponse,
+    JobDetailResponse,
+    JobListResponse,
 )
+from job_tracker import get_job_tracker
+from tasks import dispatch_document_job
 from insights_engine import generate_document_insights
 from verification import calculate_grounding_score, calculate_rag_triad_metrics, extract_citations_from_answer
 from contradiction_engine import run_cross_document_audit, AuditDiffReport
@@ -445,6 +452,208 @@ async def upload_documents(
     except Exception as e:
         logger.error(f"Error creating vector store: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error indexing documents: {str(e)}")
+
+
+# ──────────────────────────────────────────────
+# Async Background Job Processing (SEC 10-K & Heavy OCR)
+# ──────────────────────────────────────────────
+
+@app.post("/api/jobs/upload", response_model=JobResponse, status_code=202)
+@app.post("/api/upload/async", response_model=JobResponse, status_code=202)
+async def submit_async_document_job(
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    session_id: Optional[str] = Form(None),
+    current_user: UserContext = Depends(get_current_user)
+):
+    """
+    Submit heavy documents (such as 100-300+ page SEC 10-K filings or scanned PDFs)
+    for asynchronous background processing via Celery and Redis.
+    Immediately returns HTTP 202 Accepted with a job_id for non-blocking polling.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
+
+    saved_paths = []
+    file_names = []
+    failed_files = []
+
+    for file in files:
+        filename = file.filename or "unknown"
+        ext = Path(filename).suffix.lower()
+
+        if ext not in settings.ALLOWED_EXTENSIONS:
+            failed_files.append(f"{filename} (unsupported type: {ext})")
+            continue
+
+        try:
+            contents = await file.read()
+            if len(contents) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
+                failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")
+                continue
+
+            session_file_id = str(uuid.uuid4())
+            save_path = Path(settings.UPLOAD_DIR) / f"{session_file_id}{ext}"
+            save_path.write_bytes(contents)
+
+            saved_paths.append(str(save_path))
+            file_names.append(filename)
+        except Exception as e:
+            failed_files.append(f"{filename}: {str(e)}")
+
+    if not saved_paths:
+        err = "No valid files could be accepted for processing."
+        if failed_files:
+            err += f" Issues: {'; '.join(failed_files)}"
+        raise HTTPException(status_code=400, detail=err)
+
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    tracker = get_job_tracker()
+    tracker.create_job(
+        job_id=job_id,
+        file_names=file_names,
+        file_paths=saved_paths,
+        owner_id=current_user.user_id,
+        session_id=session_id
+    )
+
+    dispatch_document_job(
+        job_id=job_id,
+        file_paths=saved_paths,
+        file_names=file_names,
+        owner_id=current_user.user_id,
+        session_id=session_id,
+        background_tasks=background_tasks
+    )
+
+    logger.info(f"Accepted async job {job_id} for user {current_user.user_id} with {len(file_names)} file(s)")
+
+    msg = f"Document(s) successfully queued for background OCR and indexing. Track progress via GET /api/jobs/{job_id}"
+    if failed_files:
+        msg += f" Note: {len(failed_files)} file(s) skipped."
+
+    return JobResponse(
+        job_id=job_id,
+        status=JobStatus.QUEUED,
+        created_at=time.time(),
+        file_names=file_names,
+        message=msg
+    )
+
+
+@app.get("/api/jobs/{job_id}", response_model=JobDetailResponse)
+async def get_job_status(
+    job_id: str,
+    current_user: UserContext = Depends(get_current_user)
+):
+    """
+    Poll the status and real-time page progress of a background document processing job.
+    Enforces strict anti-IDOR user ownership isolation.
+    """
+    tracker = get_job_tracker()
+    job = tracker.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
+
+    # Anti-IDOR Ownership check
+    if job.get("owner_id") != current_user.user_id and current_user.role != "admin":
+        logger.warning(
+            f"IDOR violation: User {current_user.user_id} attempted reading job {job_id} owned by {job.get('owner_id')}"
+        )
+        raise HTTPException(status_code=403, detail="Access denied: You do not have permission to view this job.")
+
+    # If completed and session is on disk but not in memory, ensure it can be loaded
+    session_id = job.get("session_id")
+    if session_id and session_id not in sessions:
+        try:
+            _get_session(session_id, current_user)
+        except Exception:
+            pass
+
+    prog = job.get("progress", {})
+    progress_obj = JobProgress(
+        current_page=prog.get("current_page", 0),
+        total_pages=prog.get("total_pages", 0),
+        percent=prog.get("percent", 0.0),
+        stage=prog.get("stage", ""),
+        scanned_pages=prog.get("scanned_pages", 0),
+        chunks_created=prog.get("chunks_created", 0),
+    )
+
+    return JobDetailResponse(
+        job_id=job["job_id"],
+        status=job.get("status", JobStatus.QUEUED),
+        owner_id=job.get("owner_id", "unknown"),
+        created_at=job.get("created_at", time.time()),
+        updated_at=job.get("updated_at", time.time()),
+        file_names=job.get("file_names", []),
+        progress=progress_obj,
+        session_id=session_id,
+        error=job.get("error"),
+        result_summary=job.get("result_summary")
+    )
+
+
+@app.get("/api/jobs", response_model=JobListResponse)
+async def list_user_jobs(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: UserContext = Depends(get_current_user)
+):
+    """List asynchronous processing jobs for the authenticated user."""
+    tracker = get_job_tracker()
+    raw_jobs = tracker.list_jobs(owner_id=current_user.user_id, limit=limit)
+    job_responses = []
+
+    for j in raw_jobs:
+        prog = j.get("progress", {})
+        progress_obj = JobProgress(
+            current_page=prog.get("current_page", 0),
+            total_pages=prog.get("total_pages", 0),
+            percent=prog.get("percent", 0.0),
+            stage=prog.get("stage", ""),
+            scanned_pages=prog.get("scanned_pages", 0),
+            chunks_created=prog.get("chunks_created", 0),
+        )
+        job_responses.append(JobDetailResponse(
+            job_id=j["job_id"],
+            status=j.get("status", JobStatus.QUEUED),
+            owner_id=j.get("owner_id", "unknown"),
+            created_at=j.get("created_at", time.time()),
+            updated_at=j.get("updated_at", time.time()),
+            file_names=j.get("file_names", []),
+            progress=progress_obj,
+            session_id=j.get("session_id"),
+            error=j.get("error"),
+            result_summary=j.get("result_summary")
+        ))
+
+    return JobListResponse(jobs=job_responses, total=len(job_responses))
+
+
+@app.delete("/api/jobs/{job_id}")
+async def delete_or_cancel_job(
+    job_id: str,
+    current_user: UserContext = Depends(get_current_user)
+):
+    """Cancel or delete a background job and clean up its staging files."""
+    tracker = get_job_tracker()
+    job = tracker.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
+
+    if job.get("owner_id") != current_user.user_id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied: Cannot delete jobs owned by other users.")
+
+    for p in job.get("file_paths", []):
+        try:
+            Path(p).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    tracker.delete_job(job_id)
+    return {"status": "deleted", "job_id": job_id}
 
 
 # ──────────────────────────────────────────────
@@ -1303,6 +1512,13 @@ def cleanup_expired_sessions(max_age_hours: Optional[int] = None) -> Dict[str, i
                 if f.stat().st_mtime < cutoff_time:
                     if _safe_delete_file(f):
                         purged_files += 1
+
+    # 4. Purge expired async job files
+    jobs_root = Path(settings.UPLOAD_DIR) / "jobs"
+    if jobs_root.exists():
+        for jf in list(jobs_root.glob("*.json")):
+            if jf.stat().st_mtime < cutoff_time:
+                _safe_delete_file(jf)
 
     logger.info(f"Retention cleanup completed: {purged_sessions} sessions, {purged_files} files purged.")
     return {"purged_sessions": purged_sessions, "purged_files": purged_files}

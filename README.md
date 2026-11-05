@@ -1,7 +1,7 @@
 # 📑 Veridocs — Forensic Document AI & Contradiction Diff Engine
 
 [![CI Pipeline](https://github.com/Spidey173/Veridocs/actions/workflows/ci.yml/badge.svg)](https://github.com/Spidey173/Veridocs/actions)
-[![Tests](https://img.shields.io/badge/Tests-107%20Passed-brightgreen?style=flat-square&logo=pytest)](backend/tests/)
+[![Tests](https://img.shields.io/badge/Tests-115%20Passed-brightgreen?style=flat-square&logo=pytest)](backend/tests/)
 [![Backend](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](backend/)
 [![Frontend](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white)](frontend/)
 [![Embeddings](https://img.shields.io/badge/Embeddings-FastEmbed%20ONNX-orange?style=flat-square)](https://github.com/qdrant/fastembed)
@@ -17,9 +17,9 @@
 | :--- | :--- |
 | **Problem** | Traditional document bots output detached floating text without visual evidence, and fail to detect altered liability caps or SLA downgrades across multiple contract versions. |
 | **Architecture** | **Pixel-level canvas coordinate grounding** mapping PDF.js text layer transform matrices (`convertToViewportRectangle`) onto canvas viewports, **sub-second hybrid retrieval** (BM25 + FAISS via FastEmbed ONNX), and an automated clause contradiction diff matrix. |
-| **Evidence & Benchmarks** | Sub-second hybrid retrieval latency on CPU (~70MB RAM footprint), exact pixel coordinate alignment, backed by **107 automated unit and integration tests**. |
+| **Evidence & Benchmarks** | Sub-second hybrid retrieval latency on CPU (~70MB RAM footprint), exact pixel coordinate alignment, backed by **115 automated unit and integration tests**. |
 | **Scope & Boundaries** | **Synthetic Data**: Standard legal/financial PDFs paired with synthetic cross-version tampering benchmarks. **Local Benchmark Environment**: Sub-second hybrid retrieval and coordinate bounding boxes mapped via PDF.js viewport scaling in local Python benchmark environment. **Live UI + Local Backend**: Interactive viewer live on Vercel with client-side coordinate rendering; multi-document diffing engine runs in local container backend. |
-| **Verified Test Suite** | **107 / 107 Tests passing** (FastAPI backend tests, coordinate transforms, FAISS/BM25 retrieval, contradiction diffing, Next.js build). |
+| **Verified Test Suite** | **115 / 115 Tests passing** (FastAPI backend tests, coordinate transforms, FAISS/BM25 retrieval, contradiction diffing, Celery/Redis async job queue, Next.js build). |
 
 ---
 
@@ -47,7 +47,7 @@ python3 -m venv venv && source venv/bin/activate
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Run verified test suite (107 automated tests)
+# 3. Run verified test suite (115 automated tests)
 pytest backend/tests -v
 
 # 4. Run local backend API
@@ -74,20 +74,40 @@ uvicorn backend.main:app --reload
 </details>
 
 <details>
-<summary><strong>3. Project Directory Tree & Security</strong></summary>
+<summary><strong>3. Async Job Processing (Celery & Redis) for Heavy Scans & SEC 10-K Filings</strong></summary>
+
+- **The Challenge**: Multi-hundred-page documents (such as 100–300+ page SEC 10-K filings) containing rasterized financial exhibits, signature pages, or low-DPI scanned schedules can take 5–15 minutes of OCR and embedding computation. Synchronous HTTP execution will trigger gateway timeouts (30–60s) and starve server worker threads.
+- **Asynchronous Architecture**:
+  - **Job Submission (`POST /api/jobs/upload` or `POST /api/upload/async`)**: Accepts files, generates a unique `job_id`, records initial state in Redis / disk, and immediately returns `HTTP 202 Accepted`.
+  - **Distributed Celery Worker**: Dispatches `process_document_job` to Celery backed by a Redis message broker. Processes pages in streaming batches, reports real-time page-by-page progress (`percent`, `current_page`, `stage`), detects SEC Item headings (`ITEM 1. BUSINESS`, `ITEM 7. MD&A`, `ITEM 8. FINANCIAL STATEMENTS`), and persists the vector store once complete.
+  - **Non-Blocking Telemetry (`GET /api/jobs/{job_id}`)**: Clients poll status and progress metrics without holding open an HTTP connection.
+  - **Multi-Tenant Anti-IDOR**: All background jobs enforce strict ownership checks; cross-user job inspection is blocked with `403 Forbidden`.
+  - **Running Celery Workers**:
+    ```bash
+    celery -A backend.celery_app.celery_app worker --loglevel=info -c 4
+    ```
+</details>
+
+<details>
+<summary><strong>4. Project Directory Tree & Security</strong></summary>
 
 ```
 Veridocs/
 ├── backend/
-│   ├── main.py             # FastAPI endpoints & multi-tenant session isolation
-│   ├── retrieval/          # Hybrid FAISS + BM25 search engine
-│   ├── forensics/          # Clause contradiction diffing engine
-│   └── tests/              # 107 automated tests
+│   ├── main.py             # FastAPI endpoints, async job routes & session isolation
+│   ├── celery_app.py       # Distributed Celery application configuration
+│   ├── tasks.py            # Celery tasks for heavy OCR & SEC 10-K processing
+│   ├── job_tracker.py      # Redis & disk job progress state manager
+│   ├── pdf_processor.py    # SEC Item detection, atomic tables & OCR fallback
+│   ├── vector_store.py     # Hybrid FAISS + BM25 search engine
+│   ├── contradiction_engine.py # Clause contradiction diffing engine
+│   └── tests/              # 115 automated unit & integration tests
 ├── frontend/               # Next.js 16 interactive viewer & PDF.js canvas
+├── demo/                   # Standalone Vercel showcase deployment
 └── requirements.txt
 ```
-- **Anti-IDOR Security**: Session tokens are cryptographically signed with HMAC-SHA256 to isolate user documents.
-- **Ephemeral Retention**: Ingested files and extracted embeddings are purged automatically after analysis.
+- **Anti-IDOR Security**: Session tokens and job ownership are cryptographically validated to isolate user documents.
+- **Ephemeral Retention**: Ingested files, vector indices, and background job records are purged automatically after retention windows.
 </details>
 
 ---

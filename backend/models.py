@@ -213,3 +213,49 @@ class HealthResponse(BaseModel):
     active_sessions: int
     models_loaded: Dict[str, bool]
     providers_available: Dict[str, bool]
+
+
+# === Async Background Job Processing Models (SEC 10-K & Heavy OCR) ===
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class JobProgress(BaseModel):
+    current_page: int = 0
+    total_pages: int = 0
+    percent: float = 0.0
+    stage: str = "queued"
+    scanned_pages: int = 0
+    chunks_created: int = 0
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    created_at: float
+    file_names: List[str]
+    message: str = "Document queued for background processing and OCR"
+
+
+class JobDetailResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    owner_id: str
+    created_at: float
+    updated_at: float
+    file_names: List[str]
+    progress: JobProgress
+    session_id: Optional[str] = None
+    error: Optional[str] = None
+    result_summary: Optional[Dict[str, Any]] = None
+
+
+class JobListResponse(BaseModel):
+    jobs: List[JobDetailResponse]
+    total: int

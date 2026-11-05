@@ -22,6 +22,7 @@ if str(backend_dir) not in sys.path:
 import main
 from config import get_settings, ModelRegistry, get_model_registry
 from conversation import get_conversation_manager
+from job_tracker import get_job_tracker
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +32,7 @@ def clean_environment(tmp_path, monkeypatch):
     - Dedicated temp upload directory
     - In-memory sessions dictionary reset
     - Conversation manager cleared
+    - Job tracker cleared
     """
     test_upload_dir = tmp_path / "test_uploads"
     test_upload_dir.mkdir(parents=True, exist_ok=True)
@@ -44,12 +46,19 @@ def clean_environment(tmp_path, monkeypatch):
     # Clear conversation manager
     cm = get_conversation_manager()
     cm._conversations.clear()
+
+    # Clear job tracker
+    jt = get_job_tracker()
+    jt._jobs_dir = test_upload_dir / "jobs"
+    jt._jobs_dir.mkdir(parents=True, exist_ok=True)
+    jt.clear()
     
     yield
     
     # Teardown
     main.sessions.clear()
     cm._conversations.clear()
+    jt.clear()
     if test_upload_dir.exists():
         shutil.rmtree(test_upload_dir, ignore_errors=True)
 

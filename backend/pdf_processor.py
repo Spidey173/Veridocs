@@ -7,7 +7,7 @@ import io
 import re
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Callable
 import pypdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -70,6 +70,10 @@ HEADING_PATTERNS = [
     re.compile(r'^(\d+\.[\d.]*)\s+(.+)$'),
     # Roman numeral sections: "I. Introduction", "IV. Discussion"
     re.compile(r'^((?:I{1,3}|IV|V|VI{0,3}|IX|X{0,3})\.)\s+(.+)$', re.IGNORECASE),
+    # SEC 10-K Item headings: "ITEM 1. Business", "ITEM 1A. Risk Factors", "ITEM 7. MD&A", "ITEM 8. Financial Statements"
+    re.compile(r'^(ITEM\s+\d+[A-Z]?\.?)\s*(.*)$', re.IGNORECASE),
+    # SEC 10-K Part headings: "PART I", "PART II", "PART III", "PART IV"
+    re.compile(r'^(PART\s+(?:I{1,3}|IV)\.?)\s*(.*)$', re.IGNORECASE),
     # ALL CAPS headings (at least 3 chars, not too long)
     re.compile(r'^([A-Z][A-Z\s&]{2,60})$'),
     # Title Case headings with colon
@@ -126,13 +130,17 @@ def get_section_for_position(sections: List[Dict], line_index: int) -> Optional[
 # PDF Text Extraction
 # ──────────────────────────────────────────────
 
-def extract_text_from_pdf(file_bytes: bytes) -> List[Dict[str, str]]:
+def extract_text_from_pdf(
+    file_bytes: bytes,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> List[Dict[str, str]]:
     """
     Extract text from PDF bytes, returning list of pages with text, page number,
     and detected section information.
 
     Args:
         file_bytes: Raw bytes of the PDF file
+        progress_callback: Optional callback (current_page, total_pages, message) for async reporting
 
     Returns:
         List of dictionaries with 'page', 'text', and optional 'sections' keys
@@ -163,6 +171,9 @@ def extract_text_from_pdf(file_bytes: bytes) -> List[Dict[str, str]]:
         logger.info(f"Processing PDF with {total_pages} pages")
 
         for i, page in enumerate(reader.pages):
+            if progress_callback and (i % 5 == 0 or i == total_pages - 1):
+                progress_callback(i + 1, total_pages, f"Extracting digital text (page {i + 1}/{total_pages})")
+
             try:
                 text = page.extract_text()
 
@@ -198,7 +209,7 @@ def extract_text_from_pdf(file_bytes: bytes) -> List[Dict[str, str]]:
         # Attempt OCR for scanned pages if too many failed
         if scanned_page_count > 0 and scanned_page_count >= total_pages * 0.5:
             logger.info(f"{scanned_page_count}/{total_pages} pages appear scanned. Attempting OCR...")
-            ocr_pages = _ocr_pdf_pages(file_bytes, total_pages)
+            ocr_pages = _ocr_pdf_pages(file_bytes, total_pages, progress_callback=progress_callback)
             if ocr_pages:
                 # Merge OCR results with existing pages
                 existing_page_nums = {p["page"] for p in pages}
@@ -224,7 +235,11 @@ def extract_text_from_pdf(file_bytes: bytes) -> List[Dict[str, str]]:
         raise Exception(f"Error processing PDF: {str(e)}")
 
 
-def _ocr_pdf_pages(file_bytes: bytes, total_pages: int) -> List[Dict]:
+def _ocr_pdf_pages(
+    file_bytes: bytes,
+    total_pages: int,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> List[Dict]:
     """
     OCR fallback for scanned PDF pages.
     Converts pages to images and runs EasyOCR.
@@ -245,6 +260,13 @@ def _ocr_pdf_pages(file_bytes: bytes, total_pages: int) -> List[Dict]:
         ocr_pages = []
 
         for page_num in range(min(total_pages, len(doc))):
+            if progress_callback:
+                progress_callback(
+                    page_num + 1,
+                    total_pages,
+                    f"Running OCR fallback on page {page_num + 1}/{total_pages} (scanned/low-DPI)"
+                )
+
             page = doc[page_num]
             # Render page to image at 200 DPI
             pix = page.get_pixmap(dpi=200)
@@ -375,7 +397,11 @@ def extract_text_from_txt(file_bytes: bytes) -> List[Dict[str, str]]:
 # Universal Document Extractor
 # ──────────────────────────────────────────────
 
-def extract_text_from_file(file_bytes: bytes, filename: str) -> List[Dict[str, str]]:
+def extract_text_from_file(
+    file_bytes: bytes,
+    filename: str,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> List[Dict[str, str]]:
     """
     Route to the correct extractor based on file extension.
     Supports: PDF, DOCX, TXT
@@ -383,7 +409,7 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> List[Dict[str, s
     ext = Path(filename).suffix.lower()
 
     if ext == ".pdf":
-        return extract_text_from_pdf(file_bytes)
+        return extract_text_from_pdf(file_bytes, progress_callback=progress_callback)
     elif ext == ".docx":
         return extract_text_from_docx(file_bytes)
     elif ext == ".txt":
