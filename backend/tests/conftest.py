@@ -51,6 +51,7 @@ def clean_environment(tmp_path, monkeypatch):
     
     # Clear active sessions in main
     main.sessions.clear()
+    main._rate_limiter.clear()
     
     # Clear conversation manager
     cm = get_conversation_manager()

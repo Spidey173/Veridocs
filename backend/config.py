@@ -160,6 +160,13 @@ class Settings:
         self.RATE_LIMITING_ENABLED: bool = os.getenv("RATE_LIMITING_ENABLED", "true").lower() in ("true", "1", "yes")
         self.UPLOAD_RATE_LIMIT: int = int(os.getenv("UPLOAD_RATE_LIMIT", "60"))
         self.QUERY_RATE_LIMIT: int = int(os.getenv("QUERY_RATE_LIMIT", "180"))
+        self.AUDIT_RATE_LIMIT: int = int(os.getenv("AUDIT_RATE_LIMIT", "30"))
+        self.LLM_MAX_TPM: int = int(os.getenv("LLM_MAX_TPM", "30000"))
+        self.LLM_MAX_RPM: int = int(os.getenv("LLM_MAX_RPM", "60"))
+
+        # Contradiction & Audit Optimization
+        self.AUDIT_MODE: str = os.getenv("AUDIT_MODE", "hybrid").lower()
+        self.AUDIT_CACHE_ENABLED: bool = os.getenv("AUDIT_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
 
         # Retention & cleanup
         self.RETENTION_HOURS: int = int(os.getenv("RETENTION_HOURS", "24"))

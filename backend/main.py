@@ -190,6 +190,11 @@ class InMemoryRateLimiter:
             valid_timestamps.append(now)
             return True
 
+    def clear(self):
+        """Reset rate limiter state (used in test fixtures)."""
+        with self._lock:
+            self._history.clear()
+
 
 _rate_limiter = InMemoryRateLimiter()
 
@@ -1212,10 +1217,12 @@ async def get_document_insights(
 
 @app.post("/api/audit/contradictions", response_model=AuditDiffReport)
 async def audit_contradictions(
+    http_request: Request,
     req: CrossDocAuditRequest,
     current_user: UserContext = Depends(get_current_user)
 ):
     """Compare two documents to find differences and conflicting clauses."""
+    enforce_rate_limit(http_request, "audit", max_requests=getattr(settings, "AUDIT_RATE_LIMIT", 30), window_seconds=60)
     # Demo session handler
     if req.session_id == "demo-session":
         return AuditDiffReport(
