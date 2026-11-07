@@ -21,6 +21,11 @@ class TestConfig:
         assert settings.CHUNK_OVERLAP == 50
         assert settings.ALLOWED_EXTENSIONS == {".pdf", ".docx", ".txt"}
         assert settings.MAX_FILE_SIZE_MB == 50
+        assert settings.OCR_ENABLED is True
+        assert settings.OCR_ENGINE == "auto"
+        assert settings.OCR_MAX_WORKERS == 6
+        assert settings.OCR_BATCH_SIZE == 8
+        assert settings.OCR_IMAGE_MAX_DIM == 1800
 
     def test_settings_env_overrides(self, monkeypatch):
         """Verify settings pick up environment variable overrides on instantiation."""
@@ -29,6 +34,8 @@ class TestConfig:
         monkeypatch.setenv("CHUNK_SIZE", "1000")
         monkeypatch.setenv("RERANKER_ENABLED", "false")
         monkeypatch.setenv("APP_NAME", "CustomVeridocs")
+        monkeypatch.setenv("OCR_MAX_WORKERS", "12")
+        monkeypatch.setenv("OCR_ENGINE", "doctr")
 
         settings = Settings()
         assert settings.LLM_TEMPERATURE == 0.7
@@ -36,6 +43,8 @@ class TestConfig:
         assert settings.CHUNK_SIZE == 1000
         assert settings.RERANKER_ENABLED is False
         assert settings.APP_NAME == "CustomVeridocs"
+        assert settings.OCR_MAX_WORKERS == 12
+        assert settings.OCR_ENGINE == "doctr"
 
     def test_settings_singleton_cache(self):
         """Verify get_settings returns the same cached instance."""

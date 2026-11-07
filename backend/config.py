@@ -101,7 +101,12 @@ class Settings:
         self.CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "50"))
 
         # OCR settings
-        self.OCR_ENABLED: bool = os.getenv("OCR_ENABLED", "false").lower() == "true"
+        self.OCR_ENABLED: bool = os.getenv("OCR_ENABLED", "true").lower() in ("true", "1", "yes")
+        self.OCR_ENGINE: str = os.getenv("OCR_ENGINE", "auto").strip().lower()
+        self.OCR_MAX_WORKERS: int = int(os.getenv("OCR_MAX_WORKERS", "6"))
+        self.OCR_BATCH_SIZE: int = int(os.getenv("OCR_BATCH_SIZE", "8"))
+        self.OCR_IMAGE_MAX_DIM: int = int(os.getenv("OCR_IMAGE_MAX_DIM", "1800"))
+        self.OCR_TIMEOUT_SECONDS: int = int(os.getenv("OCR_TIMEOUT_SECONDS", "30"))
         self.OCR_MIN_TEXT_LENGTH: int = int(os.getenv("OCR_MIN_TEXT_LENGTH", "30"))
 
         # Background processing settings

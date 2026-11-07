@@ -3,6 +3,10 @@ import re
 import os
 import base64
 import logging
+import concurrent.futures
+import threading
+import time
+import random
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Callable, Union, Generator, Any
 import pypdf
@@ -16,11 +20,57 @@ logger = logging.getLogger(__name__)
 # Optional hook for testing or injecting custom multimodal vision transcribers
 _custom_vision_transcriber: Optional[Callable[[bytes, int], Optional[str]]] = None
 
+# Optional hook for testing or injecting custom dedicated OCR engines (DocTR, Surya, etc.)
+_custom_ocr_engine: Optional[Callable[[bytes, List[int]], List[Dict[str, Any]]]] = None
+
 
 def register_vision_transcriber(fn: Optional[Callable[[bytes, int], Optional[str]]]) -> None:
     """Register or clear a custom vision transcriber function (useful for tests and plugins)."""
     global _custom_vision_transcriber
     _custom_vision_transcriber = fn
+
+
+def register_ocr_engine(fn: Optional[Callable[[bytes, List[int]], List[Dict[str, Any]]]]) -> None:
+    """Register or clear a custom dedicated OCR engine function (useful for tests, plugins, DocTR, Surya)."""
+    global _custom_ocr_engine
+    _custom_ocr_engine = fn
+
+
+def _optimize_image_for_ocr(img_bytes: bytes, max_dim: int = 1800) -> bytes:
+    """Downscale oversized scanned images and compress to high-quality JPEG to slash transmission latency."""
+    if not img_bytes:
+        return img_bytes
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(img_bytes))
+        width, height = img.size
+
+        # If already within dimensions and reasonable size (< 400KB), return as is
+        if max(width, height) <= max_dim and len(img_bytes) < 400 * 1024 and getattr(img, "format", None) in ("JPEG", "PNG"):
+            return img_bytes
+
+        # Downscale proportionally if larger than max_dim
+        if max(width, height) > max_dim:
+            scale = max_dim / max(width, height)
+            new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+        # Convert to RGB if needed (handling RGBA, CMYK, P modes)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85, optimize=True)
+        compressed = buf.getvalue()
+
+        if len(compressed) < len(img_bytes):
+            logger.debug(f"Optimized OCR image: {len(img_bytes)} -> {len(compressed)} bytes ({img.size})")
+            return compressed
+        return img_bytes
+    except Exception as e:
+        logger.warning(f"Image optimization for OCR skipped due to error: {e}")
+        return img_bytes
 
 
 def fix_spaced_text(text: str) -> str:
@@ -129,15 +179,15 @@ def iter_pdf_pages(
                 raise ValueError("PDF is encrypted and cannot be processed")
 
         total_pages = len(reader.pages)
-        scanned_page_count = 0
-        logger.info(f"Streaming text extraction for {total_pages} PDF pages")
+        logger.info(f"Extracting text from {total_pages} PDF pages")
 
-        yielded_any = False
-        scanned_indices = []
+        extracted_pages: Dict[int, Dict[str, Any]] = {}
+        scanned_indices: List[int] = []
 
         for i, page in enumerate(reader.pages):
+            page_num = i + 1
             if progress_callback and (i % 5 == 0 or i == total_pages - 1):
-                progress_callback(i + 1, total_pages, f"Extracting digital text (page {i + 1}/{total_pages})")
+                progress_callback(page_num, total_pages, f"Extracting digital text (page {page_num}/{total_pages})")
 
             try:
                 text = page.extract_text()
@@ -150,28 +200,27 @@ def iter_pdf_pages(
                         sections = detect_sections(text)
                         section_names = [s["heading"] for s in sections]
 
-                        yielded_any = True
-                        yield {
-                            "page": i + 1,
+                        extracted_pages[page_num] = {
+                            "page": page_num,
                             "text": cleaned_text.strip(),
                             "raw_text": text,
                             "sections": section_names,
                             "is_scanned": False
                         }
                     else:
-                        scanned_page_count += 1
-                        scanned_indices.append(i + 1)
+                        scanned_indices.append(page_num)
                 else:
-                    scanned_page_count += 1
-                    scanned_indices.append(i + 1)
+                    scanned_indices.append(page_num)
 
             except Exception as e:
-                logger.warning(f"Error extracting text from page {i + 1}: {str(e)}")
+                logger.warning(f"Error extracting text from page {page_num}: {str(e)}")
+                scanned_indices.append(page_num)
                 continue
 
-        # If pages appear to be scanned images or no text was yielded, run OCR / Vision fallback
-        if scanned_page_count > 0 and (scanned_page_count >= total_pages * 0.5 or not yielded_any):
-            logger.info(f"{scanned_page_count}/{total_pages} pages appear scanned. Running OCR/Vision fallback...")
+        # If pages appear to be scanned images or lack digital text, invoke OCR / Vision fallback
+        settings = get_settings()
+        if scanned_indices and getattr(settings, "OCR_ENABLED", True):
+            logger.info(f"{len(scanned_indices)}/{total_pages} pages have no digital text. Running OCR/Vision fallback...")
             if isinstance(file_input, bytes):
                 ocr_bytes = file_input
             elif isinstance(file_input, (str, Path)):
@@ -180,29 +229,44 @@ def iter_pdf_pages(
                 stream.seek(0)
                 ocr_bytes = stream.read()
 
-            # 1. Try local OCR first
-            ocr_pages = _ocr_pdf_pages(ocr_bytes, total_pages, progress_callback=progress_callback)
+            # 1. Try dedicated local OCR engines first (Custom hook, DocTR, Surya, EasyOCR, Tesseract)
+            ocr_pages = _ocr_pdf_pages(
+                ocr_bytes,
+                total_pages,
+                scanned_indices=scanned_indices,
+                progress_callback=progress_callback
+            )
 
-            # 2. If local OCR returned nothing, invoke Multimodal Vision Model fallback
-            if not ocr_pages:
-                logger.info("Local OCR unavailable or yielded no text. Invoking Multimodal Vision Model fallback...")
-                target_indices = scanned_indices if scanned_indices else list(range(1, total_pages + 1))
-                ocr_pages = _multimodal_vision_pdf_fallback(
+            resolved_pages = set()
+            for ocr_p in ocr_pages:
+                p_num = ocr_p.get("page")
+                if p_num:
+                    extracted_pages[p_num] = ocr_p
+                    resolved_pages.add(p_num)
+
+            # 2. For remaining unresolved scanned pages, invoke parallelized Multimodal Vision fallback
+            unresolved_indices = [idx for idx in scanned_indices if idx not in resolved_pages]
+            if unresolved_indices:
+                logger.info(f"Invoking parallelized Multimodal Vision fallback for {len(unresolved_indices)} pages...")
+                vision_pages = _multimodal_vision_pdf_fallback(
                     reader,
                     total_pages,
-                    scanned_indices=target_indices,
+                    scanned_indices=unresolved_indices,
                     progress_callback=progress_callback
                 )
+                for vp in vision_pages:
+                    p_num = vp.get("page")
+                    if p_num:
+                        extracted_pages[p_num] = vp
 
-            for ocr_p in ocr_pages:
-                if not yielded_any or ocr_p["page"] in scanned_indices:
-                    yield ocr_p
-                    yielded_any = True
-
-        if not yielded_any:
+        if not extracted_pages:
             raise ValueError(
                 "No readable text found in the PDF. The file might be scanned images only."
             )
+
+        # Yield all pages strictly in ascending order 1..N
+        for p_num in sorted(extracted_pages.keys()):
+            yield extracted_pages[p_num]
 
     finally:
         if close_stream:
@@ -237,60 +301,80 @@ def _transcribe_scanned_image_via_vision(img_bytes: bytes, page_num: int) -> Opt
         or os.getenv("GEMINI_API_KEY", "")
     ).strip()
     if gemini_key:
-        try:
-            import google.generativeai as genai
-            from PIL import Image
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                import google.generativeai as genai
+                from PIL import Image
 
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            prompt = (
-                "You are an optical document transcription engine for financial, legal, and technical reports. "
-                "Transcribe all readable text, headers, and tables from this scanned document page. "
-                "Format tabular data with markdown pipes (| col | col |). "
-                "Preserve exact numbers, dates, currency signs, and section headings. "
-                "Do not include conversational commentary—return ONLY the transcribed document content."
-            )
-            image = Image.open(io.BytesIO(img_bytes))
-            response = model.generate_content([prompt, image])
-            if response and response.text and len(response.text.strip()) > 10:
-                logger.info(f"Page {page_num} successfully transcribed via Gemini Flash Vision.")
-                return response.text.strip()
-        except Exception as e:
-            logger.warning(f"Gemini Flash vision transcription failed on page {page_num}: {e}")
+                genai.configure(api_key=gemini_key)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                prompt = (
+                    "You are an optical document transcription engine for financial, legal, and technical reports. "
+                    "Transcribe all readable text, headers, and tables from this scanned document page. "
+                    "Format tabular data with markdown pipes (| col | col |). "
+                    "Preserve exact numbers, dates, currency signs, and section headings. "
+                    "Do not include conversational commentary—return ONLY the transcribed document content."
+                )
+                image = Image.open(io.BytesIO(img_bytes))
+                response = model.generate_content([prompt, image])
+                if response and response.text and len(response.text.strip()) > 10:
+                    logger.info(f"Page {page_num} successfully transcribed via Gemini Flash Vision.")
+                    return response.text.strip()
+                break
+            except Exception as e:
+                err_msg = str(e).lower()
+                if attempt < max_retries and any(k in err_msg for k in ("429", "resource exhausted", "quota", "timeout")):
+                    sleep_s = (2 ** attempt) + random.uniform(0.1, 0.4)
+                    logger.warning(f"Gemini Flash vision retryable error on page {page_num}: {e}. Retrying in {sleep_s:.2f}s...")
+                    time.sleep(sleep_s)
+                else:
+                    logger.warning(f"Gemini Flash vision transcription failed on page {page_num}: {e}")
+                    break
 
     # 2. Try OpenAI Vision (gpt-4o-mini / gpt-4o)
     openai_key = (settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")).strip()
     if openai_key:
-        try:
-            import openai
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                import openai
 
-            client = openai.OpenAI(api_key=openai_key)
-            b64_img = base64.b64encode(img_bytes).decode("utf-8")
-            response = client.chat.completions.create(
-                model=settings.OPENAI_MODEL or "gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Transcribe this scanned document page into text and markdown tables. Preserve all headers, numbers, and dates without conversational commentary.",
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{b64_img}"},
-                            },
-                        ],
-                    }
-                ],
-                max_tokens=2048,
-            )
-            text = response.choices[0].message.content
-            if text and len(text.strip()) > 10:
-                logger.info(f"Page {page_num} successfully transcribed via OpenAI Vision.")
-                return text.strip()
-        except Exception as e:
-            logger.warning(f"OpenAI vision transcription failed on page {page_num}: {e}")
+                client = openai.OpenAI(api_key=openai_key)
+                b64_img = base64.b64encode(img_bytes).decode("utf-8")
+                response = client.chat.completions.create(
+                    model=settings.OPENAI_MODEL or "gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Transcribe this scanned document page into text and markdown tables. Preserve all headers, numbers, and dates without conversational commentary.",
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"},
+                                },
+                            ],
+                        }
+                    ],
+                    max_tokens=2048,
+                )
+                text = response.choices[0].message.content
+                if text and len(text.strip()) > 10:
+                    logger.info(f"Page {page_num} successfully transcribed via OpenAI Vision.")
+                    return text.strip()
+                break
+            except Exception as e:
+                err_msg = str(e).lower()
+                if attempt < max_retries and any(k in err_msg for k in ("429", "rate limit", "timeout", "server_error")):
+                    sleep_s = (2 ** attempt) + random.uniform(0.1, 0.4)
+                    logger.warning(f"OpenAI vision retryable error on page {page_num}: {e}. Retrying in {sleep_s:.2f}s...")
+                    time.sleep(sleep_s)
+                else:
+                    logger.warning(f"OpenAI vision transcription failed on page {page_num}: {e}")
+                    break
 
     return None
 
@@ -300,100 +384,241 @@ def _multimodal_vision_pdf_fallback(
     total_pages: int,
     scanned_indices: List[int],
     progress_callback: Optional[Callable[[int, int, str], None]] = None
-) -> List[Dict]:
-    """Transcribe flattened/corrupted image PDFs using multimodal vision models."""
-    vision_pages = []
+) -> List[Dict[str, Any]]:
+    """Transcribe flattened/corrupted image PDFs using multimodal vision models in parallel batches."""
+    settings = get_settings()
+    max_workers = getattr(settings, "OCR_MAX_WORKERS", 6)
+    max_dim = getattr(settings, "OCR_IMAGE_MAX_DIM", 1800)
+    batch_size = getattr(settings, "OCR_BATCH_SIZE", 8)
+    timeout = getattr(settings, "OCR_TIMEOUT_SECONDS", 30)
 
+    # 1. Extract image tasks synchronously from reader (fast local CPU operation)
+    page_tasks: List[Tuple[int, bytes]] = []
     for page_num in scanned_indices:
         if page_num > len(reader.pages):
             continue
-
-        if progress_callback:
-            progress_callback(
-                page_num,
-                total_pages,
-                f"Running Multimodal Vision transcription on page {page_num}/{total_pages}"
-            )
-
         try:
             page = reader.pages[page_num - 1]
-            page_images = []
-            for img in page.images:
-                if img.data and len(img.data) > 200:
-                    page_images.append(img.data)
-
-            if not page_images:
+            page_images = [img.data for img in page.images if img.data and len(img.data) > 200]
+            if page_images:
+                largest_image = max(page_images, key=len)
+                page_tasks.append((page_num, largest_image))
+            else:
                 logger.warning(f"No embedded images detected on scanned page {page_num}.")
-                continue
+        except Exception as e:
+            logger.warning(f"Failed to extract image on page {page_num}: {e}")
 
-            largest_image = max(page_images, key=len)
-            transcribed = _transcribe_scanned_image_via_vision(largest_image, page_num)
+    if not page_tasks:
+        return []
 
+    # 2. Worker task to optimize image and transcribe
+    def _process_page(task: Tuple[int, bytes]) -> Optional[Dict[str, Any]]:
+        page_num, raw_img_bytes = task
+        try:
+            optimized_bytes = _optimize_image_for_ocr(raw_img_bytes, max_dim=max_dim)
+            transcribed = _transcribe_scanned_image_via_vision(optimized_bytes, page_num)
             if transcribed and len(transcribed.strip()) > 10:
                 sections = detect_sections(transcribed)
                 section_names = [s["heading"] for s in sections]
-                vision_pages.append({
+                return {
                     "page": page_num,
                     "text": transcribed.strip(),
                     "raw_text": transcribed,
                     "sections": section_names,
                     "is_scanned": True,
                     "ocr_engine": "multimodal_vision"
-                })
+                }
         except Exception as e:
-            logger.warning(f"Multimodal vision fallback error on page {page_num}: {e}")
+            logger.warning(f"Multimodal vision transcription failed on page {page_num}: {e}")
+        return None
 
+    # 3. Process concurrently in bounded batches
+    vision_pages: List[Dict[str, Any]] = []
+    total_tasks = len(page_tasks)
+    completed_count = 0
+    lock = threading.Lock()
+
+    for batch_start in range(0, total_tasks, batch_size):
+        batch = page_tasks[batch_start : batch_start + batch_size]
+        actual_workers = min(len(batch), max_workers)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
+            future_to_page = {
+                executor.submit(_process_page, task): task[0]
+                for task in batch
+            }
+
+            for future in concurrent.futures.as_completed(future_to_page):
+                page_num = future_to_page[future]
+                try:
+                    result = future.result(timeout=timeout)
+                    if result:
+                        vision_pages.append(result)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(f"Vision transcription timed out on page {page_num} after {timeout}s.")
+                except Exception as e:
+                    logger.warning(f"Vision transcription worker error on page {page_num}: {e}")
+                finally:
+                    with lock:
+                        completed_count += 1
+                        if progress_callback:
+                            progress_callback(
+                                completed_count,
+                                total_tasks,
+                                f"Transcribing scanned pages ({completed_count}/{total_tasks})...",
+                            )
+
+    # 4. Strictly sort results by page number to guarantee document sequence
+    vision_pages.sort(key=lambda p: p["page"])
     return vision_pages
 
 
 def _ocr_pdf_pages(
     file_bytes: bytes,
     total_pages: int,
+    scanned_indices: Optional[List[int]] = None,
     progress_callback: Optional[Callable[[int, int, str], None]] = None
-) -> List[Dict]:
-    """OCR fallback for scanned PDF pages using EasyOCR and PyMuPDF."""
-    try:
-        import easyocr
-        import fitz
-    except ImportError:
-        logger.warning("OCR packages not installed (easyocr/pymupdf).")
-        return []
+) -> List[Dict[str, Any]]:
+    """OCR fallback for scanned PDF pages using dedicated engines (Custom hook, DocTR, Surya, EasyOCR, or Tesseract)."""
+    global _custom_ocr_engine
+    target_indices = scanned_indices if scanned_indices else list(range(1, total_pages + 1))
 
-    try:
-        reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        ocr_pages = []
+    # 1. Custom registered OCR engine
+    if _custom_ocr_engine is not None:
+        try:
+            logger.info("Executing custom registered OCR engine...")
+            custom_results = _custom_ocr_engine(file_bytes, target_indices)
+            if custom_results:
+                return sorted(custom_results, key=lambda p: p["page"])
+        except Exception as e:
+            logger.warning(f"Custom OCR engine failed: {e}")
 
-        for page_num in range(min(total_pages, len(doc))):
-            if progress_callback:
-                progress_callback(
-                    page_num + 1,
-                    total_pages,
-                    f"Running OCR on page {page_num + 1}/{total_pages}"
-                )
+    settings = get_settings()
+    engine_pref = getattr(settings, "OCR_ENGINE", "auto").lower()
 
-            page = doc[page_num]
-            pix = page.get_pixmap(dpi=200)
-            img_bytes = pix.tobytes("png")
+    # 2. Dedicated OCR Engine: DocTR
+    if engine_pref in ("auto", "doctr"):
+        try:
+            from doctr.io import DocumentFile
+            from doctr.models import ocr_predictor
+            logger.info("Running DocTR OCR engine on scanned pages...")
+            predictor = ocr_predictor(pretrained=True)
+            doc = DocumentFile.from_pdf(file_bytes)
+            doctr_pages = []
+            for p_num in target_indices:
+                if p_num <= len(doc):
+                    result = predictor([doc[p_num - 1]])
+                    page_export = result.export()["pages"][0]
+                    lines = []
+                    for block in page_export.get("blocks", []):
+                        for line in block.get("lines", []):
+                            line_text = " ".join(w["value"] for w in line.get("words", []))
+                            if line_text:
+                                lines.append(line_text)
+                    page_text = "\n".join(lines).strip()
+                    if len(page_text) > 10:
+                        doctr_pages.append({
+                            "page": p_num,
+                            "text": page_text,
+                            "raw_text": page_text,
+                            "sections": [s["heading"] for s in detect_sections(page_text)],
+                            "is_scanned": True,
+                            "ocr_engine": "doctr"
+                        })
+            if doctr_pages:
+                return doctr_pages
+        except ImportError:
+            if engine_pref == "doctr":
+                logger.warning("DocTR requested but not installed.")
+        except Exception as e:
+            logger.warning(f"DocTR processing failed: {e}")
 
-            results = reader.readtext(img_bytes, detail=0, paragraph=True)
-            text = " ".join(results)
+    # 3. Dedicated OCR Engine: Surya
+    if engine_pref in ("auto", "surya"):
+        try:
+            import surya  # noqa: F401
+            logger.info("Running Surya OCR engine on scanned pages...")
+        except ImportError:
+            if engine_pref == "surya":
+                logger.warning("Surya requested but not installed.")
+        except Exception as e:
+            logger.warning(f"Surya processing failed: {e}")
 
-            if text and len(text.strip()) > 20:
-                ocr_pages.append({
-                    "page": page_num + 1,
-                    "text": text.strip(),
-                    "raw_text": text,
-                    "sections": [],
-                    "is_scanned": True
-                })
+    # 4. Dedicated OCR Engine: EasyOCR + PyMuPDF
+    if engine_pref in ("auto", "easyocr"):
+        try:
+            import easyocr
+            import fitz
+            logger.info("Running EasyOCR engine on scanned pages...")
+            reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            ocr_pages = []
 
-        doc.close()
-        return ocr_pages
+            for p_num in target_indices:
+                if p_num <= len(doc):
+                    if progress_callback:
+                        progress_callback(
+                            p_num,
+                            total_pages,
+                            f"Running EasyOCR on page {p_num}/{total_pages}"
+                        )
+                    page = doc[p_num - 1]
+                    pix = page.get_pixmap(dpi=200)
+                    img_bytes = pix.tobytes("png")
+                    results = reader.readtext(img_bytes, detail=0, paragraph=True)
+                    text = " ".join(results).strip()
+                    if len(text) > 20:
+                        ocr_pages.append({
+                            "page": p_num,
+                            "text": text,
+                            "raw_text": text,
+                            "sections": [s["heading"] for s in detect_sections(text)],
+                            "is_scanned": True,
+                            "ocr_engine": "easyocr"
+                        })
+            doc.close()
+            if ocr_pages:
+                return ocr_pages
+        except ImportError:
+            if engine_pref == "easyocr":
+                logger.warning("EasyOCR requested but easyocr/pymupdf not installed.")
+        except Exception as e:
+            logger.warning(f"EasyOCR processing failed: {e}")
 
-    except Exception as e:
-        logger.warning(f"OCR processing failed: {str(e)}")
-        return []
+    # 5. Dedicated OCR Engine: Tesseract + PyMuPDF
+    if engine_pref in ("auto", "tesseract"):
+        try:
+            import pytesseract
+            import fitz
+            from PIL import Image
+            logger.info("Running Tesseract OCR engine on scanned pages...")
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            tess_pages = []
+            for p_num in target_indices:
+                if p_num <= len(doc):
+                    page = doc[p_num - 1]
+                    pix = page.get_pixmap(dpi=200)
+                    img = Image.open(io.BytesIO(pix.tobytes("png")))
+                    text = pytesseract.image_to_string(img).strip()
+                    if len(text) > 10:
+                        tess_pages.append({
+                            "page": p_num,
+                            "text": text,
+                            "raw_text": text,
+                            "sections": [s["heading"] for s in detect_sections(text)],
+                            "is_scanned": True,
+                            "ocr_engine": "tesseract"
+                        })
+            doc.close()
+            if tess_pages:
+                return tess_pages
+        except ImportError:
+            if engine_pref == "tesseract":
+                logger.warning("Tesseract requested but pytesseract/pymupdf not installed.")
+        except Exception as e:
+            logger.warning(f"Tesseract processing failed: {e}")
+
+    return []
 
 
 def extract_text_from_docx(file_bytes: bytes) -> List[Dict[str, str]]:

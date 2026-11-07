@@ -16,6 +16,8 @@ from pdf_processor import (
     _chunk_table_atomically,
     _is_table_line,
     register_vision_transcriber,
+    register_ocr_engine,
+    _optimize_image_for_ocr,
 )
 
 
@@ -313,6 +315,198 @@ class TestPDFProcessor:
             assert pages[0]["ocr_engine"] == "multimodal_vision"
             assert "CONFIDENTIAL AUDIT REPORT" in pages[0]["text"]
             assert "| Total Revenue | $ 125,000 | $ 98,000 |" in pages[0]["text"]
+        finally:
+            register_vision_transcriber(None)
+
+    def test_multimodal_vision_parallel_batch_processing(self):
+        """Verify that multi-page scanned filings process pages concurrently and maintain strict page order."""
+        import io
+        import time
+        import threading
+        from PIL import Image
+
+        # Create 6-page scanned PDF
+        images = [Image.new("RGB", (100, 100), color=(i * 35, 120, 150)) for i in range(6)]
+        buf = io.BytesIO()
+        images[0].save(buf, format="PDF", save_all=True, append_images=images[1:])
+        scanned_pdf_bytes = buf.getvalue()
+
+        thread_ids = set()
+        lock = threading.Lock()
+
+        def mock_concurrent_vision(img_bytes: bytes, page_num: int) -> str:
+            with lock:
+                thread_ids.add(threading.get_ident())
+            time.sleep(0.04)
+            return f"Transcribed content for scanned page {page_num}\n\n1. Heading {page_num}\nDetails here."
+
+        register_vision_transcriber(mock_concurrent_vision)
+        try:
+            pages = extract_text_from_file(scanned_pdf_bytes, filename="multipage_scanned_filing.pdf")
+            assert len(pages) == 6
+            # Strict ordering must be guaranteed
+            page_numbers = [p["page"] for p in pages]
+            assert page_numbers == [1, 2, 3, 4, 5, 6]
+            # Multiple worker threads must have been utilized concurrently
+            assert len(thread_ids) > 1
+            for p in pages:
+                assert p["is_scanned"] is True
+                assert p["ocr_engine"] == "multimodal_vision"
+                assert f"Transcribed content for scanned page {p['page']}" in p["text"]
+        finally:
+            register_vision_transcriber(None)
+
+    def test_image_optimization_downscales_oversized_scan(self):
+        """Verify that oversized scans (>1800px) are downscaled and JPEG-compressed to minimize transmission latency."""
+        import io
+        from PIL import Image
+
+        # Create oversized 3000x2400 uncompressed test scan
+        oversized = Image.new("RGB", (3000, 2400), color=(240, 240, 240))
+        raw_buf = io.BytesIO()
+        oversized.save(raw_buf, format="PNG")
+        raw_bytes = raw_buf.getvalue()
+
+        optimized_bytes = _optimize_image_for_ocr(raw_bytes, max_dim=1800)
+        assert len(optimized_bytes) > 0
+        assert len(optimized_bytes) < len(raw_bytes)
+
+        # Inspect resulting dimensions
+        opt_img = Image.open(io.BytesIO(optimized_bytes))
+        assert max(opt_img.size) <= 1800
+        assert opt_img.format == "JPEG"
+
+    def test_dedicated_ocr_engine_registration_and_priority(self):
+        """Verify that dedicated OCR engines (e.g. DocTR, Surya) can be registered and take precedence over vision."""
+        import io
+        from PIL import Image
+
+        img = Image.new("RGB", (200, 200), color=(255, 255, 255))
+        buf = io.BytesIO()
+        img.save(buf, format="PDF")
+        scanned_pdf_bytes = buf.getvalue()
+
+        called_ocr_engine = False
+
+        def mock_dedicated_ocr(file_bytes: bytes, target_indices: list) -> list:
+            nonlocal called_ocr_engine
+            called_ocr_engine = True
+            assert len(file_bytes) > 0
+            assert target_indices == [1]
+            return [{
+                "page": 1,
+                "text": "DocTR / Surya High-Speed Local OCR Output",
+                "raw_text": "DocTR / Surya High-Speed Local OCR Output",
+                "sections": [],
+                "is_scanned": True,
+                "ocr_engine": "dedicated_engine"
+            }]
+
+        register_ocr_engine(mock_dedicated_ocr)
+        try:
+            pages = extract_text_from_file(scanned_pdf_bytes, filename="doctr_scanned.pdf")
+            assert called_ocr_engine is True
+            assert len(pages) == 1
+            assert pages[0]["ocr_engine"] == "dedicated_engine"
+            assert "DocTR / Surya High-Speed Local OCR Output" in pages[0]["text"]
+        finally:
+            register_ocr_engine(None)
+
+    def test_mixed_digital_and_scanned_pdf_interleaving(self):
+        """Verify that PDFs with mixed digital text and scanned image pages interleave in exact order."""
+        import io
+        from PIL import Image
+        import pypdf
+
+        # Minimal valid PDF page with digital text stream
+        raw_text_pdf = b"""%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length 55 >>
+stream
+BT
+/F1 12 Tf
+72 200 Td
+(Digital Text Page Content Here) Tj
+ET
+endstream
+endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000230 00000 n 
+0000000336 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+407
+%%EOF"""
+
+        # Scanned image for page 2
+        img = Image.new("RGB", (200, 300), color=(255, 0, 0))
+        img_buf = io.BytesIO()
+        img.save(img_buf, format="PDF")
+
+        # Assemble 3-page document: Page 1 (digital), Page 2 (scanned), Page 3 (digital)
+        writer = pypdf.PdfWriter()
+        writer.add_page(pypdf.PdfReader(io.BytesIO(raw_text_pdf)).pages[0])
+        writer.add_page(pypdf.PdfReader(img_buf).pages[0])
+        writer.add_page(pypdf.PdfReader(io.BytesIO(raw_text_pdf)).pages[0])
+
+        out_buf = io.BytesIO()
+        writer.write(out_buf)
+        mixed_pdf_bytes = out_buf.getvalue()
+
+        def mock_vision(img_bytes: bytes, page_num: int) -> str:
+            assert page_num == 2
+            return "Transcribed Scanned Exhibit Table on Page 2"
+
+        register_vision_transcriber(mock_vision)
+        try:
+            pages = extract_text_from_file(mixed_pdf_bytes, filename="mixed_filing.pdf")
+            assert len(pages) == 3
+            assert pages[0]["page"] == 1
+            assert pages[0]["is_scanned"] is False
+            assert "Digital Text" in pages[0]["text"]
+
+            assert pages[1]["page"] == 2
+            assert pages[1]["is_scanned"] is True
+            assert "Transcribed Scanned Exhibit" in pages[1]["text"]
+
+            assert pages[2]["page"] == 3
+            assert pages[2]["is_scanned"] is False
+            assert "Digital Text" in pages[2]["text"]
+        finally:
+            register_vision_transcriber(None)
+
+    def test_vision_worker_partial_failure_resilience(self):
+        """Verify that transient failures on one page do not prevent other pages from completing."""
+        import io
+        from PIL import Image
+
+        images = [Image.new("RGB", (100, 100), color=(i * 40, 100, 100)) for i in range(3)]
+        buf = io.BytesIO()
+        images[0].save(buf, format="PDF", save_all=True, append_images=images[1:])
+        scanned_pdf_bytes = buf.getvalue()
+
+        def mock_failing_vision(img_bytes: bytes, page_num: int) -> str:
+            if page_num == 2:
+                # Page 2 fails
+                raise RuntimeError("Simulated API rate limit error on page 2")
+            return f"Transcribed page {page_num} successfully"
+
+        register_vision_transcriber(mock_failing_vision)
+        try:
+            pages = extract_text_from_file(scanned_pdf_bytes, filename="partial_failure.pdf")
+            # Pages 1 and 3 should be successfully extracted
+            assert len(pages) == 2
+            assert [p["page"] for p in pages] == [1, 3]
+            assert "Transcribed page 1" in pages[0]["text"]
+            assert "Transcribed page 3" in pages[1]["text"]
         finally:
             register_vision_transcriber(None)
 
