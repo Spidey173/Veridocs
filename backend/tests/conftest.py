@@ -169,7 +169,7 @@ def sample_chunks():
     """Sample chunked documents for vector search & reranker tests."""
     return [
         {
-            "text": "Veridocs provides two-stage retrieval using FAISS and Cross-Encoder.",
+            "text": "Veridocs provides two-stage retrieval using pgvector HNSW and Cross-Encoder.",
             "page": 1,
             "source_file": "doc1.pdf",
             "section": "Architecture",
@@ -195,7 +195,7 @@ def mock_llm_service(monkeypatch):
     from llm_service import FreeLLMService
 
     def mock_generate_answer(self, question, chunks, history=None):
-        return f"Based on the provided context [Page 1], Veridocs uses FAISS and Cross-Encoder."
+        return f"Based on the provided context [Page 1], Veridocs uses pgvector HNSW and Cross-Encoder."
 
     def mock_generate_summary(self, content):
         return {

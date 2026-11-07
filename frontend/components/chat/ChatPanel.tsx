@@ -413,12 +413,12 @@ A 99.5% uptime commitment permits up to **3.6 hours of uncredited downtime per m
               source_file: "Veridocs_Technical_Architecture.pdf",
             },
           ];
-        } else if (lower.includes("hybrid") || lower.includes("bm25") || lower.includes("faiss") || lower.includes("search")) {
-          answerText = `Veridocs implements a two-stage **Hybrid Retrieval Engine** fusing lexical indexing with dense semantic vector representations:
+        } else if (lower.includes("hybrid") || lower.includes("bm25") || lower.includes("search") || lower.includes("pgvector")) {
+          answerText = `Veridocs implements a two-stage **Hybrid Retrieval Engine** fusing PostgreSQL full-text indexing with dense semantic vector representations:
 
-1. **BM25 Lexical Indexing:** Excels at exact keyword queries, alphanumeric IDs, section headers (*"Section 4.1"*), and monetary figures (*"$1,000,000"*).
-2. **FAISS Dense Vector Search:** Captures conceptual intent using FastEmbed ONNX embeddings (\`bge-small-en-v1.5\`), operating entirely on CPU with ~70MB RAM.
-3. **Reciprocal Rank Fusion (RRF):** Fuses ranking scores across both candidate lists using rank reciprocal constants ($k=60$), ensuring balanced retrieval without vector drift.`;
+1. **PostgreSQL Full-Text Search:** Excels at exact keyword queries, alphanumeric IDs, section headers (*"Section 4.1"*), and monetary figures (*"$1,000,000"*).
+2. **PostgreSQL pgvector HNSW Search:** Captures conceptual intent using FastEmbed embeddings and native pgvector HNSW cosine similarity.
+3. **Reciprocal Rank Fusion (RRF):** Fuses ranking scores across dense and sparse candidate lists using rank reciprocal constants ($k=60$) directly in PostgreSQL.`;
           demoCitations = [
             {
               citation_id: 1,
@@ -538,7 +538,7 @@ A 99.5% uptime commitment permits up to **3.6 hours of uncredited downtime per m
             answer_relevance: 0.97,
             numeric_accuracy: 1.0,
             latency_ms: 215.0,
-            retrieval_pipeline: "Hybrid BM25 + FAISS + Cross-Encoder RRF",
+            retrieval_pipeline: "Hybrid Full-Text + pgvector HNSW + Cross-Encoder RRF",
           },
           claim_verifications: demoClaims,
         });

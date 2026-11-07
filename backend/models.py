@@ -94,7 +94,7 @@ class RagTriadMetrics(BaseModel):
     answer_relevance: float = Field(default=0.0, description="How well the answer addresses the question")
     numeric_accuracy: float = Field(default=1.0, description="Accuracy of numbers and dates")
     latency_ms: Optional[float] = None
-    retrieval_pipeline: Optional[str] = "Hybrid BM25 + FAISS"
+    retrieval_pipeline: Optional[str] = "Hybrid Full-Text + pgvector HNSW"
 
 
 class QueryResponse(BaseModel):

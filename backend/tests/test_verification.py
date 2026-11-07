@@ -23,7 +23,7 @@ class TestVerification:
     def test_calculate_grounding_score_grounded(self, sample_chunks):
         """Verify high confidence score for answer matching source chunks."""
         answer = (
-            "Veridocs provides two-stage retrieval using FAISS and Cross-Encoder. "
+            "Veridocs provides two-stage retrieval using pgvector HNSW and Cross-Encoder. "
             "Q3 2024 revenue reached $2.5 million representing a 35% increase."
         )
         score_info = calculate_grounding_score(answer, sample_chunks)
@@ -43,7 +43,7 @@ class TestVerification:
 
     def test_extract_citations_from_answer(self, sample_chunks):
         """Verify [Page X] extraction and mapping to chunks."""
-        answer = "Veridocs uses FAISS [Page 1] and verification [Page 2]."
+        answer = "Veridocs uses pgvector [Page 1] and verification [Page 2]."
         citations = extract_citations_from_answer(answer, sample_chunks)
 
         assert len(citations) == 2

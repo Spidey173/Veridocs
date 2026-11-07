@@ -9,9 +9,9 @@ from fastapi import BackgroundTasks
 
 from celery_app import celery_app, is_celery_broker_reachable
 from job_tracker import get_job_tracker
-from config import get_settings
+from config import get_settings, get_model_registry
 from pdf_processor import extract_text_from_file, chunk_text
-from vector_store import VectorStore
+import database
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -115,47 +115,33 @@ def process_document_job(
         tracker.update_progress(
             job_id,
             percent=75.0,
-            stage="Building vector index...",
+            stage="Generating vector embeddings...",
             chunks_created=len(all_chunks),
             total_pages=total_pages_count,
             scanned_pages=total_scanned_count
         )
 
-        vector_store = VectorStore()
-        vector_store.add_documents(all_chunks)
+        reg = get_model_registry()
+        chunk_texts = [c["text"] for c in all_chunks]
+        embeddings = reg.embedding_model.encode(
+            chunk_texts,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+            batch_size=settings.EMBEDDING_BATCH_SIZE
+        )
 
         if not session_id:
             session_id = str(uuid.uuid4())
 
-        # Save session to disk
         tracker.update_progress(
             job_id,
             percent=90.0,
-            stage="Saving session to disk..."
+            stage="Saving session to PostgreSQL..."
         )
 
-        session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
-        vector_store.save_to_disk(session_dir)
-
-        session_meta = {
-            "session_id": session_id,
-            "file_paths": file_paths,
-            "file_names": file_names,
-            "metadata": doc_metadata,
-            "created_at": time.time(),
-            "owner_id": owner_id,
-            "total_pages": total_pages_count,
-            "scanned_pages": total_scanned_count,
-            "is_async_job": True,
-            "job_id": job_id
-        }
-        with open(session_dir / "session.json", "w", encoding="utf-8") as f:
-            json.dump(session_meta, f, indent=2)
-
+        # Persist session and chunks directly to PostgreSQL
         try:
             import asyncio
-            import database
             if database.is_database_configured():
                 async def _save_to_db():
                     await database.init_db()
@@ -168,8 +154,7 @@ def process_document_job(
                         insights={},
                         created_at=time.time()
                     )
-                    if hasattr(vector_store, "embeddings") and vector_store.embeddings is not None:
-                        await database.save_chunks(session_id, all_chunks, vector_store.embeddings)
+                    await database.save_chunks(session_id, all_chunks, embeddings)
 
                 try:
                     loop = asyncio.get_event_loop()
@@ -182,10 +167,10 @@ def process_document_job(
         except Exception as e:
             logger.debug(f"Could not persist async job session to database: {e}")
 
+        # Update session cache
         try:
             import main
             main.sessions[session_id] = {
-                "vector_store": vector_store,
                 "chunks": all_chunks,
                 "file_paths": file_paths,
                 "file_names": file_names,

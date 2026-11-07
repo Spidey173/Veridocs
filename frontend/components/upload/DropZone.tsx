@@ -61,7 +61,7 @@ export default function DropZone() {
           if (currentPct >= 50 && currentPct < 80) {
             stage = "Generating FastEmbed vectors & neural embeddings...";
           } else if (currentPct >= 80) {
-            stage = "Finalizing hybrid BM25 + FAISS structures...";
+            stage = "Finalizing hybrid FTS + pgvector HNSW structures...";
           }
           setUploadProgress(Math.min(currentPct, 95), stage);
         }
@@ -274,7 +274,7 @@ export default function DropZone() {
         key_findings: [
           "Cross-Document Contradiction Engine detects covenant modifications, numerical discrepancies, and liability changes across multiple files.",
           "Pixel-Level Visual Grounding highlights exact text coordinates on the PDF canvas for both citations and conflicting clauses.",
-          "Two-stage hybrid retrieval (BM25 + FAISS via RRF) and cross-encoder re-ranking eliminate hallucinated answers.",
+          "Two-stage hybrid retrieval (PostgreSQL FTS + pgvector HNSW via RRF) and cross-encoder re-ranking eliminate hallucinated answers.",
         ],
         risks: [
           "Contract amendments often subtly weaken liability caps and extend payment windows without explicit redlines.",
@@ -340,7 +340,7 @@ export default function DropZone() {
         answer_relevance: 0.96,
         numeric_accuracy: 1.0,
         latency_ms: 185.0,
-        retrieval_pipeline: "Hybrid BM25 + FAISS + Cross-Encoder RRF"
+        retrieval_pipeline: "Hybrid Full-Text + pgvector HNSW + Cross-Encoder RRF"
       },
       claim_verifications: [
         {

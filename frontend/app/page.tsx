@@ -110,7 +110,7 @@ function LandingScreen() {
           className="flex flex-wrap items-center justify-center gap-2.5 mt-8"
         >
           {[
-            { icon: <Search className="w-3.5 h-3.5 text-accent-primary" />, text: "Hybrid Search (BM25 + FAISS)" },
+            { icon: <Search className="w-3.5 h-3.5 text-accent-primary" />, text: "Hybrid Search (FTS + pgvector HNSW)" },
             { icon: <Layers className="w-3.5 h-3.5 text-accent-primary" />, text: "Neural Re-Ranking" },
             { icon: <Shield className="w-3.5 h-3.5 text-emerald-400" />, text: "Lexical & Numeric Grounding" },
             { icon: <Zap className="w-3.5 h-3.5 text-accent-secondary" />, text: "RAG Triad Telemetry" },

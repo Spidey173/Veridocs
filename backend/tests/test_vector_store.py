@@ -1,53 +1,18 @@
 """
-Unit tests for vector_store.py BM25, RRF, and hybrid VectorStore.
+Unit tests for vector_store.py: Query caching, embedding normalization, and Reciprocal Rank Fusion.
 """
 
-
-
 import numpy as np
-from vector_store import BM25, reciprocal_rank_fusion, VectorStore
-
-
-class TestBM25:
-    def test_tokenize(self):
-        """Verify tokenization removes punctuation and short tokens."""
-        text = "Hello, world! This is a test."
-        tokens = BM25._tokenize(text)
-        assert "hello" in tokens
-        assert "world" in tokens
-        assert "test" in tokens
-        assert "a" not in tokens  # 1-char token skipped
-
-    def test_fit_and_search(self):
-        """Verify BM25 corpus indexing and keyword search."""
-        corpus = [
-            "Veridocs uses FAISS for vector search.",
-            "Cross-Encoder reranks the candidate chunks.",
-            "Post-generation verification validates claim grounding.",
-            "The quick brown fox jumps over the lazy dog.",
-        ]
-        bm25 = BM25()
-        bm25.fit(corpus)
-
-        assert bm25.doc_count == 4
-        assert bm25.avg_doc_len > 0
-        assert "faiss" in bm25.doc_freqs
-
-        # Search for exact keyword
-        results = bm25.search("faiss search", k=2)
-        assert len(results) > 0
-        # First result should be doc 0
-        top_doc_idx, top_score = results[0]
-        assert top_doc_idx == 0
-        assert top_score > 0
-
-    def test_search_unknown_terms(self):
-        """Verify BM25 search with words not in the index."""
-        bm25 = BM25()
-        bm25.fit(["apple orange banana"])
-        results = bm25.search("zebra dinosaur", k=3)
-        # Scores should be 0.0
-        assert all(score == 0.0 for _, score in results)
+from unittest.mock import MagicMock
+from vector_store import (
+    get_query_embedding,
+    reciprocal_rank_fusion,
+    _get_cached_query_embedding,
+    _set_cached_query_embedding,
+    _QUERY_CACHE,
+    _QUERY_CACHE_LOCK,
+    _MAX_QUERY_CACHE_SIZE,
+)
 
 
 class TestRRF:
@@ -63,44 +28,58 @@ class TestRRF:
         assert top_doc in (0, 1)
         assert top_score > 0
 
+    def test_reciprocal_rank_fusion_empty(self):
+        """Verify RRF handles empty ranking lists cleanly."""
+        fused = reciprocal_rank_fusion([], weights=[])
+        assert fused == []
 
-class TestVectorStore:
-    def test_add_and_search(self, sample_chunks, patch_models):
-        """Verify adding documents and performing hybrid search."""
-        store = VectorStore()
-        store.add_documents(sample_chunks)
+    def test_reciprocal_rank_fusion_weights(self):
+        """Verify weighted RRF prioritizes higher-weighted ranking list."""
+        list1 = [(0, 0.9)]
+        list2 = [(1, 0.9)]
+        # list1 heavily weighted
+        fused = reciprocal_rank_fusion([list1, list2], weights=[10.0, 1.0], k=60)
+        assert fused[0][0] == 0
 
-        assert store.index is not None
-        assert store.index.ntotal == len(sample_chunks)
-        assert len(store.chunks) == len(sample_chunks)
 
-        # Query relevant to chunk 0
-        results = store.search("FAISS retrieval", k=2)
-        assert len(results) > 0
-        assert "text" in results[0]
-        assert "relevance_score" in results[0]
-        assert "source_file" in results[0]
+class TestQueryCache:
+    def test_cache_set_and_get(self):
+        """Verify query embedding cache stores and retrieves arrays correctly."""
+        vec = np.random.randn(384).astype(np.float32)
+        _set_cached_query_embedding("test query", vec)
+        retrieved = _get_cached_query_embedding("test query")
+        assert retrieved is not None
+        np.testing.assert_allclose(retrieved, vec)
 
-    def test_search_empty_store(self, patch_models):
-        """Verify search on unindexed store returns empty list."""
-        store = VectorStore()
-        results = store.search("anything", k=5)
-        assert results == []
+    def test_cache_miss_returns_none(self):
+        """Verify cache miss returns None."""
+        assert _get_cached_query_embedding("non_existent_key_12345") is None
 
-    def test_add_empty_chunks(self, patch_models):
-        """Verify adding empty chunk list does not break store."""
-        store = VectorStore()
-        store.add_documents([])
-        assert store.index is None
-        assert len(store.chunks) == 0
+    def test_cache_eviction_at_max_size(self):
+        """Verify LRU eviction when cache exceeds max size."""
+        with _QUERY_CACHE_LOCK:
+            _QUERY_CACHE.clear()
 
-    def test_add_documents_with_precomputed_embeddings(self, sample_chunks):
-        """Verify indexing with precomputed embeddings bypasses embedding model."""
-        store = VectorStore()
-        # Mock 384-dimensional normalized embeddings
-        fake_embs = np.random.randn(len(sample_chunks), 384).astype(np.float32)
-        store.add_documents(sample_chunks, embeddings=fake_embs)
+        # Fill cache to limit
+        for i in range(_MAX_QUERY_CACHE_SIZE + 5):
+            vec = np.array([float(i)], dtype=np.float32)
+            _set_cached_query_embedding(f"key_{i}", vec)
 
-        assert store.index is not None
-        assert store.index.ntotal == len(sample_chunks)
-        assert len(store.chunks) == len(sample_chunks)
+        with _QUERY_CACHE_LOCK:
+            assert len(_QUERY_CACHE) <= _MAX_QUERY_CACHE_SIZE
+
+
+class TestGetQueryEmbedding:
+    def test_get_query_embedding_normalized(self, patch_models):
+        """Verify get_query_embedding returns an L2-normalized vector."""
+        vec = get_query_embedding("What are the quarterly financial results?")
+        assert isinstance(vec, np.ndarray)
+        assert vec.shape == (384,)
+        norm = np.linalg.norm(vec)
+        assert np.isclose(norm, 1.0, atol=1e-4)
+
+    def test_get_query_embedding_uses_cache(self, patch_models):
+        """Verify subsequent calls return cached embedding without re-invoking model."""
+        vec1 = get_query_embedding("repeatable search string")
+        vec2 = get_query_embedding("repeatable search string")
+        np.testing.assert_array_equal(vec1, vec2)

@@ -168,7 +168,7 @@ def calculate_rag_triad_metrics(
             "answer_relevance": 0.0,
             "numeric_accuracy": 1.0,
             "latency_ms": latency_ms,
-            "retrieval_pipeline": "Hybrid BM25 + FAISS"
+            "retrieval_pipeline": "Hybrid Full-Text + pgvector HNSW"
         }
 
     # Groundedness
@@ -206,7 +206,7 @@ def calculate_rag_triad_metrics(
         "answer_relevance": round(min(1.0, max(0.1, answer_relevance)), 3),
         "numeric_accuracy": round(numeric_accuracy, 3),
         "latency_ms": round(latency_ms, 1) if latency_ms is not None else None,
-        "retrieval_pipeline": "Hybrid BM25 + FAISS"
+        "retrieval_pipeline": "Hybrid Full-Text + pgvector HNSW"
     }
 
 

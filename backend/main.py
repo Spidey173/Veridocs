@@ -40,7 +40,7 @@ from pdf_processor import (
     chunk_text,
 )
 import database
-from vector_store import VectorStore
+from vector_store import get_query_embedding
 from reranker import rerank_chunks
 from llm_service import FreeLLMService
 from conversation import get_conversation_manager
@@ -273,11 +273,11 @@ def _generate_insights_background(session_id: str, chunks_by_file: Dict, doc_met
         logger.error(f"Background insights generation failed: {e}", exc_info=True)
 
 
-def _persist_session_background(session_id: str, vector_store: VectorStore, saved_paths: List[str], file_names: List[str], doc_metadata: List[Dict], owner_id: str):
-    """Save session to disk."""
+def _persist_session_background(session_id: str, saved_paths: List[str], file_names: List[str], doc_metadata: List[Dict], owner_id: str):
+    """Save session metadata to disk for file management."""
     try:
         session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
-        vector_store.save_to_disk(session_dir)
+        session_dir.mkdir(parents=True, exist_ok=True)
         session_meta = {
             "session_id": session_id,
             "file_paths": saved_paths,
@@ -287,7 +287,7 @@ def _persist_session_background(session_id: str, vector_store: VectorStore, save
             "owner_id": owner_id,
         }
         with open(session_dir / "session.json", "w", encoding="utf-8") as f:
-            json.dump(session_meta, f)
+            json.dump(session_meta, f, indent=2)
         logger.info(f"Saved session {session_id} to disk")
     except Exception as e:
         logger.warning(f"Could not persist session {session_id} to disk: {e}")
@@ -409,9 +409,15 @@ async def upload_documents(
             all_chunks = existing_session.get("chunks", []) + all_chunks
             existing_insights = existing_session.get("insights", {})
 
-        # Create vector store
-        vector_store = VectorStore()
-        vector_store.add_documents(all_chunks)
+        # Generate embeddings for chunks
+        reg = get_model_registry()
+        chunk_texts = [c["text"] for c in all_chunks]
+        embeddings = reg.embedding_model.encode(
+            chunk_texts,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+            batch_size=settings.EMBEDDING_BATCH_SIZE
+        )
 
         with _sessions_lock:
             if not session_id or session_id not in sessions:
@@ -424,8 +430,8 @@ async def upload_documents(
                 chunks_by_file[fn].append(chunk)
 
             sessions[session_id] = {
-                "vector_store": vector_store,
                 "chunks": all_chunks,
+                "embeddings": embeddings,
                 "file_paths": saved_paths,
                 "file_names": file_names,
                 "metadata": doc_metadata,
@@ -450,8 +456,7 @@ async def upload_documents(
                     insights=existing_insights,
                     created_at=time.time()
                 )
-                if hasattr(vector_store, "embeddings") and vector_store.embeddings is not None:
-                    await database.save_chunks(session_id, all_chunks, vector_store.embeddings)
+                await database.save_chunks(session_id, all_chunks, embeddings)
             except Exception as e:
                 logger.error(f"Failed to persist session {session_id} to PostgreSQL: {e}")
 
@@ -459,7 +464,6 @@ async def upload_documents(
         background_tasks.add_task(
             _persist_session_background,
             session_id=session_id,
-            vector_store=vector_store,
             saved_paths=saved_paths,
             file_names=file_names,
             doc_metadata=doc_metadata,
@@ -697,7 +701,6 @@ async def answer_query(
     """Answer a question using uploaded documents."""
     enforce_rate_limit(http_request, "query", max_requests=settings.QUERY_RATE_LIMIT, window_seconds=60)
     session_data = await _get_session(request.session_id, current_user)
-    vector_store = session_data["vector_store"]
     question = request.question.strip()
 
     _validate_question(question)
@@ -705,12 +708,11 @@ async def answer_query(
     conversation = get_conversation_manager()
 
     try:
-        # Retrieve candidates (in-memory FAISS/BM25, or PostgreSQL pgvector hybrid search)
-        if vector_store and vector_store.index is not None:
-            candidates = vector_store.search(question, k=settings.RETRIEVAL_INITIAL_K)
-        elif database.is_database_configured():
-            reg = get_model_registry()
-            q_emb = reg.embedding_model.encode([question], convert_to_numpy=True)[0]
+        # Retrieve candidates via PostgreSQL pgvector hybrid search
+        q_emb = get_query_embedding(question)
+        candidates = []
+
+        if database.is_database_configured():
             candidates = await database.hybrid_search_postgres(
                 session_id=request.session_id,
                 query=question,
@@ -720,8 +722,26 @@ async def answer_query(
                 bm25_weight=settings.BM25_WEIGHT,
                 active_files=request.active_files or None
             )
-        else:
-            candidates = []
+        elif "chunks" in session_data and session_data["chunks"]:
+            # Fallback for testing when PostgreSQL is not configured
+            session_chunks = session_data["chunks"]
+            session_embs = session_data.get("embeddings")
+            if session_embs is not None and len(session_embs) == len(session_chunks):
+                q_norm = np.linalg.norm(q_emb)
+                q_unit = q_emb / (q_norm if q_norm > 0 else 1.0)
+                emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
+                emb_norms[emb_norms == 0] = 1.0
+                normed_embs = session_embs / emb_norms
+                scores = np.dot(normed_embs, q_unit)
+                ranked_indices = np.argsort(scores)[::-1][:settings.RETRIEVAL_INITIAL_K]
+                for idx in ranked_indices:
+                    chunk_copy = dict(session_chunks[idx])
+                    chunk_copy["relevance_score"] = float(round(scores[idx], 4))
+                    chunk_copy["dense_score"] = float(round(scores[idx], 4))
+                    chunk_copy["bm25_score"] = 0.0
+                    candidates.append(chunk_copy)
+            else:
+                candidates = list(session_chunks[:settings.RETRIEVAL_INITIAL_K])
 
         if request.active_files is not None:
             candidates = [c for c in candidates if c.get("source_file") in request.active_files]
@@ -843,7 +863,6 @@ async def stream_query(
     """Stream answer tokens as Server-Sent Events."""
     enforce_rate_limit(http_request, "stream_query", max_requests=settings.QUERY_RATE_LIMIT, window_seconds=60)
     session_data = await _get_session(request.session_id, current_user)
-    vector_store = session_data["vector_store"]
     question = request.question.strip()
 
     _validate_question(question)
@@ -852,12 +871,11 @@ async def stream_query(
         conversation = get_conversation_manager()
 
         try:
-            # Search relevant chunks (in-memory FAISS/BM25, or PostgreSQL pgvector hybrid search)
-            if vector_store and vector_store.index is not None:
-                candidates = vector_store.search(question, k=settings.RETRIEVAL_INITIAL_K)
-            elif database.is_database_configured():
-                reg = get_model_registry()
-                q_emb = reg.embedding_model.encode([question], convert_to_numpy=True)[0]
+            # Search relevant chunks via PostgreSQL pgvector hybrid search
+            q_emb = get_query_embedding(question)
+            candidates = []
+
+            if database.is_database_configured():
                 candidates = await database.hybrid_search_postgres(
                     session_id=request.session_id,
                     query=question,
@@ -867,8 +885,26 @@ async def stream_query(
                     bm25_weight=settings.BM25_WEIGHT,
                     active_files=request.active_files or None
                 )
-            else:
-                candidates = []
+            elif "chunks" in session_data and session_data["chunks"]:
+                # Fallback for testing when PostgreSQL is not configured
+                session_chunks = session_data["chunks"]
+                session_embs = session_data.get("embeddings")
+                if session_embs is not None and len(session_embs) == len(session_chunks):
+                    q_norm = np.linalg.norm(q_emb)
+                    q_unit = q_emb / (q_norm if q_norm > 0 else 1.0)
+                    emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
+                    emb_norms[emb_norms == 0] = 1.0
+                    normed_embs = session_embs / emb_norms
+                    scores = np.dot(normed_embs, q_unit)
+                    ranked_indices = np.argsort(scores)[::-1][:settings.RETRIEVAL_INITIAL_K]
+                    for idx in ranked_indices:
+                        chunk_copy = dict(session_chunks[idx])
+                        chunk_copy["relevance_score"] = float(round(scores[idx], 4))
+                        chunk_copy["dense_score"] = float(round(scores[idx], 4))
+                        chunk_copy["bm25_score"] = 0.0
+                        candidates.append(chunk_copy)
+                else:
+                    candidates = list(session_chunks[:settings.RETRIEVAL_INITIAL_K])
 
             if request.active_files is not None:
                 candidates = [c for c in candidates if c.get("source_file") in request.active_files]
@@ -1345,20 +1381,38 @@ async def delete_document_from_session(
     if idx < len(file_paths):
         file_paths.pop(idx)
 
-    remaining_chunks = [c for c in session_data.get("chunks", []) if c.get("source_file") != document_name]
+    old_chunks = session_data.get("chunks", [])
+    remaining_chunks = [c for c in old_chunks if c.get("source_file") != document_name]
     session_data["chunks"] = remaining_chunks
     session_data["file_names"] = file_names
     session_data["file_paths"] = file_paths
     session_data.get("insights", {}).pop(document_name, None)
 
-    vector_store = VectorStore()
-    if remaining_chunks:
-        vector_store.add_documents(remaining_chunks)
-    session_data["vector_store"] = vector_store
+    # Filter in-memory embeddings if present
+    if "embeddings" in session_data and session_data["embeddings"] is not None:
+        kept_indices = [i for i, c in enumerate(old_chunks) if c.get("source_file") != document_name]
+        if kept_indices:
+            session_data["embeddings"] = session_data["embeddings"][kept_indices]
+        else:
+            session_data["embeddings"] = None
 
     session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
     if session_dir.exists():
-        vector_store.save_to_disk(session_dir)
+        raw_insights = session_data.get("insights", {})
+        serializable_insights = {
+            k: (v.model_dump() if hasattr(v, "model_dump") else (v.dict() if hasattr(v, "dict") else v))
+            for k, v in raw_insights.items()
+        }
+        session_meta = {
+            "session_id": session_id,
+            "file_paths": file_paths,
+            "file_names": file_names,
+            "metadata": session_data.get("metadata", []),
+            "insights": serializable_insights,
+            "owner_id": current_user.user_id,
+        }
+        with open(session_dir / "session.json", "w", encoding="utf-8") as f:
+            json.dump(session_meta, f, indent=2, default=str)
 
     # Delete chunks for this document from PostgreSQL if configured
     if database.is_database_configured():
@@ -1454,22 +1508,19 @@ async def _get_session(session_id: str, current_user: UserContext) -> Dict:
                 with open(session_meta_file, "r", encoding="utf-8") as f:
                     meta = json.load(f)
 
-                vector_store = VectorStore.load_from_disk(session_dir)
-                if vector_store:
-                    restored_session = {
-                        "vector_store": vector_store,
-                        "chunks": vector_store.chunks,
-                        "file_paths": meta.get("file_paths", []),
-                        "file_names": meta.get("file_names", []),
-                        "metadata": meta.get("metadata", []),
-                        "insights": meta.get("insights", {}),
-                        "created_at": meta.get("created_at", time.time()),
-                        "owner_id": meta.get("owner_id"),
-                    }
-                    with _sessions_lock:
-                        sessions[session_id] = restored_session
-                    session_data = restored_session
-                    logger.info(f"Loaded session {session_id} from disk")
+                restored_session = {
+                    "chunks": [],
+                    "file_paths": meta.get("file_paths", []),
+                    "file_names": meta.get("file_names", []),
+                    "metadata": meta.get("metadata", []),
+                    "insights": meta.get("insights", {}),
+                    "created_at": meta.get("created_at", time.time()),
+                    "owner_id": meta.get("owner_id"),
+                }
+                with _sessions_lock:
+                    sessions[session_id] = restored_session
+                session_data = restored_session
+                logger.info(f"Loaded session {session_id} from disk")
         except Exception as e:
             logger.error(f"Error loading session {session_id} from disk: {e}")
 
@@ -1479,20 +1530,13 @@ async def _get_session(session_id: str, current_user: UserContext) -> Dict:
             db_session = await database.get_session(session_id)
             if db_session:
                 chunks = await database.get_chunks_for_session(session_id, include_embeddings=True)
-                vector_store = VectorStore()
-                if chunks:
-                    has_precomputed = all("embedding" in c and c["embedding"] is not None for c in chunks)
-                    if has_precomputed:
-                        embs = np.array([c.pop("embedding") for c in chunks], dtype=np.float32)
-                        vector_store.add_documents(chunks, embeddings=embs)
-                    else:
-                        for c in chunks:
-                            c.pop("embedding", None)
-                        vector_store.add_documents(chunks)
+                embeddings = None
+                if chunks and all("embedding" in c and c["embedding"] is not None for c in chunks):
+                    embeddings = np.array([c.pop("embedding") for c in chunks], dtype=np.float32)
 
                 restored_session = {
-                    "vector_store": vector_store,
                     "chunks": chunks,
+                    "embeddings": embeddings,
                     "file_paths": db_session.get("file_paths", []),
                     "file_names": db_session.get("file_names", []),
                     "metadata": db_session.get("metadata", []),

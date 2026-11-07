@@ -53,6 +53,6 @@ class TestReranker:
 
     def test_rerank_chunks_helper(self, patch_models, sample_chunks):
         """Verify convenience function rerank_chunks."""
-        result = rerank_chunks("FAISS", sample_chunks, top_k=1)
+        result = rerank_chunks("pgvector", sample_chunks, top_k=1)
         assert len(result) == 1
         assert "rerank_score" in result[0]

@@ -812,7 +812,7 @@ export default function PDFViewer() {
                           </p>
                         </div>
                         <p>
-                          BM25 captures exact lexical entities, codes, and numerical values, while sentence embeddings capture high-level semantic intent. By indexing both sparse inverted token indexes and compressed FAISS vector clusters, the candidate generator achieves high recall across technical terminology and conversational queries.
+                          Full-text search captures exact lexical entities, codes, and numerical values, while sentence embeddings capture high-level semantic intent. By indexing both PostgreSQL full-text tsvector indexes and HNSW pgvector clusters, the candidate generator achieves high recall across technical terminology and conversational queries.
                         </p>
                       </div>
                     )}
