@@ -1,0 +1,30 @@
+# Git and system metadata
+.git/
+.gitignore
+.DS_Store
+
+# Local dependencies and build artifacts
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Local environment variables and secrets
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Playwright E2E test results and cache
+e2e/
+test-results/
+playwright-report/
+blob-report/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

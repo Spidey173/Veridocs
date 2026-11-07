@@ -1,0 +1,36 @@
+# Root .dockerignore for Veridocs
+.git/
+.gitignore
+.DS_Store
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache & coverage
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Sensitive environment variables
+.env
+.env.*
+.env.local
+!.env.example
+
+# Uncommitted demo and local builds
+demo/
+node_modules/
+.next/
+dist/
+out/
+build/
+
+# Uploads & logs
+uploads/
+backend/uploads/
+*.log

@@ -1,0 +1,34 @@
+# Git and system metadata
+.git/
+.gitignore
+.DS_Store
+
+# Python cache and byte-compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Test caches and coverage data
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.log
+
+# Sensitive environment variables and secrets (prevents baking keys into image)
+.env
+.env.*
+!.env.example
+
+# Local uploads and test files
+uploads/
+*.pdf
+*.docx
