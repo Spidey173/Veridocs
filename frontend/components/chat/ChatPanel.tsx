@@ -9,6 +9,7 @@ import {
   User,
   Sparkles,
   MessageSquare,
+  FileText,
 } from "lucide-react";
 import { useAppStore, type ChatMessage } from "@/lib/store";
 import { streamQuery, type CitationInfo, type ClaimVerificationItem, type RagTriadMetrics } from "@/lib/api";
@@ -745,6 +746,12 @@ function MessageBubble({
   animationDelay?: number;
 }) {
   const isUser = message.role === "user";
+  const { setCurrentPage } = useAppStore();
+
+  // Convert inline citations like [Page 1] into clickable anchor links [#page-1]
+  const processedContent = message.content
+    ? message.content.replace(/\[Page\s*(\d+)\](?!\()/gi, "[$&](#page-$1)")
+    : "";
 
   return (
     <motion.div
@@ -754,28 +761,114 @@ function MessageBubble({
       className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}
     >
       {!isUser && (
-        <div className="shrink-0 w-7 h-7 rounded-lg bg-accent-primary/15 flex items-center justify-center mt-0.5">
+        <div className="shrink-0 w-8 h-8 rounded-xl bg-accent-primary/15 border border-accent-primary/25 flex items-center justify-center mt-0.5 shadow-sm">
           <Bot className="w-4 h-4 text-accent-primary" />
         </div>
       )}
 
       <div
         className={`
-          max-w-[85%] rounded-2xl px-4 py-3
+          max-w-[88%] rounded-2xl px-5 py-4 shadow-sm
           ${
             isUser
               ? "bg-accent-primary text-midnight-950 font-semibold rounded-br-md"
-              : "glass rounded-bl-md"
+              : "glass border border-white/10 rounded-bl-md bg-white/[0.03]"
           }
         `}
       >
         {isUser ? (
-          <p className="text-sm leading-relaxed">{message.content}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
         ) : (
           <>
             {message.content ? (
               <div className="text-sm markdown-content">
-                <ReactMarkdown>{message.content}</ReactMarkdown>
+                <ReactMarkdown
+                  components={{
+                    a: ({ href, children }) => {
+                      if (href?.startsWith("#page-")) {
+                        const pageNum = parseInt(href.replace("#page-", ""), 10);
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setCurrentPage(pageNum)}
+                            title={`Jump to Page ${pageNum} in viewer`}
+                            className="inline-flex items-center px-1.5 py-0.5 mx-1 rounded text-xs font-mono font-medium bg-accent-primary/15 text-accent-primary border border-accent-primary/30 hover:bg-accent-primary/25 hover:border-accent-primary/50 cursor-pointer transition-all shadow-sm align-baseline"
+                          >
+                            <FileText className="w-3 h-3 mr-1 inline opacity-85" />
+                            {children}
+                          </button>
+                        );
+                      }
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent-primary underline hover:text-accent-primary/80 transition-colors"
+                        >
+                          {children}
+                        </a>
+                      );
+                    },
+                    h1: ({ children }) => (
+                      <h1 className="text-base font-bold text-text-primary mt-3 mb-1.5 first:mt-0 tracking-tight flex items-center gap-1.5">
+                        {children}
+                      </h1>
+                    ),
+                    h2: ({ children }) => (
+                      <h2 className="text-sm font-semibold text-text-primary mt-3 mb-1 first:mt-0">
+                        {children}
+                      </h2>
+                    ),
+                    h3: ({ children }) => (
+                      <h3 className="text-sm font-semibold text-accent-primary mt-3 mb-1 first:mt-0">
+                        {children}
+                      </h3>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="space-y-1.5 my-2 pl-4 list-disc marker:text-accent-primary/80">
+                        {children}
+                      </ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol className="space-y-1.5 my-2 pl-4 list-decimal marker:text-accent-primary/80">
+                        {children}
+                      </ol>
+                    ),
+                    li: ({ children }) => (
+                      <li className="text-text-secondary leading-relaxed pl-1 text-[13.5px]">
+                        {children}
+                      </li>
+                    ),
+                    p: ({ children }) => (
+                      <p className="mb-2.5 last:mb-0 leading-relaxed text-text-secondary text-[13.5px]">
+                        {children}
+                      </p>
+                    ),
+                    strong: ({ children }) => (
+                      <strong className="font-semibold text-text-primary">{children}</strong>
+                    ),
+                    table: ({ children }) => (
+                      <div className="overflow-x-auto my-3 rounded-lg border border-white/10 bg-white/[0.02]">
+                        <table className="w-full text-left text-xs border-collapse">{children}</table>
+                      </div>
+                    ),
+                    thead: ({ children }) => (
+                      <thead className="bg-white/5 border-b border-white/10 text-text-primary">
+                        {children}
+                      </thead>
+                    ),
+                    th: ({ children }) => <th className="p-2.5 font-semibold text-text-primary">{children}</th>,
+                    td: ({ children }) => <td className="p-2.5 border-b border-white/5 text-text-secondary">{children}</td>,
+                    code: ({ children }) => (
+                      <code className="px-1.5 py-0.5 rounded text-xs font-mono bg-white/10 text-accent-primary font-medium">
+                        {children}
+                      </code>
+                    ),
+                  }}
+                >
+                  {processedContent}
+                </ReactMarkdown>
               </div>
             ) : message.isStreaming ? (
               <div className="flex items-center gap-2 py-1">
@@ -807,7 +900,7 @@ function MessageBubble({
       </div>
 
       {isUser && (
-        <div className="shrink-0 w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center mt-0.5">
+        <div className="shrink-0 w-8 h-8 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center mt-0.5 shadow-sm">
           <User className="w-4 h-4 text-text-secondary" />
         </div>
       )}

@@ -34,7 +34,7 @@ class Settings:
         # API Keys & Endpoints for any LLM Provider
         self.GOOGLE_API_KEY: str = (os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE", "") or os.getenv("google", "")).strip()
         self.GROQ_API_KEY: str = (os.getenv("GROQ_API_KEY", "")).strip()
-        self.GROQ_MODEL: str = (os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")).strip()
+        self.GROQ_MODEL: str = (os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")).strip()
         self.OPENAI_API_KEY: str = (os.getenv("OPENAI_API_KEY", "")).strip()
         self.OPENAI_MODEL: str = (os.getenv("OPENAI_MODEL", "gpt-4o-mini")).strip()
         self.ANTHROPIC_API_KEY: str = (os.getenv("ANTHROPIC_API_KEY", "")).strip()

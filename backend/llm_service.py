@@ -10,16 +10,24 @@ from tracing import tracer
 
 logger = logging.getLogger(__name__)
 
-ANSWER_SYSTEM_PROMPT = """You are Veridocs, a document assistant.
-You answer questions based on the provided context from uploaded documents.
+ANSWER_SYSTEM_PROMPT = """You are Veridocs AI, an executive document intelligence assistant.
+Your answers must be exceptionally clear, well-structured, authoritative, and formatted in clean GitHub-Flavored Markdown.
 
-RULES:
-1. Only use information from the provided context.
-2. Cite your sources using [Page X] notation inline with your answer.
-3. If the answer is not in the context, say "I cannot find this information in the uploaded documents."
-4. Be precise and clear.
-5. Use markdown formatting where appropriate.
-"""
+CRITICAL PRESENTATION & FORMATTING GUIDELINES:
+1. Direct Executive Summary:
+   - Begin with a concise, direct answer or summary paragraph addressing the question.
+2. Structured Sections & Clean Headings:
+   - Organize findings under clear markdown headings (e.g. `### Primary Experience`, `### Technical Stack & Systems`, `### Key Metrics & Findings`).
+3. Clean Bullet Hierarchy:
+   - Use clean, well-spaced bullet points (`* `) with bold lead-ins (e.g. `* **Software Engineer Intern at ElinaAI:** ...`).
+   - Highlight key technologies, tools, figures, and dates in **bold** or inline code.
+4. Data & Comparison:
+   - If presenting comparative, financial, SLA, or multi-field data, use a clean markdown table (`| Item | Description | Source |`).
+5. Precise Source Grounding:
+   - Cite your exact source page inline using `[Page X]` notation at the end of every substantive claim or finding (e.g. `[Page 1]`).
+   - Only state facts that appear in the provided context. If information is missing, state: "I cannot find this information in the uploaded documents."
+6. Tone:
+   - Senior engineering / executive advisory tone. No conversational filler like "Sure!" or "Here is...". Jump straight into the verified intelligence."""
 
 ANSWER_PROMPT_TEMPLATE = """Context from uploaded documents:
 
@@ -333,11 +341,33 @@ class FreeLLMService:
         else:
             best = best[:4]
 
-        formatted_parts = []
-        for score, para, p in best:
-            formatted_parts.append(f"{para} [Page {p}]")
+        formatted_bullets = []
+        for score, raw_para, p in best:
+            lines = [l.strip() for l in raw_para.split("\n") if l.strip()]
+            for line in lines:
+                cleaned = re.sub(r"^[\s\.\·\•\*\-\–\—\>]+", "", line).strip()
+                if not cleaned or len(cleaned) < 15 or "@" in cleaned or cleaned.startswith("http"):
+                    continue
 
-        return "Based on the source document:\n\n" + "\n\n".join(formatted_parts)
+                if ":" in cleaned and not cleaned.startswith("http"):
+                    head, tail = cleaned.split(":", 1)
+                    formatted_bullets.append(f"* **{head.strip()}:** {tail.strip()} [Page {p}]")
+                else:
+                    formatted_bullets.append(f"* {cleaned} [Page {p}]")
+
+        unique_bullets = []
+        seen_b = set()
+        for b in formatted_bullets:
+            norm = b.lower()
+            if norm not in seen_b:
+                seen_b.add(norm)
+                unique_bullets.append(b)
+
+        clean_q = question.rstrip("?").strip()
+        if not unique_bullets:
+            return "I could not find any relevant information in the uploaded documents to answer your question."
+
+        return f"### Analysis for \"{clean_q}\"\n\n" + "\n".join(unique_bullets[:6])
 
     async def _stream_offline(self, answer: str) -> AsyncGenerator[str, None]:
         """Stream offline answer tokens."""
@@ -553,28 +583,47 @@ class FreeLLMService:
             raise
 
     async def _stream_openai_compat(self, prompt: str) -> AsyncGenerator[str, None]:
-        """Stream tokens from OpenAI-compatible APIs."""
-        try:
-            stream = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=self.settings.LLM_TEMPERATURE,
-                max_tokens=self.settings.LLM_MAX_TOKENS,
-                stream=True
-            )
+        """Stream tokens from OpenAI-compatible APIs with automated model fallback."""
+        candidate_models = [self.model]
+        if self.provider == "groq":
+            candidate_models = [self.model, "qwen/qwen3.8-27b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
 
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-                    await asyncio.sleep(0)
+        last_error = None
+        stream = None
+        for m in candidate_models:
+            if not m:
+                continue
+            try:
+                stream = await asyncio.to_thread(
+                    self.client.chat.completions.create,
+                    model=m,
+                    messages=[
+                        {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=self.settings.LLM_TEMPERATURE,
+                    max_tokens=self.settings.LLM_MAX_TOKENS,
+                    stream=True
+                )
+                self.model = m
+                break
+            except Exception as e:
+                last_error = e
+                err_str = str(e).lower()
+                if "model_not_found" in err_str or "does not exist" in err_str or "404" in err_str:
+                    logger.warning(f"Model '{m}' not available on {self.provider}. Trying fallback...")
+                    continue
+                raise
 
-        except Exception as e:
-            logger.error(f"Streaming error ({self.provider}): {e}")
-            raise
+        if stream is None:
+            if last_error:
+                raise last_error
+            raise RuntimeError(f"No valid models found for {self.provider}")
+
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+                await asyncio.sleep(0)
 
     def generate_summary(self, chunks: List[Dict]) -> Dict:
         """Generate a summary of the document."""
@@ -720,12 +769,30 @@ class FreeLLMService:
                 )
                 raw = response.content[0].text.strip()
             else:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.2,
-                    max_tokens=1000
-                )
+                candidate_models = [self.model]
+                if self.provider == "groq":
+                    candidate_models = [self.model, "qwen/qwen3.8-27b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
+
+                response = None
+                for m in candidate_models:
+                    if not m:
+                        continue
+                    try:
+                        response = self.client.chat.completions.create(
+                            model=m,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.2,
+                            max_tokens=1000
+                        )
+                        self.model = m
+                        break
+                    except Exception as me:
+                        err_str = str(me).lower()
+                        if "model_not_found" in err_str or "does not exist" in err_str or "404" in err_str:
+                            continue
+                        raise
+                if response is None:
+                    raise RuntimeError(f"No valid models found for {self.provider}")
                 raw = response.choices[0].message.content.strip()
 
             json_match = re.search(r'\{.*\}', raw, re.DOTALL)
