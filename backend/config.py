@@ -14,9 +14,14 @@ from typing import Optional
 import threading
 import logging
 import hashlib
+from pathlib import Path
 import numpy as np
 from dotenv import load_dotenv
 
+# Prioritize loading .env from backend directory, then fallback to current working directory
+_backend_env = Path(__file__).resolve().parent / ".env"
+if _backend_env.exists():
+    load_dotenv(dotenv_path=_backend_env)
 load_dotenv()
 
 logger = logging.getLogger(__name__)

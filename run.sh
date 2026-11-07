@@ -25,12 +25,17 @@ if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
     (cd "$ROOT_DIR/frontend" && npm install --legacy-peer-deps)
 fi
 
-# Free up port 8000 if previously occupied
+# Free up port 8000 and 3000 if previously occupied
 if command -v lsof >/dev/null 2>&1; then
     OLD_BACKEND=$(lsof -ti :8000 2>/dev/null || true)
     if [ -n "$OLD_BACKEND" ]; then
         echo "Clearing existing process on port 8000 (PID: $OLD_BACKEND)..."
         kill -9 $OLD_BACKEND 2>/dev/null || true
+    fi
+    OLD_FRONTEND=$(lsof -ti :3000 2>/dev/null || true)
+    if [ -n "$OLD_FRONTEND" ]; then
+        echo "Clearing existing process on port 3000 (PID: $OLD_FRONTEND)..."
+        kill -9 $OLD_FRONTEND 2>/dev/null || true
     fi
 fi
 

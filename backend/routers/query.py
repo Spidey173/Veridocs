@@ -162,7 +162,7 @@ async def answer_query(
             confidence_score=confidence_score
         )
 
-        if database.is_database_configured():
+        if database.is_database_ready():
             try:
                 await database.save_chat_message(request.session_id, str(uuid.uuid4()), "user", question)
                 await database.save_chat_message(
@@ -318,7 +318,7 @@ async def stream_query(
                 confidence_score=grounding["confidence_score"]
             )
 
-            if database.is_database_configured():
+            if database.is_database_ready():
                 try:
                     await database.save_chat_message(request.session_id, str(uuid.uuid4()), "user", question)
                     await database.save_chat_message(
@@ -372,7 +372,7 @@ async def get_conversation_history(
     conversation = get_conversation_manager()
     messages = conversation.get_history(session_id)
 
-    if not messages and database.is_database_configured():
+    if not messages and database.is_database_ready():
         try:
             db_msgs = await database.get_chat_history(session_id)
             if db_msgs:

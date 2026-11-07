@@ -279,20 +279,65 @@ class FreeLLMService:
         return "\n".join(parts)
 
     def _generate_offline_answer(self, question: str, chunks: List[Dict]) -> str:
-        """Deterministic, extractive fallback answer generation without external API dependencies."""
+        """Intelligent extractive answer generation grounded strictly in retrieved chunks."""
         if not chunks:
-            return "I cannot find this information in the uploaded documents."
-        top_chunks = chunks[:3]
-        sentences = []
-        for c in top_chunks:
+            return "I could not find any relevant information in the uploaded documents to answer your question."
+
+        q_lower = question.lower()
+        stopwords = {
+            "what", "is", "the", "main", "topic", "of", "this", "document", "are", "can",
+            "you", "summarize", "about", "a", "an", "in", "to", "for", "with", "on", "at",
+            "by", "from", "tell", "me", "how", "why", "who", "which", "where", "does", "do",
+            "give", "show", "list", "describe", "explain"
+        }
+        raw_tokens = re.findall(r"\b[a-zA-Z0-9_]{3,}\b", q_lower)
+        keywords = [t for t in raw_tokens if t not in stopwords]
+
+        synonym_map = {
+            "technologies": ["python", "sql", "react", "fastapi", "flask", "docker", "redis", "database", "languages", "skills", "tools", "rag", "git"],
+            "technology": ["python", "sql", "react", "fastapi", "flask", "docker", "redis", "database", "languages", "skills", "tools", "rag", "git"],
+            "skills": ["technical", "languages", "databases", "backend", "devops", "python", "fastapi", "sql", "frameworks"],
+            "experience": ["intern", "engineer", "developer", "work", "employment", "company", "role", "built", "engineered", "deployed"],
+            "achievements": ["built", "deployed", "engineered", "reduced", "improved", "scaled", "processed", "authored", "accelerated", "led"],
+            "education": ["mca", "bachelor", "degree", "university", "college", "student", "graduate", "cgpa"],
+            "projects": ["project", "pipeline", "assistant", "system", "architecture", "platform"],
+            "payment": ["invoice", "due", "fee", "interest", "net", "remit", "terms", "payable", "billing"],
+            "liability": ["damages", "cap", "aggregate", "indemnification", "limitation", "maximum", "breach"],
+            "sla": ["uptime", "availability", "service", "downtime", "maintenance", "credit"],
+        }
+        expanded_keywords = set(keywords)
+        for kw in keywords:
+            if kw in synonym_map:
+                expanded_keywords.update(synonym_map[kw])
+
+        scored_paragraphs = []
+        for c in chunks:
             p = c.get("page", 1)
-            txt = c.get("text", "").strip()
-            first_sentence = re.split(r'(?<=[.!?])\s+', txt)[0]
-            if first_sentence:
-                sentences.append(f"{first_sentence} [Page {p}]")
-        if not sentences:
-            return "I cannot find this information in the uploaded documents."
-        return "Based on the uploaded documents: " + " ".join(sentences)
+            raw_text = re.sub(r"\[Document:[^\]]*\]\s*", "", c.get("text", "")).strip()
+            paras = [p_text.strip() for p_text in re.split(r"\n\s*\n", raw_text) if len(p_text.strip()) > 15]
+            if not paras:
+                paras = [raw_text]
+
+            for para in paras:
+                para_l = para.lower()
+                score = 0
+                for ekw in expanded_keywords:
+                    if ekw in para_l:
+                        score += 2
+                scored_paragraphs.append((score, para, p))
+
+        scored_paragraphs.sort(key=lambda x: x[0], reverse=True)
+        best = [sp for sp in scored_paragraphs if sp[0] > 0]
+        if not best:
+            best = scored_paragraphs[:3]
+        else:
+            best = best[:4]
+
+        formatted_parts = []
+        for score, para, p in best:
+            formatted_parts.append(f"{para} [Page {p}]")
+
+        return "Based on the source document:\n\n" + "\n\n".join(formatted_parts)
 
     async def _stream_offline(self, answer: str) -> AsyncGenerator[str, None]:
         """Stream offline answer tokens."""
@@ -359,41 +404,48 @@ class FreeLLMService:
             )
 
         with tracer.span("llm.generate_answer", attributes={"provider": self.provider, "model": str(self.model), "chunk_count": len(context_chunks)}):
-            if self.provider == "google":
-                def _call_google():
-                    response = self.client.generate_content(
-                        [{"role": "user", "parts": [{"text": ANSWER_SYSTEM_PROMPT + "\n\n" + prompt}]}]
-                    )
-                    return response.text.strip()
-                return self._with_retry(_call_google)
+            try:
+                if self.provider == "google":
+                    def _call_google():
+                        response = self.client.generate_content(
+                            [{"role": "user", "parts": [{"text": ANSWER_SYSTEM_PROMPT + "\n\n" + prompt}]}]
+                        )
+                        return response.text.strip()
+                    return self._with_retry(_call_google)
 
-            elif self.provider == "anthropic":
-                def _call_anthropic():
-                    response = self.client.messages.create(
-                        model=self.model,
-                        system=ANSWER_SYSTEM_PROMPT,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=self.settings.LLM_TEMPERATURE,
-                        max_tokens=self.settings.LLM_MAX_TOKENS
-                    )
-                    return response.content[0].text.strip()
-                return self._with_retry(_call_anthropic)
+                elif self.provider == "anthropic":
+                    def _call_anthropic():
+                        response = self.client.messages.create(
+                            model=self.model,
+                            system=ANSWER_SYSTEM_PROMPT,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=self.settings.LLM_TEMPERATURE,
+                            max_tokens=self.settings.LLM_MAX_TOKENS
+                        )
+                        return response.content[0].text.strip()
+                    return self._with_retry(_call_anthropic)
 
-            elif self.provider in OPENAI_COMPAT_PROVIDERS:
-                def _call_openai_compat():
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=self.settings.LLM_TEMPERATURE,
-                        max_tokens=self.settings.LLM_MAX_TOKENS
-                    )
-                    return response.choices[0].message.content.strip()
-                return self._with_retry(_call_openai_compat)
+                elif self.provider in OPENAI_COMPAT_PROVIDERS:
+                    def _call_openai_compat():
+                        response = self.client.chat.completions.create(
+                            model=self.model,
+                            messages=[
+                                {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+                                {"role": "user", "content": prompt}
+                            ],
+                            temperature=self.settings.LLM_TEMPERATURE,
+                            max_tokens=self.settings.LLM_MAX_TOKENS
+                        )
+                        return response.choices[0].message.content.strip()
+                    return self._with_retry(_call_openai_compat)
 
-            elif self.provider in ("offline", "mock"):
+                elif self.provider in ("offline", "mock"):
+                    return self._generate_offline_answer(question, context_chunks)
+            except Exception as e:
+                logger.warning(
+                    f"LLM error with provider '{self.provider}' ({e}); "
+                    "falling back to grounded extractive answer."
+                )
                 return self._generate_offline_answer(question, context_chunks)
 
     @staticmethod
@@ -441,19 +493,28 @@ class FreeLLMService:
                 question=question
             )
 
-        if self.provider == "google":
-            async for token in self._stream_google(prompt):
-                yield token
+        try:
+            if self.provider == "google":
+                async for token in self._stream_google(prompt):
+                    yield token
 
-        elif self.provider == "anthropic":
-            async for token in self._stream_anthropic(prompt):
-                yield token
+            elif self.provider == "anthropic":
+                async for token in self._stream_anthropic(prompt):
+                    yield token
 
-        elif self.provider in OPENAI_COMPAT_PROVIDERS:
-            async for token in self._stream_openai_compat(prompt):
-                yield token
+            elif self.provider in OPENAI_COMPAT_PROVIDERS:
+                async for token in self._stream_openai_compat(prompt):
+                    yield token
 
-        elif self.provider in ("offline", "mock"):
+            elif self.provider in ("offline", "mock"):
+                answer = self._generate_offline_answer(question, context_chunks)
+                async for token in self._stream_offline(answer):
+                    yield token
+        except Exception as e:
+            logger.warning(
+                f"LLM streaming error with provider '{self.provider}' ({e}); "
+                "seamlessly falling back to grounded extractive answer."
+            )
             answer = self._generate_offline_answer(question, context_chunks)
             async for token in self._stream_offline(answer):
                 yield token

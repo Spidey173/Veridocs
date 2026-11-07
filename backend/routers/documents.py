@@ -30,6 +30,7 @@ from session_store import (
     _safe_delete_file,
     _cleanup_session,
     _persist_session_background,
+    persist_session_snapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -211,8 +212,8 @@ async def upload_documents(
                 oldest_key = min(sessions, key=lambda k: sessions[k]["created_at"])
                 _cleanup_session(oldest_key)
 
-        # Save session to PostgreSQL if configured
-        if database.is_database_configured():
+        # Save session to PostgreSQL if pool is ready
+        if database.is_database_ready():
             try:
                 saved_sess = await database.save_session(
                     session_id=session_id,
@@ -249,14 +250,16 @@ async def upload_documents(
                 detail="PostgreSQL database is required for uploads in production mode."
             )
 
-        # Save session to disk in background
-        background_tasks.add_task(
-            _persist_session_background,
+        # Synchronously persist complete session snapshot (metadata, chunks, embeddings) to disk
+        persist_session_snapshot(
             session_id=session_id,
             saved_paths=saved_paths,
             file_names=file_names,
             doc_metadata=doc_metadata,
             owner_id=current_user.user_id,
+            chunks=new_chunks,
+            embeddings=new_embeddings,
+            insights=existing_insights,
         )
 
         # Generate summary and questions via asynchronous worker queue or background tasks

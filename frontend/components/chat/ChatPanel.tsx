@@ -78,7 +78,7 @@ export default function ChatPanel() {
     setCurrentStreamingId(aiMsgId);
 
     try {
-      if (sessionId === "demo-session" || sessionId.startsWith("session-")) {
+      if (sessionId === "demo-session") {
         let answerText = "";
         let demoCitations: CitationInfo[] = [];
         const demoConfidence = 0.98;
@@ -620,11 +620,8 @@ To get real AI-powered answers, hybrid vector search, and citations for **${docN
             break;
           case "error": {
             const rawMsg = (event.data?.message as string) || "";
-            const displayMsg = rawMsg.toLowerCase().includes("session") || rawMsg.includes("404")
-              ? "Your session expired after the backend update. Please re-upload your document or click New Workspace to start fresh."
-              : rawMsg || "Sorry, an error occurred while generating the response. Please try again.";
             updateMessage(aiMsgId, {
-              content: displayMsg,
+              content: rawMsg || "Sorry, an error occurred while generating the response. Please try again.",
               isStreaming: false,
             });
             break;
@@ -633,11 +630,8 @@ To get real AI-powered answers, hybrid vector search, and citations for **${docN
       }
     } catch (err) {
       const errStr = err instanceof Error ? err.message : "Failed to get response";
-      const displayMsg = errStr.toLowerCase().includes("session") || errStr.includes("404")
-        ? "Your session expired after the backend update. Please re-upload your document or click New Workspace to start fresh."
-        : `Error: ${errStr}`;
       updateMessage(aiMsgId, {
-        content: displayMsg,
+        content: `Error: ${errStr}`,
         isStreaming: false,
       });
     } finally {

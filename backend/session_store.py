@@ -11,7 +11,7 @@ import logging
 import threading
 import concurrent.futures
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Tuple
 import numpy as np
 from fastapi import HTTPException
 
@@ -107,14 +107,17 @@ def _generate_insights_background(
         logger.error(f"Background insights generation failed: {e}", exc_info=True)
 
 
-def _persist_session_background(
+def persist_session_snapshot(
     session_id: str,
     saved_paths: List[str],
     file_names: List[str],
     doc_metadata: List[Dict],
-    owner_id: str
+    owner_id: str,
+    chunks: Optional[List[Dict]] = None,
+    embeddings: Optional[np.ndarray] = None,
+    insights: Optional[Dict] = None,
 ) -> None:
-    """Save session metadata to disk for file management and crash recovery."""
+    """Save complete session snapshot (metadata, chunks, and embeddings) to disk."""
     settings = get_settings()
     try:
         session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
@@ -127,10 +130,49 @@ def _persist_session_background(
                 "file_paths": saved_paths,
                 "file_names": file_names,
                 "metadata": doc_metadata,
+                "insights": insights or {},
                 "created_at": time.time(),
             }, f, indent=2)
+
+        if chunks is not None:
+            chunks_file = session_dir / "chunks.json"
+            clean_chunks = []
+            for c in chunks:
+                chk = dict(c)
+                if "embedding" in chk:
+                    chk.pop("embedding")
+                clean_chunks.append(chk)
+            with open(chunks_file, "w", encoding="utf-8") as f:
+                json.dump(clean_chunks, f)
+
+        if embeddings is not None:
+            embeddings_file = session_dir / "embeddings.npy"
+            np.save(str(embeddings_file), embeddings)
+
+        logger.info(f"Persisted session snapshot {session_id} to disk.")
     except Exception as e:
         logger.error(f"Failed to persist session {session_id} to disk: {e}")
+
+
+def _persist_session_background(
+    session_id: str,
+    saved_paths: List[str],
+    file_names: List[str],
+    doc_metadata: List[Dict],
+    owner_id: str,
+    chunks: Optional[List[Dict]] = None,
+    embeddings: Optional[np.ndarray] = None,
+) -> None:
+    """Background task wrapper for session disk persistence."""
+    persist_session_snapshot(
+        session_id=session_id,
+        saved_paths=saved_paths,
+        file_names=file_names,
+        doc_metadata=doc_metadata,
+        owner_id=owner_id,
+        chunks=chunks,
+        embeddings=embeddings
+    )
 
 
 async def _get_session(session_id: str, current_user: UserContext) -> Dict[str, Any]:
@@ -145,12 +187,31 @@ async def _get_session(session_id: str, current_user: UserContext) -> Dict[str, 
         try:
             session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
             session_meta_file = session_dir / "session.json"
+            chunks_file = session_dir / "chunks.json"
+            embeddings_file = session_dir / "embeddings.npy"
+
             if session_dir.exists() and session_meta_file.exists():
                 with open(session_meta_file, "r", encoding="utf-8") as f:
                     meta = json.load(f)
 
+                chunks = []
+                if chunks_file.exists():
+                    try:
+                        with open(chunks_file, "r", encoding="utf-8") as f:
+                            chunks = json.load(f)
+                    except Exception as ce:
+                        logger.warning(f"Error loading chunks for session {session_id}: {ce}")
+
+                embeddings = None
+                if embeddings_file.exists():
+                    try:
+                        embeddings = np.load(str(embeddings_file))
+                    except Exception as ee:
+                        logger.warning(f"Error loading embeddings for session {session_id}: {ee}")
+
                 restored_session = {
-                    "chunks": [],
+                    "chunks": chunks,
+                    "embeddings": embeddings,
                     "file_paths": meta.get("file_paths", []),
                     "file_names": meta.get("file_names", []),
                     "metadata": meta.get("metadata", []),
@@ -161,12 +222,12 @@ async def _get_session(session_id: str, current_user: UserContext) -> Dict[str, 
                 with _sessions_lock:
                     sessions[session_id] = restored_session
                 session_data = restored_session
-                logger.info(f"Loaded session {session_id} from disk")
+                logger.info(f"Loaded session {session_id} from disk with {len(chunks)} chunks")
         except Exception as e:
             logger.error(f"Error loading session {session_id} from disk: {e}")
 
-    # Fallback to PostgreSQL if configured
-    if not session_data and database.is_database_configured():
+    # Fallback to PostgreSQL if configured and pool is ready
+    if not session_data and database.is_database_ready():
         try:
             db_session = await database.get_session(session_id)
             if db_session:
@@ -205,7 +266,14 @@ async def _get_session(session_id: str, current_user: UserContext) -> Dict[str, 
             detail="Access denied: Session ownership is missing or unverified."
         )
 
-    if owner_id != current_user.user_id and current_user.role != "admin":
+    # In development mode, allow access if both are demo users; otherwise require exact user match or admin
+    is_demo_match = (
+        settings.ENVIRONMENT != "production"
+        and settings.AUTH_MODE != "gateway"
+        and str(owner_id).startswith("demo_usr")
+        and str(current_user.user_id).startswith("demo_usr")
+    )
+    if owner_id != current_user.user_id and current_user.role != "admin" and not is_demo_match:
         raise HTTPException(
             status_code=403,
             detail="Access denied: You do not have permission to access this session."

@@ -104,16 +104,10 @@ export default function DropZone() {
           });
       } catch (err: unknown) {
         clearInterval(progressTicker);
-        console.warn("Backend not available, initializing interactive client session:", err);
-        const uploaded: UploadedFile[] = filesToUpload.map((f) => ({
-          name: f.name,
-          size: f.size,
-          type: f.type,
-          pages: 3,
-        }));
-        setSession(`session-${Date.now()}`, uploaded);
+        console.error("Document upload failed:", err);
+        const errMessage = err instanceof Error ? err.message : "Failed to upload and index document.";
+        setError(errMessage);
         setUploading(false);
-        setSelectedFiles([]);
       }
     },
     [

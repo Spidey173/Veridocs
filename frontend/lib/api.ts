@@ -218,7 +218,7 @@ export async function uploadDocuments(
   }
 
   const xhr = new XMLHttpRequest();
-  xhr.timeout = 8000;
+  xhr.timeout = 120000;
 
   return new Promise((resolve, reject) => {
     xhr.upload.onprogress = (e) => {
