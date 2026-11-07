@@ -297,3 +297,16 @@ class TestAPIEndpoints:
         assert "veridocs_http_requests_total" in text
         assert "veridocs_active_sessions" in text
         assert "veridocs_http_request_duration_seconds" in text
+
+    def test_opentelemetry_traces_endpoint(self, test_client: TestClient):
+        """Verify GET /api/traces returns recent distributed trace spans."""
+        from tracing import tracer
+
+        with tracer.span("test.pipeline.operation", attributes={"batch": 1}):
+            pass
+
+        resp = test_client.get("/api/traces")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "spans" in data
+        assert any(s["name"] == "test.pipeline.operation" for s in data["spans"])

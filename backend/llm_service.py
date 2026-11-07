@@ -6,6 +6,7 @@ import re
 from typing import List, Dict, AsyncGenerator, Optional, Tuple, Callable, Any
 
 from config import get_settings
+from tracing import tracer
 
 logger = logging.getLogger(__name__)
 
@@ -357,42 +358,43 @@ class FreeLLMService:
                 question=question
             )
 
-        if self.provider == "google":
-            def _call_google():
-                response = self.client.generate_content(
-                    [{"role": "user", "parts": [{"text": ANSWER_SYSTEM_PROMPT + "\n\n" + prompt}]}]
-                )
-                return response.text.strip()
-            return self._with_retry(_call_google)
+        with tracer.span("llm.generate_answer", attributes={"provider": self.provider, "model": str(self.model), "chunk_count": len(context_chunks)}):
+            if self.provider == "google":
+                def _call_google():
+                    response = self.client.generate_content(
+                        [{"role": "user", "parts": [{"text": ANSWER_SYSTEM_PROMPT + "\n\n" + prompt}]}]
+                    )
+                    return response.text.strip()
+                return self._with_retry(_call_google)
 
-        elif self.provider == "anthropic":
-            def _call_anthropic():
-                response = self.client.messages.create(
-                    model=self.model,
-                    system=ANSWER_SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=self.settings.LLM_TEMPERATURE,
-                    max_tokens=self.settings.LLM_MAX_TOKENS
-                )
-                return response.content[0].text.strip()
-            return self._with_retry(_call_anthropic)
+            elif self.provider == "anthropic":
+                def _call_anthropic():
+                    response = self.client.messages.create(
+                        model=self.model,
+                        system=ANSWER_SYSTEM_PROMPT,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=self.settings.LLM_TEMPERATURE,
+                        max_tokens=self.settings.LLM_MAX_TOKENS
+                    )
+                    return response.content[0].text.strip()
+                return self._with_retry(_call_anthropic)
 
-        elif self.provider in OPENAI_COMPAT_PROVIDERS:
-            def _call_openai_compat():
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=self.settings.LLM_TEMPERATURE,
-                    max_tokens=self.settings.LLM_MAX_TOKENS
-                )
-                return response.choices[0].message.content.strip()
-            return self._with_retry(_call_openai_compat)
+            elif self.provider in OPENAI_COMPAT_PROVIDERS:
+                def _call_openai_compat():
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=self.settings.LLM_TEMPERATURE,
+                        max_tokens=self.settings.LLM_MAX_TOKENS
+                    )
+                    return response.choices[0].message.content.strip()
+                return self._with_retry(_call_openai_compat)
 
-        elif self.provider in ("offline", "mock"):
-            return self._generate_offline_answer(question, context_chunks)
+            elif self.provider in ("offline", "mock"):
+                return self._generate_offline_answer(question, context_chunks)
 
     @staticmethod
     def _with_retry(func: Callable[[], Any], max_retries: int = 3, initial_delay: float = 0.5) -> Any:

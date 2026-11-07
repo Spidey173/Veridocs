@@ -248,3 +248,55 @@ def dispatch_document_job(
             daemon=True
         )
         thread.start()
+
+
+@celery_app.task(name="veridocs.generate_insights_job")
+def generate_insights_job(
+    session_id: str,
+    chunks_by_file: Dict[str, List[Dict]],
+    doc_metadata: List[Dict],
+    provider: str
+) -> Dict[str, Any]:
+    """Celery worker task offloading document insights generation to dedicated worker processes."""
+    from session_store import _generate_insights_background
+    _generate_insights_background(session_id, chunks_by_file, doc_metadata, provider)
+    return {"status": "completed", "session_id": session_id}
+
+
+def dispatch_insights_job(
+    session_id: str,
+    chunks_by_file: Dict[str, List[Dict]],
+    doc_metadata: List[Dict],
+    provider: str,
+    background_tasks: Optional[BackgroundTasks] = None
+):
+    """Dispatch insights generation to Celery worker queue or local background worker."""
+    if is_celery_broker_reachable() or settings.CELERY_TASK_ALWAYS_EAGER:
+        try:
+            generate_insights_job.delay(
+                session_id=session_id,
+                chunks_by_file=chunks_by_file,
+                doc_metadata=doc_metadata,
+                provider=provider
+            )
+            logger.info(f"Dispatched insights task for session {session_id} to Celery worker queue.")
+            return
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed ({e}), falling back to background task")
+
+    from session_store import _generate_insights_background
+    if background_tasks:
+        background_tasks.add_task(
+            _generate_insights_background,
+            session_id=session_id,
+            chunks_by_file=chunks_by_file,
+            doc_metadata=doc_metadata,
+            provider=provider
+        )
+    else:
+        thread = threading.Thread(
+            target=_generate_insights_background,
+            args=(session_id, chunks_by_file, doc_metadata, provider),
+            daemon=True
+        )
+        thread.start()

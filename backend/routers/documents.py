@@ -22,6 +22,7 @@ from llm_service import FreeLLMService
 from insights_engine import generate_document_insights
 from rate_limiter import enforce_rate_limit
 from conversation import get_conversation_manager
+from tasks import dispatch_insights_job
 from session_store import (
     sessions,
     _sessions_lock,
@@ -29,7 +30,6 @@ from session_store import (
     _safe_delete_file,
     _cleanup_session,
     _persist_session_background,
-    _generate_insights_background,
 )
 
 logger = logging.getLogger(__name__)
@@ -259,13 +259,13 @@ async def upload_documents(
             owner_id=current_user.user_id,
         )
 
-        # Generate summary and questions in background concurrently
-        background_tasks.add_task(
-            _generate_insights_background,
+        # Generate summary and questions via asynchronous worker queue or background tasks
+        dispatch_insights_job(
             session_id=session_id,
             chunks_by_file=dict(chunks_by_file),
             doc_metadata=doc_metadata,
-            provider=settings.LLM_PROVIDER
+            provider=settings.LLM_PROVIDER,
+            background_tasks=background_tasks
         )
 
         message = f"Successfully processed {processed_files} file(s) with {len(all_chunks)} text chunks"

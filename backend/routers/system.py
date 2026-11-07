@@ -12,6 +12,7 @@ from models import HealthResponse
 import database
 from session_store import sessions, cleanup_expired_sessions
 from metrics import metrics
+from tracing import tracer
 
 logger = logging.getLogger(__name__)
 
@@ -91,4 +92,15 @@ async def get_prometheus_metrics():
         content=content,
         media_type="text/plain; version=0.0.4; charset=utf-8"
     )
+
+
+@router.get("/traces")
+@router.get("/api/traces")
+async def get_distributed_traces(limit: int = 50):
+    """Export recent distributed OpenTelemetry-compatible trace spans."""
+    spans = tracer.get_recent_spans(limit=limit)
+    return {
+        "count": len(spans),
+        "spans": spans
+    }
 

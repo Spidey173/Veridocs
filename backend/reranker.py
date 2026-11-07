@@ -2,6 +2,7 @@ import logging
 from typing import List, Dict
 
 from config import get_model_registry, get_settings
+from tracing import tracer
 
 logger = logging.getLogger(__name__)
 
@@ -35,47 +36,48 @@ class Reranker:
             logger.warning("Reranker model not available, returning chunks as-is")
             return chunks[:top_k]
 
-        try:
-            doc_texts = [chunk["text"] for chunk in chunks]
+        with tracer.span("reranker.cross_encoder", attributes={"candidate_count": len(chunks), "top_k": top_k}):
+            try:
+                doc_texts = [chunk["text"] for chunk in chunks]
 
-            # FastEmbed CrossEncoder
-            if hasattr(model, "rerank") and callable(getattr(model, "rerank")):
-                reranked_items = list(model.rerank(query, doc_texts))
-                scored_chunks = []
-                for item in reranked_items:
-                    idx = item["index"] if isinstance(item, dict) else getattr(item, "index", None)
-                    score = item["score"] if isinstance(item, dict) else getattr(item, "score", 0.0)
-                    if idx is not None and 0 <= idx < len(chunks):
-                        c = chunks[idx].copy()
-                        c["rerank_score"] = float(score)
-                        scored_chunks.append(c)
+                # FastEmbed CrossEncoder
+                if hasattr(model, "rerank") and callable(getattr(model, "rerank")):
+                    reranked_items = list(model.rerank(query, doc_texts))
+                    scored_chunks = []
+                    for item in reranked_items:
+                        idx = item["index"] if isinstance(item, dict) else getattr(item, "index", None)
+                        score = item["score"] if isinstance(item, dict) else getattr(item, "score", 0.0)
+                        if idx is not None and 0 <= idx < len(chunks):
+                            c = chunks[idx].copy()
+                            c["rerank_score"] = float(score)
+                            scored_chunks.append(c)
 
-                if scored_chunks:
+                    if scored_chunks:
+                        scored_chunks.sort(key=lambda x: x["rerank_score"], reverse=True)
+                        return scored_chunks[:top_k]
+
+                # SentenceTransformers cross-encoder
+                if hasattr(model, "predict") and callable(getattr(model, "predict")):
+                    pairs = [(query, text) for text in doc_texts]
+                    try:
+                        scores = model.predict(pairs, show_progress_bar=False)
+                    except TypeError:
+                        scores = model.predict(pairs)
+
+                    scored_chunks = []
+                    for chunk, score in zip(chunks, scores):
+                        chunk_copy = chunk.copy()
+                        chunk_copy["rerank_score"] = float(score)
+                        scored_chunks.append(chunk_copy)
+
                     scored_chunks.sort(key=lambda x: x["rerank_score"], reverse=True)
                     return scored_chunks[:top_k]
 
-            # SentenceTransformers cross-encoder
-            if hasattr(model, "predict") and callable(getattr(model, "predict")):
-                pairs = [(query, text) for text in doc_texts]
-                try:
-                    scores = model.predict(pairs, show_progress_bar=False)
-                except TypeError:
-                    scores = model.predict(pairs)
+                return chunks[:top_k]
 
-                scored_chunks = []
-                for chunk, score in zip(chunks, scores):
-                    chunk_copy = chunk.copy()
-                    chunk_copy["rerank_score"] = float(score)
-                    scored_chunks.append(chunk_copy)
-
-                scored_chunks.sort(key=lambda x: x["rerank_score"], reverse=True)
-                return scored_chunks[:top_k]
-
-            return chunks[:top_k]
-
-        except Exception as e:
-            logger.error(f"Re-ranking failed: {e}. Returning unranked results.")
-            return chunks[:top_k]
+            except Exception as e:
+                logger.error(f"Re-ranking failed: {e}. Returning unranked results.")
+                return chunks[:top_k]
 
 
 def rerank_chunks(query: str, chunks: List[Dict], top_k: int = None) -> List[Dict]:

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from config import get_settings, get_model_registry
 import database
 from session_store import sessions, _sessions_lock
+from tracing import tracer
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +58,18 @@ def reciprocal_rank_fusion(
     weights: Optional[List[float]] = None
 ) -> List[Tuple[int, float]]:
     """Combine rankings from multiple search methods using RRF."""
-    from collections import defaultdict
-    if weights is None:
-        weights = [1.0] * len(rankings)
+    with tracer.span("retrieval.rrf", attributes={"rankings_count": len(rankings)}):
+        from collections import defaultdict
+        if weights is None:
+            weights = [1.0] * len(rankings)
 
-    fused_scores: Dict[int, float] = defaultdict(float)
+        fused_scores: Dict[int, float] = defaultdict(float)
 
-    for ranking, weight in zip(rankings, weights):
-        for rank, (doc_idx, _score) in enumerate(ranking):
-            fused_scores[doc_idx] += weight / (k + rank + 1)
+        for ranking, weight in zip(rankings, weights):
+            for rank, (doc_idx, _score) in enumerate(ranking):
+                fused_scores[doc_idx] += weight / (k + rank + 1)
 
-    return sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+        return sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
 
 
 # =====================================================================
@@ -143,20 +145,21 @@ class PostgresVectorStore(BaseVectorStore):
                 session_data=session_data
             )
 
-        candidates = await database.hybrid_search_postgres(
-            session_id=session_id,
-            query=query,
-            query_embedding=query_embedding,
-            k=k,
-            dense_weight=dense_weight,
-            bm25_weight=bm25_weight,
-            active_files=active_files or None
-        )
+        with tracer.span("retrieval.hybrid_search.postgres", attributes={"session_id": session_id, "k": k}):
+            candidates = await database.hybrid_search_postgres(
+                session_id=session_id,
+                query=query,
+                query_embedding=query_embedding,
+                k=k,
+                dense_weight=dense_weight,
+                bm25_weight=bm25_weight,
+                active_files=active_files or None
+            )
 
-        if active_files is not None:
-            candidates = [c for c in candidates if c.get("source_file") in active_files]
+            if active_files is not None:
+                candidates = [c for c in candidates if c.get("source_file") in active_files]
 
-        return candidates
+            return candidates
 
     async def save_chunks(
         self,
@@ -195,31 +198,32 @@ class InMemoryVectorStore(BaseVectorStore):
             with _sessions_lock:
                 session_data = sessions.get(session_id, {})
 
-        candidates: List[Dict[str, Any]] = []
-        if "chunks" in session_data and session_data["chunks"]:
-            session_chunks = session_data["chunks"]
-            session_embs = session_data.get("embeddings")
-            if session_embs is not None and len(session_embs) == len(session_chunks):
-                q_norm = np.linalg.norm(query_embedding)
-                q_unit = query_embedding / (q_norm if q_norm > 0 else 1.0)
-                emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
-                emb_norms[emb_norms == 0] = 1.0
-                normed_embs = session_embs / emb_norms
-                scores = np.dot(normed_embs, q_unit)
-                ranked_indices = np.argsort(scores)[::-1][:k]
-                for idx in ranked_indices:
-                    chunk_copy = dict(session_chunks[idx])
-                    chunk_copy["relevance_score"] = float(round(scores[idx], 4))
-                    chunk_copy["dense_score"] = float(round(scores[idx], 4))
-                    chunk_copy["bm25_score"] = 0.0
-                    candidates.append(chunk_copy)
-            else:
-                candidates = list(session_chunks[:k])
+        with tracer.span("retrieval.hybrid_search.in_memory", attributes={"session_id": session_id, "k": k}):
+            candidates: List[Dict[str, Any]] = []
+            if "chunks" in session_data and session_data["chunks"]:
+                session_chunks = session_data["chunks"]
+                session_embs = session_data.get("embeddings")
+                if session_embs is not None and len(session_embs) == len(session_chunks):
+                    q_norm = np.linalg.norm(query_embedding)
+                    q_unit = query_embedding / (q_norm if q_norm > 0 else 1.0)
+                    emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
+                    emb_norms[emb_norms == 0] = 1.0
+                    normed_embs = session_embs / emb_norms
+                    scores = np.dot(normed_embs, q_unit)
+                    ranked_indices = np.argsort(scores)[::-1][:k]
+                    for idx in ranked_indices:
+                        chunk_copy = dict(session_chunks[idx])
+                        chunk_copy["relevance_score"] = float(round(scores[idx], 4))
+                        chunk_copy["dense_score"] = float(round(scores[idx], 4))
+                        chunk_copy["bm25_score"] = 0.0
+                        candidates.append(chunk_copy)
+                else:
+                    candidates = list(session_chunks[:k])
 
-        if active_files is not None:
-            candidates = [c for c in candidates if c.get("source_file") in active_files]
+            if active_files is not None:
+                candidates = [c for c in candidates if c.get("source_file") in active_files]
 
-        return candidates
+            return candidates
 
     async def save_chunks(
         self,
