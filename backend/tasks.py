@@ -173,16 +173,17 @@ def process_document_job(
 
         # Update session cache
         try:
-            import main
-            main.sessions[session_id] = {
-                "chunks": all_chunks,
-                "file_paths": valid_file_paths,
-                "file_names": valid_file_names,
-                "metadata": doc_metadata,
-                "insights": {},
-                "created_at": time.time(),
-                "owner_id": owner_id,
-            }
+            from session_store import sessions, _sessions_lock
+            with _sessions_lock:
+                sessions[session_id] = {
+                    "chunks": all_chunks,
+                    "file_paths": valid_file_paths,
+                    "file_names": valid_file_names,
+                    "metadata": doc_metadata,
+                    "insights": {},
+                    "created_at": time.time(),
+                    "owner_id": owner_id,
+                }
         except Exception as e:
             logger.debug(f"Failed to populate in-process session cache from background task: {e}")
 
