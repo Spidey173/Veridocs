@@ -1,6 +1,24 @@
 version: "3.8"
 
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: veridocs-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=veridocs
+      - POSTGRES_PASSWORD=veridocs_password
+      - POSTGRES_DB=veridocs
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veridocs -d veridocs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     container_name: veridocs-redis
@@ -27,6 +45,7 @@ services:
       - ENVIRONMENT=development
       - AUTH_MODE=demo
       - AUTH_SECRET_KEY=veridocs_super_secret_production_key_min_32_chars
+      - DATABASE_URL=postgresql://veridocs:veridocs_password@postgres:5432/veridocs
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - UPLOAD_DIR=/app/uploads
@@ -34,6 +53,8 @@ services:
     volumes:
       - uploads_data:/app/uploads
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -53,12 +74,15 @@ services:
       - ENVIRONMENT=development
       - AUTH_MODE=demo
       - AUTH_SECRET_KEY=veridocs_super_secret_production_key_min_32_chars
+      - DATABASE_URL=postgresql://veridocs:veridocs_password@postgres:5432/veridocs
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - UPLOAD_DIR=/app/uploads
     volumes:
       - uploads_data:/app/uploads
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -77,6 +101,6 @@ services:
       - backend
 
 volumes:
+  postgres_data:
   redis_data:
   uploads_data:
-

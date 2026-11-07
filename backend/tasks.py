@@ -154,6 +154,35 @@ def process_document_job(
             json.dump(session_meta, f, indent=2)
 
         try:
+            import asyncio
+            import database
+            if database.is_database_configured():
+                async def _save_to_db():
+                    await database.init_db()
+                    await database.save_session(
+                        session_id=session_id,
+                        owner_id=owner_id,
+                        file_names=file_names,
+                        file_paths=file_paths,
+                        metadata=doc_metadata,
+                        insights={},
+                        created_at=time.time()
+                    )
+                    if hasattr(vector_store, "embeddings") and vector_store.embeddings is not None:
+                        await database.save_chunks(session_id, all_chunks, vector_store.embeddings)
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(_save_to_db())
+                    else:
+                        loop.run_until_complete(_save_to_db())
+                except RuntimeError:
+                    asyncio.run(_save_to_db())
+        except Exception as e:
+            logger.debug(f"Could not persist async job session to database: {e}")
+
+        try:
             import main
             main.sessions[session_id] = {
                 "vector_store": vector_store,
