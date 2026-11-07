@@ -23,6 +23,11 @@ def is_database_configured() -> bool:
     return bool(settings.DATABASE_URL and settings.DATABASE_URL.strip())
 
 
+def is_database_ready() -> bool:
+    """Check if database is configured and connection pool is active and open."""
+    return is_database_configured() and _pool is not None and not getattr(_pool, "_closed", False)
+
+
 def run_migrations(dsn: Optional[str] = None) -> bool:
     """Run Alembic database migrations programmatically up to head."""
     try:

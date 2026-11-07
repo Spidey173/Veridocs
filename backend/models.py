@@ -169,6 +169,7 @@ class HealthResponse(BaseModel):
     active_sessions: int
     models_loaded: Dict[str, bool]
     providers_available: Dict[str, bool]
+    database_connected: Optional[bool] = None
 
 
 class JobStatus(str, Enum):

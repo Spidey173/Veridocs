@@ -8,6 +8,7 @@ import time
 import json
 import pytest
 import tempfile
+import numpy as np
 from fastapi.testclient import TestClient
 from pathlib import Path
 
@@ -90,12 +91,51 @@ class TestSecurityAndAccessControl:
 
         # In production gateway mode, fail if GATEWAY_SHARED_SECRET is not configured to prevent header spoofing
         monkeypatch.setattr(settings, "AUTH_SECRET_KEY", "strong-32-character-secret-key-for-test-suite")
+        monkeypatch.setattr(settings, "DATABASE_URL", "postgresql://user:pass@localhost:5432/veridocs")
         monkeypatch.setattr(settings, "AUTH_MODE", "gateway")
         monkeypatch.setattr(settings, "GATEWAY_SHARED_SECRET", "")
         monkeypatch.setattr(settings, "REQUIRE_API_KEY", False)
         with pytest.raises(RuntimeError) as excinfo:
             settings.validate_production_configuration()
         assert "GATEWAY_SHARED_SECRET" in str(excinfo.value)
+
+    def test_production_fails_without_database_url(self, monkeypatch):
+        """Verify production mode fails fast on startup if DATABASE_URL is not configured."""
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        monkeypatch.setattr(settings, "AUTH_SECRET_KEY", "strong-32-character-secret-key-for-test-suite")
+        monkeypatch.setattr(settings, "DATABASE_URL", "")
+        with pytest.raises(RuntimeError) as excinfo:
+            settings.validate_production_configuration()
+        assert "DATABASE_URL is required" in str(excinfo.value)
+
+    def test_production_query_fails_fast_when_database_unconfigured(self, test_client: TestClient, monkeypatch):
+        """Verify query endpoint fails fast with HTTP 503 in production if database is not configured."""
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        monkeypatch.setattr(settings, "AUTH_SECRET_KEY", "strong-32-character-secret-key-for-test-suite")
+        monkeypatch.setattr(settings, "DATABASE_URL", "")
+
+        token = create_access_token(user_id="prod_user")
+        test_client.headers["Authorization"] = f"Bearer {token}"
+
+        # Setup an in-memory session
+        sess_id = "prod_session_123"
+        main.sessions[sess_id] = {
+            "owner_id": "prod_user",
+            "file_names": ["doc.txt"],
+            "file_paths": ["/tmp/doc.txt"],
+            "chunks": [{"text": "Revenue grew by 20%", "source_file": "doc.txt"}],
+            "embeddings": np.ones((1, 384), dtype=np.float32),
+            "created_at": time.time(),
+        }
+
+        resp = test_client.post(
+            "/api/query",
+            json={"session_id": sess_id, "question": "What is revenue?"}
+        )
+        assert resp.status_code == 503
+        assert "database is required" in resp.json()["detail"].lower()
 
     def test_gateway_trusted_identity_header(self, monkeypatch, sample_txt_bytes, patch_models, mock_llm_service):
         """Verify gateway mode authenticates through trusted upstream headers without client tokens."""

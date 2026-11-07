@@ -102,7 +102,17 @@ async def lifespan(app: FastAPI):
 
     # Initialize PostgreSQL + pgvector if configured
     if database.is_database_configured():
-        await database.init_db()
+        db_ok = await database.init_db()
+        if not db_ok and settings.ENVIRONMENT == "production":
+            raise RuntimeError(
+                "FATAL DATABASE ERROR: Could not connect to PostgreSQL database in production mode. "
+                "Refusing to start in a degraded multi-worker state to prevent worker divergence."
+            )
+    elif settings.ENVIRONMENT == "production":
+        raise RuntimeError(
+            "FATAL CONFIGURATION ERROR: DATABASE_URL must be configured when ENVIRONMENT=production. "
+            "Multi-worker production nodes require a shared PostgreSQL + pgvector database."
+        )
 
     # Preload models in background
     def _warmup():
@@ -473,7 +483,7 @@ async def upload_documents(
         # Save session to PostgreSQL if configured (only insert newly added chunks)
         if database.is_database_configured():
             try:
-                await database.save_session(
+                saved_sess = await database.save_session(
                     session_id=session_id,
                     owner_id=current_user.user_id,
                     file_names=file_names,
@@ -482,9 +492,31 @@ async def upload_documents(
                     insights=existing_insights,
                     created_at=time.time()
                 )
-                await database.save_chunks(session_id, new_chunks, new_embeddings)
+                if not saved_sess and settings.ENVIRONMENT == "production":
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Failed to persist session to database in production mode. Aborting to prevent worker divergence."
+                    )
+                saved_chk = await database.save_chunks(session_id, new_chunks, new_embeddings)
+                if not saved_chk and settings.ENVIRONMENT == "production":
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Failed to persist document chunks to database in production mode. Aborting to prevent worker divergence."
+                    )
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.error(f"Failed to persist session {session_id} to PostgreSQL: {e}")
+                if settings.ENVIRONMENT == "production":
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Database persistence failure in production: {str(e)}"
+                    )
+        elif settings.ENVIRONMENT == "production":
+            raise HTTPException(
+                status_code=503,
+                detail="PostgreSQL database is required for uploads in production mode."
+            )
 
         # Save session to disk in background
         background_tasks.add_task(
@@ -739,35 +771,51 @@ async def answer_query(
         candidates = []
 
         if database.is_database_configured():
-            candidates = await database.hybrid_search_postgres(
-                session_id=request.session_id,
-                query=question,
-                query_embedding=q_emb,
-                k=settings.RETRIEVAL_INITIAL_K,
-                dense_weight=settings.DENSE_WEIGHT,
-                bm25_weight=settings.BM25_WEIGHT,
-                active_files=request.active_files or None
-            )
-        elif "chunks" in session_data and session_data["chunks"]:
-            # Fallback for testing when PostgreSQL is not configured
-            session_chunks = session_data["chunks"]
-            session_embs = session_data.get("embeddings")
-            if session_embs is not None and len(session_embs) == len(session_chunks):
-                q_norm = np.linalg.norm(q_emb)
-                q_unit = q_emb / (q_norm if q_norm > 0 else 1.0)
-                emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
-                emb_norms[emb_norms == 0] = 1.0
-                normed_embs = session_embs / emb_norms
-                scores = np.dot(normed_embs, q_unit)
-                ranked_indices = np.argsort(scores)[::-1][:settings.RETRIEVAL_INITIAL_K]
-                for idx in ranked_indices:
-                    chunk_copy = dict(session_chunks[idx])
-                    chunk_copy["relevance_score"] = float(round(scores[idx], 4))
-                    chunk_copy["dense_score"] = float(round(scores[idx], 4))
-                    chunk_copy["bm25_score"] = 0.0
-                    candidates.append(chunk_copy)
+            if not database.is_database_ready():
+                if settings.ENVIRONMENT == "production":
+                    logger.error("PostgreSQL connection pool is down during query retrieval in production.")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Database connection is unavailable. In-memory fallback is disabled in production to prevent worker state divergence."
+                    )
+                logger.warning("PostgreSQL pool offline; falling back to in-memory cosine similarity for development.")
             else:
-                candidates = list(session_chunks[:settings.RETRIEVAL_INITIAL_K])
+                candidates = await database.hybrid_search_postgres(
+                    session_id=request.session_id,
+                    query=question,
+                    query_embedding=q_emb,
+                    k=settings.RETRIEVAL_INITIAL_K,
+                    dense_weight=settings.DENSE_WEIGHT,
+                    bm25_weight=settings.BM25_WEIGHT,
+                    active_files=request.active_files or None
+                )
+        elif settings.ENVIRONMENT == "production":
+            raise HTTPException(
+                status_code=503,
+                detail="PostgreSQL database is required for queries in production mode. Ephemeral fallback is disabled."
+            )
+
+        # Fallback for local development / testing when PostgreSQL is not configured
+        if not candidates and not database.is_database_configured():
+            if "chunks" in session_data and session_data["chunks"]:
+                session_chunks = session_data["chunks"]
+                session_embs = session_data.get("embeddings")
+                if session_embs is not None and len(session_embs) == len(session_chunks):
+                    q_norm = np.linalg.norm(q_emb)
+                    q_unit = q_emb / (q_norm if q_norm > 0 else 1.0)
+                    emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
+                    emb_norms[emb_norms == 0] = 1.0
+                    normed_embs = session_embs / emb_norms
+                    scores = np.dot(normed_embs, q_unit)
+                    ranked_indices = np.argsort(scores)[::-1][:settings.RETRIEVAL_INITIAL_K]
+                    for idx in ranked_indices:
+                        chunk_copy = dict(session_chunks[idx])
+                        chunk_copy["relevance_score"] = float(round(scores[idx], 4))
+                        chunk_copy["dense_score"] = float(round(scores[idx], 4))
+                        chunk_copy["bm25_score"] = 0.0
+                        candidates.append(chunk_copy)
+                else:
+                    candidates = list(session_chunks[:settings.RETRIEVAL_INITIAL_K])
 
         if request.active_files is not None:
             candidates = [c for c in candidates if c.get("source_file") in request.active_files]
@@ -907,35 +955,47 @@ async def stream_query(
             candidates = []
 
             if database.is_database_configured():
-                candidates = await database.hybrid_search_postgres(
-                    session_id=request.session_id,
-                    query=question,
-                    query_embedding=q_emb,
-                    k=settings.RETRIEVAL_INITIAL_K,
-                    dense_weight=settings.DENSE_WEIGHT,
-                    bm25_weight=settings.BM25_WEIGHT,
-                    active_files=request.active_files or None
-                )
-            elif "chunks" in session_data and session_data["chunks"]:
-                # Fallback for testing when PostgreSQL is not configured
-                session_chunks = session_data["chunks"]
-                session_embs = session_data.get("embeddings")
-                if session_embs is not None and len(session_embs) == len(session_chunks):
-                    q_norm = np.linalg.norm(q_emb)
-                    q_unit = q_emb / (q_norm if q_norm > 0 else 1.0)
-                    emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
-                    emb_norms[emb_norms == 0] = 1.0
-                    normed_embs = session_embs / emb_norms
-                    scores = np.dot(normed_embs, q_unit)
-                    ranked_indices = np.argsort(scores)[::-1][:settings.RETRIEVAL_INITIAL_K]
-                    for idx in ranked_indices:
-                        chunk_copy = dict(session_chunks[idx])
-                        chunk_copy["relevance_score"] = float(round(scores[idx], 4))
-                        chunk_copy["dense_score"] = float(round(scores[idx], 4))
-                        chunk_copy["bm25_score"] = 0.0
-                        candidates.append(chunk_copy)
+                if not database.is_database_ready():
+                    if settings.ENVIRONMENT == "production":
+                        logger.error("PostgreSQL connection pool is down during stream retrieval in production.")
+                        yield _sse_event("error", {"detail": "Database connection is unavailable in production."})
+                        return
+                    logger.warning("PostgreSQL pool offline; falling back to in-memory cosine similarity for development.")
                 else:
-                    candidates = list(session_chunks[:settings.RETRIEVAL_INITIAL_K])
+                    candidates = await database.hybrid_search_postgres(
+                        session_id=request.session_id,
+                        query=question,
+                        query_embedding=q_emb,
+                        k=settings.RETRIEVAL_INITIAL_K,
+                        dense_weight=settings.DENSE_WEIGHT,
+                        bm25_weight=settings.BM25_WEIGHT,
+                        active_files=request.active_files or None
+                    )
+            elif settings.ENVIRONMENT == "production":
+                yield _sse_event("error", {"detail": "PostgreSQL database is required in production mode."})
+                return
+
+            # Fallback for local development / testing when PostgreSQL is not configured
+            if not candidates and not database.is_database_configured():
+                if "chunks" in session_data and session_data["chunks"]:
+                    session_chunks = session_data["chunks"]
+                    session_embs = session_data.get("embeddings")
+                    if session_embs is not None and len(session_embs) == len(session_chunks):
+                        q_norm = np.linalg.norm(q_emb)
+                        q_unit = q_emb / (q_norm if q_norm > 0 else 1.0)
+                        emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
+                        emb_norms[emb_norms == 0] = 1.0
+                        normed_embs = session_embs / emb_norms
+                        scores = np.dot(normed_embs, q_unit)
+                        ranked_indices = np.argsort(scores)[::-1][:settings.RETRIEVAL_INITIAL_K]
+                        for idx in ranked_indices:
+                            chunk_copy = dict(session_chunks[idx])
+                            chunk_copy["relevance_score"] = float(round(scores[idx], 4))
+                            chunk_copy["dense_score"] = float(round(scores[idx], 4))
+                            chunk_copy["bm25_score"] = 0.0
+                            candidates.append(chunk_copy)
+                    else:
+                        candidates = list(session_chunks[:settings.RETRIEVAL_INITIAL_K])
 
             if request.active_files is not None:
                 candidates = [c for c in candidates if c.get("source_file") in request.active_files]
@@ -1316,17 +1376,26 @@ async def get_conversation_history(
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health_check():
-    """Health check returning model and service status."""
+    """Health check returning model, database, and service status."""
     registry = get_model_registry()
+    db_configured = database.is_database_configured()
+    db_connected = database.is_database_ready() if db_configured else False
+
+    status = "healthy"
+    if settings.ENVIRONMENT == "production":
+        if not db_configured or not db_connected:
+            status = "degraded"
+
     return HealthResponse(
-        status="healthy",
+        status=status,
         version=settings.APP_VERSION,
         active_sessions=len(sessions),
         models_loaded={
             "embedding": registry._embedding_model is not None,
             "reranker": registry._reranker_model is not None,
         },
-        providers_available=settings.get_available_llm_providers()
+        providers_available=settings.get_available_llm_providers(),
+        database_connected=db_connected if db_configured else None
     )
 
 

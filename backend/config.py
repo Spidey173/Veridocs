@@ -203,6 +203,14 @@ class Settings:
                     "You must provide a unique, random secret in production."
                 )
 
+            if self.ENVIRONMENT == "production":
+                if not self.DATABASE_URL or not self.DATABASE_URL.strip():
+                    raise RuntimeError(
+                        "FATAL DATABASE CONFIGURATION: DATABASE_URL is required when ENVIRONMENT=production. "
+                        "Multi-worker production nodes require a shared PostgreSQL + pgvector database. "
+                        "Refusing to start in production with ephemeral in-memory storage to prevent worker divergence."
+                    )
+
             if self.AUTH_MODE == "gateway":
                 allow_unprotected = os.getenv("ALLOW_UNPROTECTED_GATEWAY_HEADERS", "false").lower() in ("true", "1", "yes")
                 if not self.GATEWAY_SHARED_SECRET and not self.REQUIRE_API_KEY and not allow_unprotected:
