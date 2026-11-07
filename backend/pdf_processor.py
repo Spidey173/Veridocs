@@ -1,13 +1,26 @@
 import io
 import re
+import os
+import base64
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Callable, Union, Generator, Iterable, Any
 import pypdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from config import get_settings
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Optional hook for testing or injecting custom multimodal vision transcribers
+_custom_vision_transcriber: Optional[Callable[[bytes, int], Optional[str]]] = None
+
+
+def register_vision_transcriber(fn: Optional[Callable[[bytes, int], Optional[str]]]) -> None:
+    """Register or clear a custom vision transcriber function (useful for tests and plugins)."""
+    global _custom_vision_transcriber
+    _custom_vision_transcriber = fn
 
 
 def fix_spaced_text(text: str) -> str:
@@ -156,9 +169,9 @@ def iter_pdf_pages(
                 logger.warning(f"Error extracting text from page {i + 1}: {str(e)}")
                 continue
 
-        # If most pages appear to be scanned images, run OCR fallback
-        if scanned_page_count > 0 and scanned_page_count >= total_pages * 0.5:
-            logger.info(f"{scanned_page_count}/{total_pages} pages appear scanned. Running OCR fallback...")
+        # If pages appear to be scanned images or no text was yielded, run OCR / Vision fallback
+        if scanned_page_count > 0 and (scanned_page_count >= total_pages * 0.5 or not yielded_any):
+            logger.info(f"{scanned_page_count}/{total_pages} pages appear scanned. Running OCR/Vision fallback...")
             if isinstance(file_input, bytes):
                 ocr_bytes = file_input
             elif isinstance(file_input, (str, Path)):
@@ -167,7 +180,20 @@ def iter_pdf_pages(
                 stream.seek(0)
                 ocr_bytes = stream.read()
 
+            # 1. Try local OCR first
             ocr_pages = _ocr_pdf_pages(ocr_bytes, total_pages, progress_callback=progress_callback)
+
+            # 2. If local OCR returned nothing, invoke Multimodal Vision Model fallback
+            if not ocr_pages:
+                logger.info("Local OCR unavailable or yielded no text. Invoking Multimodal Vision Model fallback...")
+                target_indices = scanned_indices if scanned_indices else list(range(1, total_pages + 1))
+                ocr_pages = _multimodal_vision_pdf_fallback(
+                    reader,
+                    total_pages,
+                    scanned_indices=target_indices,
+                    progress_callback=progress_callback
+                )
+
             for ocr_p in ocr_pages:
                 if not yielded_any or ocr_p["page"] in scanned_indices:
                     yield ocr_p
@@ -189,6 +215,135 @@ def extract_text_from_pdf(
 ) -> List[Dict[str, Any]]:
     """Extract text from PDF pages as a list."""
     return list(iter_pdf_pages(file_input, progress_callback=progress_callback))
+
+
+def _transcribe_scanned_image_via_vision(img_bytes: bytes, page_num: int) -> Optional[str]:
+    """Transcribe a scanned document page image using Multimodal Vision Models (Gemini Flash or OpenAI)."""
+    global _custom_vision_transcriber
+    if _custom_vision_transcriber is not None:
+        try:
+            custom_result = _custom_vision_transcriber(img_bytes, page_num)
+            if custom_result:
+                return custom_result.strip()
+        except Exception as e:
+            logger.warning(f"Custom vision transcriber error on page {page_num}: {e}")
+
+    settings = get_settings()
+
+    # 1. Try Google Gemini Flash Vision
+    gemini_key = (
+        settings.GOOGLE_API_KEY
+        or os.getenv("GOOGLE_API_KEY", "")
+        or os.getenv("GEMINI_API_KEY", "")
+    ).strip()
+    if gemini_key:
+        try:
+            import google.generativeai as genai
+            from PIL import Image
+
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = (
+                "You are an optical document transcription engine for financial, legal, and technical reports. "
+                "Transcribe all readable text, headers, and tables from this scanned document page. "
+                "Format tabular data with markdown pipes (| col | col |). "
+                "Preserve exact numbers, dates, currency signs, and section headings. "
+                "Do not include conversational commentary—return ONLY the transcribed document content."
+            )
+            image = Image.open(io.BytesIO(img_bytes))
+            response = model.generate_content([prompt, image])
+            if response and response.text and len(response.text.strip()) > 10:
+                logger.info(f"Page {page_num} successfully transcribed via Gemini Flash Vision.")
+                return response.text.strip()
+        except Exception as e:
+            logger.warning(f"Gemini Flash vision transcription failed on page {page_num}: {e}")
+
+    # 2. Try OpenAI Vision (gpt-4o-mini / gpt-4o)
+    openai_key = (settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")).strip()
+    if openai_key:
+        try:
+            import openai
+
+            client = openai.OpenAI(api_key=openai_key)
+            b64_img = base64.b64encode(img_bytes).decode("utf-8")
+            response = client.chat.completions.create(
+                model=settings.OPENAI_MODEL or "gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Transcribe this scanned document page into text and markdown tables. Preserve all headers, numbers, and dates without conversational commentary.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{b64_img}"},
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=2048,
+            )
+            text = response.choices[0].message.content
+            if text and len(text.strip()) > 10:
+                logger.info(f"Page {page_num} successfully transcribed via OpenAI Vision.")
+                return text.strip()
+        except Exception as e:
+            logger.warning(f"OpenAI vision transcription failed on page {page_num}: {e}")
+
+    return None
+
+
+def _multimodal_vision_pdf_fallback(
+    reader: pypdf.PdfReader,
+    total_pages: int,
+    scanned_indices: List[int],
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> List[Dict]:
+    """Transcribe flattened/corrupted image PDFs using multimodal vision models."""
+    vision_pages = []
+
+    for page_num in scanned_indices:
+        if page_num > len(reader.pages):
+            continue
+
+        if progress_callback:
+            progress_callback(
+                page_num,
+                total_pages,
+                f"Running Multimodal Vision transcription on page {page_num}/{total_pages}"
+            )
+
+        try:
+            page = reader.pages[page_num - 1]
+            page_images = []
+            for img in page.images:
+                if img.data and len(img.data) > 200:
+                    page_images.append(img.data)
+
+            if not page_images:
+                logger.warning(f"No embedded images detected on scanned page {page_num}.")
+                continue
+
+            largest_image = max(page_images, key=len)
+            transcribed = _transcribe_scanned_image_via_vision(largest_image, page_num)
+
+            if transcribed and len(transcribed.strip()) > 10:
+                sections = detect_sections(transcribed)
+                section_names = [s["heading"] for s in sections]
+                vision_pages.append({
+                    "page": page_num,
+                    "text": transcribed.strip(),
+                    "raw_text": transcribed,
+                    "sections": section_names,
+                    "is_scanned": True,
+                    "ocr_engine": "multimodal_vision"
+                })
+        except Exception as e:
+            logger.warning(f"Multimodal vision fallback error on page {page_num}: {e}")
+
+    return vision_pages
 
 
 def _ocr_pdf_pages(

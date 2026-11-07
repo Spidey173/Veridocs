@@ -14,6 +14,7 @@ from pdf_processor import (
     _extract_blocks,
     _format_table_block,
     _chunk_table_atomically,
+    register_vision_transcriber,
 )
 
 
@@ -277,4 +278,43 @@ class TestPDFProcessor:
         assert "| Line Item | 2024 | 2023 |" in p2_chunks[0]["raw_text"]
         assert "| Gross Profit | $ 60,000 | $ 45,000 |" in p2_chunks[0]["raw_text"]
         assert "| --- |" in p2_chunks[0]["raw_text"]
+
+    def test_multimodal_vision_fallback_for_scanned_image_pdf(self):
+        """Verify that pure scanned PDFs without OCR text trigger the multimodal vision fallback."""
+        import io
+        from PIL import Image
+
+        # 1. Create a pure scanned image PDF with zero text characters
+        img = Image.new("RGB", (300, 400), color=(255, 255, 255))
+        pdf_buf = io.BytesIO()
+        img.save(pdf_buf, format="PDF")
+        scanned_pdf_bytes = pdf_buf.getvalue()
+
+        # 2. Register mock multimodal vision model (e.g. simulating Gemini Flash vision)
+        mock_transcription = (
+            "CONFIDENTIAL AUDIT REPORT - SCANNED PHOTOCOPY\n\n"
+            "| Item | 2024 | 2023 |\n"
+            "| --- | --- | --- |\n"
+            "| Total Revenue | $ 125,000 | $ 98,000 |\n\n"
+            "Audited by Forensic Accounting Partners."
+        )
+
+        def mock_vision(img_bytes: bytes, page_num: int) -> str:
+            assert len(img_bytes) > 0
+            assert page_num == 1
+            return mock_transcription
+
+        register_vision_transcriber(mock_vision)
+
+        try:
+            pages = extract_text_from_file(scanned_pdf_bytes, filename="scanned_audit.pdf")
+            assert len(pages) == 1
+            assert pages[0]["page"] == 1
+            assert pages[0]["is_scanned"] is True
+            assert pages[0]["ocr_engine"] == "multimodal_vision"
+            assert "CONFIDENTIAL AUDIT REPORT" in pages[0]["text"]
+            assert "| Total Revenue | $ 125,000 | $ 98,000 |" in pages[0]["text"]
+        finally:
+            register_vision_transcriber(None)
+
 
