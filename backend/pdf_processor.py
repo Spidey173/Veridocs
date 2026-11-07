@@ -395,14 +395,16 @@ def _is_table_line(line: str) -> bool:
     return False
 
 
-def _format_table_block(block_text: str) -> str:
+def _format_table_block(block_text: str, default_header: Optional[str] = None) -> str:
     """Ensure table block is formatted with markdown pipes for optimal LLM and embedding comprehension."""
     lines = block_text.strip().split("\n")
     if not lines:
         return block_text
 
-    # If already formatted as a markdown table, return as is
-    if any(line.strip().startswith("|") for line in lines):
+    # If already formatted as a markdown table with separator, return as is (or attach default_header if missing)
+    has_pipes = any(line.strip().startswith("|") for line in lines)
+    has_sep = any(re.match(r'^\|?[\s\-:]+(\|[\s\-:]+)+\|?$', line.strip()) for line in lines)
+    if has_pipes and has_sep:
         return block_text
 
     formatted_rows = []
@@ -413,13 +415,25 @@ def _format_table_block(block_text: str) -> str:
         if re.match(r'^[\s\-=_]+$', s):
             continue  # omit raw divider lines in markdown conversion
 
-        if "\t" in s:
+        if s.startswith("|") and s.endswith("|") and s.count("|") >= 2:
+            cols = [c.strip() for c in s.strip("|").split("|")]
+        elif "\t" in s:
             cols = [c.strip() for c in s.split("\t") if c.strip()]
         else:
             cols = [c.strip() for c in re.split(r'\s{2,}', s) if c.strip()]
 
         if cols:
             formatted_rows.append("| " + " | ".join(cols) + " |")
+
+    if not formatted_rows:
+        return block_text
+
+    # If a default continuation header is provided and the continuing table lacks its own header
+    if default_header and formatted_rows:
+        first_row_clean = re.sub(r'[\s|]', '', formatted_rows[0]).lower()
+        hdr_clean = re.sub(r'[\s|]', '', default_header.strip().split("\n")[0]).lower()
+        if first_row_clean != hdr_clean:
+            return default_header.strip() + "\n" + "\n".join(formatted_rows)
 
     if len(formatted_rows) >= 2:
         col_count = formatted_rows[0].count("|") - 1
@@ -429,6 +443,70 @@ def _format_table_block(block_text: str) -> str:
         return "\n".join(formatted_rows)
 
     return block_text
+
+
+def _chunk_table_atomically(
+    table_text: str,
+    max_chunk_chars: int = 1200
+) -> List[str]:
+    """Preserve table structures as indivisible semantic units.
+    
+    If the table exceeds max_chunk_chars, it splits strictly at row boundaries
+    and re-injects the original column headers into every subsequent chunk.
+    """
+    cleaned_table = table_text.strip()
+    if not cleaned_table:
+        return []
+
+    lines = [ln.strip() for ln in cleaned_table.split("\n") if ln.strip()]
+    if not lines:
+        return []
+
+    # If table comfortably fits within limit, keep it indivisible
+    if len(cleaned_table) <= max_chunk_chars:
+        return [cleaned_table]
+
+    # Find the markdown separator line
+    sep_idx = -1
+    for i, line in enumerate(lines):
+        if re.match(r'^\|?[\s\-:]+(\|[\s\-:]+)+\|?$', line):
+            sep_idx = i
+            break
+
+    if sep_idx > 0:
+        header_rows = lines[:sep_idx]
+        sep_row = lines[sep_idx]
+        data_rows = lines[sep_idx + 1:]
+    else:
+        # Fallback: treat first line as header
+        header_rows = [lines[0]]
+        col_count = header_rows[0].count("|") - 1
+        sep_row = "| " + " | ".join(["---"] * max(col_count, 1)) + " |"
+        data_rows = lines[1:]
+
+    header_prefix = "\n".join(header_rows + [sep_row])
+
+    if not data_rows:
+        return [cleaned_table]
+
+    chunks = []
+    current_chunk_rows = []
+    current_chunk_len = len(header_prefix)
+
+    for row in data_rows:
+        row_len = len(row) + 1  # includes newline
+        if current_chunk_rows and (current_chunk_len + row_len > max_chunk_chars):
+            chunks.append(header_prefix + "\n" + "\n".join(current_chunk_rows))
+            current_chunk_rows = [row]
+            current_chunk_len = len(header_prefix) + row_len
+        else:
+            current_chunk_rows.append(row)
+            current_chunk_len += row_len
+
+    if current_chunk_rows:
+        chunks.append(header_prefix + "\n" + "\n".join(current_chunk_rows))
+
+    return chunks
 
 
 def _extract_blocks(text: str) -> List[Tuple[str, bool]]:
@@ -482,6 +560,7 @@ def chunk_text(
 
         chunks = []
         current_section = None
+        active_table_header: Optional[str] = None
 
         for page_info in pages:
             page_num = page_info["page"]
@@ -501,15 +580,39 @@ def chunk_text(
             try:
                 blocks = _extract_blocks(page_text)
 
-                for block_text, is_table in blocks:
+                for block_idx, (block_text, is_table) in enumerate(blocks):
                     block_stripped = block_text.strip()
                     if not block_stripped:
                         continue
 
                     if is_table:
-                        formatted_table = _format_table_block(block_stripped)
-                        splits = [formatted_table] if len(formatted_table) <= chunk_size * 2 else text_splitter.split_text(formatted_table)
+                        # Cross-page table stitching: if preceding page ended with table and current starts with table
+                        use_header = None
+                        if active_table_header and (block_idx == 0 or (block_idx == 1 and len(blocks[0][0].strip()) < 80)):
+                            use_header = active_table_header
+
+                        formatted_table = _format_table_block(block_stripped, default_header=use_header)
+
+                        # Extract table header to preserve if this table reaches the page boundary
+                        sep_match = re.search(r'\n(\|?[\s\-:]+(\|[\s\-:]+)+\|?)(?:\n|$)', formatted_table)
+                        if sep_match:
+                            hdr_end = sep_match.end()
+                            current_tbl_hdr = formatted_table[:hdr_end].strip()
+                        else:
+                            first_ln = formatted_table.split("\n")[0]
+                            col_cnt = first_ln.count("|") - 1
+                            sep_ln = "| " + " | ".join(["---"] * max(col_cnt, 1)) + " |"
+                            current_tbl_hdr = f"{first_ln}\n{sep_ln}"
+
+                        if block_idx == len(blocks) - 1:
+                            active_table_header = current_tbl_hdr
+                        else:
+                            active_table_header = None
+
+                        table_max_chars = max(chunk_size * 2, 1000)
+                        splits = _chunk_table_atomically(formatted_table, max_chunk_chars=table_max_chars)
                     else:
+                        active_table_header = None
                         splits = text_splitter.split_text(block_stripped)
 
                     for split in splits:

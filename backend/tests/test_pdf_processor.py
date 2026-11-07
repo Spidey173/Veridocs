@@ -12,6 +12,8 @@ from pdf_processor import (
     extract_text_from_file,
     get_pdf_metadata,
     _extract_blocks,
+    _format_table_block,
+    _chunk_table_atomically,
 )
 
 
@@ -205,3 +207,74 @@ class TestPDFProcessor:
         assert "| Line Item | 2024 | 2023 |" in md_table
         assert "| --- |" in md_table
         assert "| Cash and cash equivalents | $ 24,500 | $ 19,200 |" in md_table
+
+    def test_atomic_table_chunking_preserves_headers_across_splits(self):
+        """Verify that large tables split strictly at row boundaries and repeat column headers on every chunk."""
+        # 1. Test small table remains an indivisible semantic unit
+        small_tbl = (
+            "| Metric | 2024 | 2023 |\n"
+            "| --- | --- | --- |\n"
+            "| Cash | $ 100 | $ 90 |\n"
+            "| Debt | $ 50 | $ 60 |"
+        )
+        small_splits = _chunk_table_atomically(small_tbl, max_chunk_chars=500)
+        assert len(small_splits) == 1
+        assert small_splits[0] == small_tbl
+
+        # 2. Test large multi-row table exceeding chunk threshold
+        header = "| Metric Name | FY 2024 (in Millions) | FY 2023 (in Millions) |\n| --- | --- | --- |"
+        rows = [f"| Financial Line Item {i:02d} | $ {i*150:,} | $ {i*120:,} |" for i in range(1, 31)]
+        dense_tbl = header + "\n" + "\n".join(rows)
+
+        # Split with tight character budget
+        splits = _chunk_table_atomically(dense_tbl, max_chunk_chars=400)
+        assert len(splits) > 1
+
+        # Every partition must have header and separator
+        for i, split in enumerate(splits):
+            lines = split.strip().split("\n")
+            assert lines[0] == "| Metric Name | FY 2024 (in Millions) | FY 2023 (in Millions) |"
+            assert lines[1] == "| --- | --- | --- |"
+            # Ensure every remaining line is an unsevered row starting and ending with pipe
+            for row_line in lines[2:]:
+                assert row_line.startswith("|")
+                assert row_line.endswith("|")
+                assert row_line.count("|") == 4
+
+    def test_multi_page_table_stitching_across_pages(self):
+        """Verify that multi-page tables continuing across page boundaries inherit column headers."""
+        page1_text = (
+            "Form 10-K Consolidated Statements of Operations\n\n"
+            "Line Item                        2024          2023\n"
+            "---------------------------------------------------\n"
+            "Net Sales                        $ 150,000     $ 120,000\n"
+            "Cost of Goods Sold               $ 90,000      $ 75,000"
+        )
+        page2_text = (
+            "Gross Profit                     $ 60,000      $ 45,000\n"
+            "Operating Expenses               $ 30,000      $ 25,000\n"
+            "Operating Income                 $ 30,000      $ 20,000\n\n"
+            "Note 1: Summary of Significant Accounting Policies."
+        )
+
+        pages = [
+            {"page": 1, "text": page1_text, "sections": []},
+            {"page": 2, "text": page2_text, "sections": []},
+        ]
+
+        chunks = chunk_text(pages, chunk_size=500)
+        assert len(chunks) >= 2
+
+        # Verify page 1 table chunk has headers
+        p1_chunks = [c for c in chunks if c["page"] == 1 and c["is_table"]]
+        assert len(p1_chunks) >= 1
+        assert "| Line Item | 2024 | 2023 |" in p1_chunks[0]["raw_text"]
+        assert "| Net Sales | $ 150,000 | $ 120,000 |" in p1_chunks[0]["raw_text"]
+
+        # Verify page 2 continuing table chunk inherited the column header from page 1!
+        p2_chunks = [c for c in chunks if c["page"] == 2 and c["is_table"]]
+        assert len(p2_chunks) >= 1
+        assert "| Line Item | 2024 | 2023 |" in p2_chunks[0]["raw_text"]
+        assert "| Gross Profit | $ 60,000 | $ 45,000 |" in p2_chunks[0]["raw_text"]
+        assert "| --- |" in p2_chunks[0]["raw_text"]
+

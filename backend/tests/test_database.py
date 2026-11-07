@@ -196,3 +196,15 @@ async def test_database_postgres_integration():
     assert del_ok is True
 
     await database.close_db()
+
+
+def test_alembic_migrations_configuration_and_head():
+    """Verify that Alembic is configured properly and tracks initial pgvector schema head."""
+    head = database.get_migration_head()
+    assert head == "001_initial_pgvector"
+
+    # Verify programmatic migration execution function exists and runs safely
+    res = database.run_migrations("invalid_test_dsn_safe_noop")
+    # Even if DSN fails to connect, run_migrations safely handles exception and returns False
+    assert res is False
+
