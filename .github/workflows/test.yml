@@ -47,7 +47,7 @@ jobs:
 
       - name: Install frontend dependencies via lockfile
         working-directory: ./frontend
-        run: npm ci
+        run: npm ci --legacy-peer-deps --legacy-peer-deps
 
       - name: Run ESLint
         working-directory: ./frontend
@@ -56,6 +56,10 @@ jobs:
       - name: Run TypeScript type check
         working-directory: ./frontend
         run: npx tsc --noEmit
+
+      - name: Run Vitest Unit Suite
+        working-directory: ./frontend
+        run: npm test
 
       - name: Run Next.js production build
         working-directory: ./frontend
@@ -79,7 +83,7 @@ jobs:
 
       - name: Install frontend dependencies via lockfile
         working-directory: ./frontend
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Install Playwright Chromium with system dependencies
         working-directory: ./frontend

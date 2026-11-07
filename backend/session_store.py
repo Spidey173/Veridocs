@@ -3,7 +3,6 @@ Central Session Store and Data Lifecycle Manager for Veridocs.
 Manages in-memory session caches, disk snapshots, retention policies, and parallel document insights.
 """
 
-import os
 import json
 import time
 import shutil

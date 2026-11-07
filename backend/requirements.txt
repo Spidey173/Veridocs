@@ -25,6 +25,7 @@ greenlet>=3.0.0
 
 # LLM providers
 openai==1.59.3
+anthropic>=0.18.0
 google-generativeai==0.8.4
 
 # HTTP client

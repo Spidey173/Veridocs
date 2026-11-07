@@ -7,9 +7,7 @@ claim-level RAG Triad grounding verification, and cross-document contradiction a
 import asyncio
 import logging
 import threading
-import shutil
 from pathlib import Path
-from typing import Union, Dict, Any, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request

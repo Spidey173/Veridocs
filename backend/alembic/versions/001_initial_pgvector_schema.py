@@ -36,6 +36,8 @@ def upgrade() -> None:
         sa.Column('created_at', sa.Float(precision=53), nullable=False),
         sa.Column('updated_at', sa.Float(precision=53), nullable=False),
     )
+    op.create_index('idx_sessions_owner', 'sessions', ['owner_id'])
+    op.create_index('idx_sessions_created', 'sessions', ['created_at'])
 
     # 3. Document chunks table
     op.create_table(
@@ -82,5 +84,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table('chat_messages')
     op.drop_table('document_chunks')
+    op.drop_index('idx_sessions_created', table_name='sessions')
+    op.drop_index('idx_sessions_owner', table_name='sessions')
     op.drop_table('sessions')
     op.execute("DROP EXTENSION IF EXISTS vector CASCADE;")

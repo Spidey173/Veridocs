@@ -409,10 +409,6 @@ export async function fetchPdfBlobUrl(sessionId: string, documentName: string): 
   return URL.createObjectURL(blob);
 }
 
-export function getPdfUrl(sessionId: string, documentName: string): string {
-  return `${getApiBase()}/api/documents/${sessionId}/pdf?document_name=${encodeURIComponent(documentName)}`;
-}
-
 export async function deleteSession(sessionId: string): Promise<{ status: string; message: string }> {
   const authHeaders = await getAuthHeaders();
   const response = await fetch(`${getApiBase()}/api/sessions/${sessionId}`, {

@@ -206,3 +206,14 @@ def test_alembic_migrations_configuration_and_head():
     # Even if DSN fails to connect, run_migrations safely handles exception and returns False
     assert res is False
 
+
+@pytest.mark.asyncio
+async def test_database_delete_expired_sessions_and_aliases():
+    """Verify delete_expired_sessions and backwards-compatibility alias delete_session_data."""
+    # When pool is uninitialized, returns safe 0 without crashing
+    deleted_count = await database.delete_expired_sessions(cutoff_time=1000.0)
+    assert deleted_count == 0
+
+    # Ensure alias points to delete_session
+    assert database.delete_session_data is database.delete_session
+

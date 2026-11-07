@@ -145,10 +145,13 @@ class TestAPIEndpoints:
         # Success serving by index
         resp = test_client.get(f"/api/documents/{session_id}/pdf?file_index=0")
         assert resp.status_code == 200
+        assert "private" in resp.headers.get("Cache-Control", "")
+        assert "no-store" in resp.headers.get("Cache-Control", "")
 
         # Success serving by document_name
         resp_name = test_client.get(f"/api/documents/{session_id}/pdf?document_name=my_notes.txt")
         assert resp_name.status_code == 200
+        assert "private" in resp_name.headers.get("Cache-Control", "")
 
         # 404 for invalid index
         resp_bad_idx = test_client.get(f"/api/documents/{session_id}/pdf?file_index=99")

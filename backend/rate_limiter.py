@@ -7,7 +7,8 @@ HTTP rate limiting for API endpoints backed by Redis with in-memory fallback.
 import time
 import threading
 import logging
-from typing import List, Tuple, Optional, Dict
+from collections import deque
+from typing import List, Tuple, Optional, Dict, Deque
 from fastapi import HTTPException, Request
 
 from config import get_settings
@@ -22,14 +23,14 @@ class SlidingWindowTokenLimiter:
         self.window_seconds = window_seconds
         self.max_tpm = max_tpm
         self.max_rpm = max_rpm
-        self._history: List[Tuple[float, int]] = []  # (timestamp, token_count)
+        self._history: Deque[Tuple[float, int]] = deque()  # (timestamp, token_count)
         self._lock = threading.Lock()
 
     def _cleanup(self, now: float) -> None:
         """Evict events outside the current sliding window."""
         cutoff = now - self.window_seconds
         while self._history and self._history[0][0] <= cutoff:
-            self._history.pop(0)
+            self._history.popleft()
 
     def current_usage(self) -> Tuple[int, int]:
         """Return (current_tokens, current_requests) in the active window."""

@@ -170,7 +170,7 @@ class PostgresVectorStore(BaseVectorStore):
         return await database.save_chunks(session_id, chunks, embeddings)
 
     async def delete_session(self, session_id: str) -> bool:
-        return await database.delete_session_data(session_id)
+        return await database.delete_session(session_id)
 
 
 class InMemoryVectorStore(BaseVectorStore):

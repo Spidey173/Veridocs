@@ -68,30 +68,30 @@ async def upload_documents(
             continue
 
         try:
-            # Stream read file in 1MB chunks to prevent memory spikes
+            # Stream write directly to disk in 1MB chunks with O(1) memory
             max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
-            chunk_bytes_list = []
-            total_read = 0
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                total_read += len(chunk)
-                if total_read > max_bytes:
-                    failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")
-                    break
-                chunk_bytes_list.append(chunk)
-
-            if total_read > max_bytes:
-                continue
-
-            contents = b"".join(chunk_bytes_list)
-            logger.info(f"Processing upload for user {current_user.user_id}: {filename} ({len(contents)} bytes)")
-
-            # Save file to disk for PDF viewer
             session_file_id = str(uuid.uuid4())
             save_path = Path(settings.UPLOAD_DIR) / f"{session_file_id}{ext}"
-            save_path.write_bytes(contents)
+            total_read = 0
+            file_too_large = False
+
+            with open(save_path, "wb") as out_f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total_read += len(chunk)
+                    if total_read > max_bytes:
+                        file_too_large = True
+                        break
+                    out_f.write(chunk)
+
+            if file_too_large:
+                failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")
+                _safe_delete_file(save_path)
+                continue
+
+            logger.info(f"Processing upload for user {current_user.user_id}: {filename} ({total_read} bytes)")
 
             # Stream extract text from disk to avoid in-memory byte duplication
             pages = extract_text_from_file(save_path, filename=filename)
@@ -103,7 +103,7 @@ async def upload_documents(
 
             metadata = {
                 "filename": filename,
-                "file_size_bytes": len(contents),
+                "file_size_bytes": total_read,
                 "num_pages": len(pages),
                 "is_encrypted": False,
                 "metadata": {}
@@ -320,7 +320,7 @@ async def get_document_pdf(
         media_type="application/pdf",
         filename=file_names[file_index] if file_index < len(file_names) else "document.pdf",
         headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
+            "Cache-Control": "private, no-cache, no-store, must-revalidate",
             "Accept-Ranges": "bytes",
         }
     )

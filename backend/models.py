@@ -222,6 +222,19 @@ class JobProgress(BaseModel):
     scanned_pages: int = 0
     chunks_created: int = 0
 
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]] = None) -> "JobProgress":
+        if not data or not isinstance(data, dict):
+            return cls()
+        return cls(
+            current_page=data.get("current_page", 0),
+            total_pages=data.get("total_pages", 0),
+            percent=data.get("percent", 0.0),
+            stage=data.get("stage", ""),
+            scanned_pages=data.get("scanned_pages", 0),
+            chunks_created=data.get("chunks_created", 0),
+        )
+
 
 class JobResponse(BaseModel):
     job_id: str

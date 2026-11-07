@@ -40,8 +40,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /install /install
 COPY . /app
 
-# Ensure uploads directory exists
-RUN mkdir -p /app/uploads/sessions /app/uploads/jobs
+# Create non-root user and prepare uploads directory
+RUN groupadd -g 10001 appgroup && \
+    useradd -u 10001 -g appgroup -s /bin/sh -d /app appuser && \
+    mkdir -p /app/uploads/sessions /app/uploads/jobs && \
+    chown -R appuser:appgroup /app
+
+USER appuser
 
 EXPOSE 8000
 

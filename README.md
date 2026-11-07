@@ -182,18 +182,21 @@ alembic downgrade -1
 ## 🧪 Testing Suite
 
 ### 1. Backend Pytest Suite (Unit, Integration, & Security)
-The backend contains 151 automated unit, integration, and security tests covering RRF hybrid search, anti-IDOR authorization, async tasks, and RAG Triad grounding:
+The backend contains 157 automated unit, integration, and security tests covering RRF hybrid search, anti-IDOR authorization, async tasks, and RAG Triad grounding:
 
 ```bash
 # Run all tests with coverage
 pytest backend/tests --cov=backend --cov-report=term-missing
 ```
 
-### 2. Frontend Playwright E2E Suite
-The frontend includes 16 Playwright end-to-end tests covering real browser rendering, drag-and-drop ingestion, SSE token streaming, contradiction audits, and claim drawers:
+### 2. Frontend Vitest & Playwright Suites
+The frontend includes Vitest unit tests for Zustand state stores and API clients, plus 16 Playwright end-to-end tests covering real browser rendering, drag-and-drop ingestion, SSE token streaming, contradiction audits, and claim drawers:
 
 ```bash
 cd frontend
+
+# Run frontend Vitest unit tests
+npm test
 
 # Run all Playwright E2E tests headless
 npm run test:e2e

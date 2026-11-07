@@ -3,7 +3,6 @@ Cross-Document Contradiction and Comparative Audit Endpoints.
 """
 
 import logging
-from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Depends
 
 from config import get_settings

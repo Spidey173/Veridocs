@@ -225,6 +225,30 @@ async def delete_session(session_id: str) -> bool:
         return False
 
 
+# Compatibility alias
+delete_session_data = delete_session
+
+
+async def delete_expired_sessions(cutoff_time: float) -> int:
+    """Delete expired sessions and cascade delete all chunks and messages. Returns count of deleted sessions."""
+    if _pool is None:
+        return 0
+
+    query = "DELETE FROM sessions WHERE created_at < $1;"
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute(query, cutoff_time)
+            # asyncpg returns status string e.g. "DELETE 3"
+            parts = result.split()
+            count = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+            if count > 0:
+                logger.info(f"Purged {count} expired sessions from PostgreSQL")
+            return count
+    except Exception as e:
+        logger.error(f"Error deleting expired sessions from database: {e}")
+        return 0
+
+
 async def delete_document_from_session(session_id: str, document_name: str) -> bool:
     """Remove chunks for a single document from PostgreSQL."""
     if _pool is None:
@@ -349,7 +373,7 @@ async def hybrid_search_postgres(
         WHERE session_id = $1
           AND ($7::varchar[] IS NULL OR source_file = ANY($7::varchar[]))
         ORDER BY embedding <=> $2
-        LIMIT 20
+        LIMIT GREATEST($6, 20)
     ),
     sparse AS (
         SELECT id, text, page_number, source_file, metadata,
@@ -359,7 +383,7 @@ async def hybrid_search_postgres(
         WHERE session_id = $1
           AND ($7::varchar[] IS NULL OR source_file = ANY($7::varchar[]))
           AND to_tsvector('english', text) @@ plainto_tsquery('english', $3)
-        LIMIT 20
+        LIMIT GREATEST($6, 20)
     ),
     combined AS (
         SELECT

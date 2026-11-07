@@ -4,7 +4,6 @@ Tracks request throughput, latencies, LLM token invocations, vector searches, an
 Exposes standard Prometheus exposition format without requiring heavy external client dependencies.
 """
 
-import time
 import threading
 from typing import Dict, Tuple
 

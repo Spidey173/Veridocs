@@ -165,3 +165,21 @@ class TestVectorStoreStrategy:
             get_vector_store()
         assert exc_info.value.status_code == 503
         assert "database is required" in exc_info.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_postgres_vector_store_delete_session(self, monkeypatch):
+        """Verify PostgresVectorStore.delete_session delegates directly to database.delete_session."""
+        from vector_store import PostgresVectorStore
+        import database
+
+        called = []
+        async def mock_delete_session(session_id: str):
+            called.append(session_id)
+            return True
+
+        monkeypatch.setattr(database, "delete_session", mock_delete_session)
+
+        store = PostgresVectorStore()
+        result = await store.delete_session("session-test-123")
+        assert result is True
+        assert called == ["session-test-123"]

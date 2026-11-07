@@ -15,7 +15,7 @@ from models import JobResponse, JobDetailResponse, JobListResponse, JobProgress,
 from job_tracker import get_job_tracker
 from tasks import dispatch_document_job
 from rate_limiter import enforce_rate_limit
-from session_store import sessions, _get_session
+from session_store import sessions, _get_session, _safe_delete_file
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +53,28 @@ async def submit_async_document_job(
             continue
 
         try:
-            contents = await file.read()
-            if len(contents) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
-                failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")
-                continue
-
+            # Stream directly to disk in 1MB chunks to avoid memory spikes
+            max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
             session_file_id = str(uuid.uuid4())
             save_path = Path(settings.UPLOAD_DIR) / f"{session_file_id}{ext}"
-            save_path.write_bytes(contents)
+            total_read = 0
+            file_too_large = False
+
+            with open(save_path, "wb") as out_f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total_read += len(chunk)
+                    if total_read > max_bytes:
+                        file_too_large = True
+                        break
+                    out_f.write(chunk)
+
+            if file_too_large:
+                failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")
+                _safe_delete_file(save_path)
+                continue
 
             saved_paths.append(str(save_path))
             file_names.append(filename)
@@ -129,15 +143,7 @@ async def get_job_status(
         except Exception as e:
             logger.debug(f"Session {session_id} not available yet for job {job_id}: {e}")
 
-    prog = job.get("progress", {})
-    progress_obj = JobProgress(
-        current_page=prog.get("current_page", 0),
-        total_pages=prog.get("total_pages", 0),
-        percent=prog.get("percent", 0.0),
-        stage=prog.get("stage", ""),
-        scanned_pages=prog.get("scanned_pages", 0),
-        chunks_created=prog.get("chunks_created", 0),
-    )
+    progress_obj = JobProgress.from_dict(job.get("progress"))
 
     return JobDetailResponse(
         job_id=job["job_id"],
@@ -164,15 +170,7 @@ async def list_user_jobs(
     job_responses = []
 
     for j in raw_jobs:
-        prog = j.get("progress", {})
-        progress_obj = JobProgress(
-            current_page=prog.get("current_page", 0),
-            total_pages=prog.get("total_pages", 0),
-            percent=prog.get("percent", 0.0),
-            stage=prog.get("stage", ""),
-            scanned_pages=prog.get("scanned_pages", 0),
-            chunks_created=prog.get("chunks_created", 0),
-        )
+        progress_obj = JobProgress.from_dict(j.get("progress"))
         job_responses.append(JobDetailResponse(
             job_id=j["job_id"],
             status=j.get("status", JobStatus.QUEUED),
