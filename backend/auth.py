@@ -1,9 +1,3 @@
-"""
-Authentication and Access Control module for Veridocs.
-Provides tamper-proof, signed token authentication (HMAC-SHA256),
-multi-tenant user isolation, and gateway API key verification.
-"""
-
 import os
 import time
 import json
@@ -12,6 +6,7 @@ import base64
 import secrets
 import hashlib
 import logging
+from pathlib import Path
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
 from fastapi import HTTPException, Header, Query, Request
@@ -20,12 +15,29 @@ from config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Fallback in-memory secret generated on server startup if not specified in env
+# Fallback secret if not configured in environment
 _EPHEMERAL_SECRET: str = secrets.token_hex(32)
 
 
+def _get_dev_secret() -> str:
+    """Get or create a local secret stored on disk for development."""
+    settings = get_settings()
+    try:
+        secret_file = Path(settings.UPLOAD_DIR) / ".auth_dev_secret"
+        if secret_file.exists():
+            content = secret_file.read_text(encoding="utf-8").strip()
+            if len(content) >= 32:
+                return content
+        new_secret = secrets.token_hex(32)
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        secret_file.write_text(new_secret, encoding="utf-8")
+        return new_secret
+    except Exception:
+        return _EPHEMERAL_SECRET
+
+
 class UserContext(BaseModel):
-    """Authenticated user context attached to request state."""
+    """Holds information about the currently authenticated user."""
     user_id: str
     created_at: float
     expires_at: float
@@ -33,10 +45,7 @@ class UserContext(BaseModel):
 
 
 def _get_signing_key() -> str:
-    """
-    Retrieve secret signing key from settings or fallback to ephemeral startup secret in dev/demo.
-    Fails fast in production/gateway mode if secret is unconfigured.
-    """
+    """Get the secret key used to sign tokens."""
     settings = get_settings()
     if settings.AUTH_SECRET_KEY and settings.AUTH_SECRET_KEY.strip():
         return settings.AUTH_SECRET_KEY.strip()
@@ -46,16 +55,16 @@ def _get_signing_key() -> str:
             "FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is required in production/gateway mode."
         )
 
-    return _EPHEMERAL_SECRET
+    return _get_dev_secret()
 
 
 def _b64encode(data: bytes) -> str:
-    """URL-safe base64 encoding without padding."""
+    """Base64 encode without padding."""
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
 
 def _b64decode(data: str) -> bytes:
-    """URL-safe base64 decoding with padding restoration."""
+    """Base64 decode with padding restoration."""
     padding = "=" * ((4 - len(data) % 4) % 4)
     return base64.urlsafe_b64decode(data + padding)
 
@@ -65,10 +74,7 @@ def create_access_token(
     expires_in_hours: Optional[int] = None,
     role: str = "user"
 ) -> str:
-    """
-    Generate a cryptographically signed, tamper-proof user token.
-    Token structure: base64url(payload).base64url(hmac_sha256_signature)
-    """
+    """Generate an HMAC-SHA256 signed access token."""
     settings = get_settings()
     now = time.time()
     ttl_hours = expires_in_hours or settings.TOKEN_EXPIRE_HOURS or 24
@@ -94,10 +100,7 @@ def create_access_token(
 
 
 def verify_access_token(token: str) -> UserContext:
-    """
-    Validate HMAC-SHA256 signature and expiration of a user token.
-    Raises HTTPException(401) on failure.
-    """
+    """Validate token signature and expiration."""
     if not token or "." not in token:
         raise HTTPException(
             status_code=401,
@@ -113,7 +116,6 @@ def verify_access_token(token: str) -> UserContext:
 
     payload_b64, sig_b64 = parts
 
-    # Verify signature
     signing_key = _get_signing_key().encode("utf-8")
     expected_sig = hmac.new(signing_key, payload_b64.encode("utf-8"), hashlib.sha256).digest()
     expected_sig_b64 = _b64encode(expected_sig)
@@ -121,10 +123,9 @@ def verify_access_token(token: str) -> UserContext:
     if not hmac.compare_digest(sig_b64, expected_sig_b64):
         raise HTTPException(
             status_code=401,
-            detail="Invalid token signature. Token may have been tampered with or issued with a different secret."
+            detail="Invalid token signature."
         )
 
-    # Decode and verify payload
     try:
         payload_bytes = _b64decode(payload_b64)
         payload = json.loads(payload_bytes.decode("utf-8"))
@@ -134,12 +135,11 @@ def verify_access_token(token: str) -> UserContext:
             detail=f"Unable to decode token payload: {str(e)}"
         )
 
-    # Check expiration
     exp = payload.get("exp", 0)
     if time.time() > exp:
         raise HTTPException(
             status_code=401,
-            detail="Authentication token has expired. Please refresh your session."
+            detail="Authentication token has expired."
         )
 
     uid = payload.get("uid")
@@ -163,20 +163,10 @@ async def get_current_user(
     x_user_token: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None),
 ) -> UserContext:
-    """
-    FastAPI dependency for user endpoint authentication & user identity resolution.
-    Accepts:
-    1. Deployment Gateway API Key validation (if REQUIRE_API_KEY=true)
-    2. Trusted Gateway headers (X-Consumer-Custom-ID / X-Consumer-Role) in gateway deployment mode
-    3. Header Authorization: Bearer <token>
-    4. Header X-User-Token: <token>
-
-    Notice: Administrative keys (X-Admin-Key) are strictly NOT accepted here to prevent
-    privilege escalation or using maintenance credentials as an omnipotent user identity.
-    """
+    """FastAPI dependency to extract and verify the current user."""
     settings = get_settings()
 
-    # 1. Deployment Gateway API Key validation (if enabled)
+    # Validate API key if configured
     if settings.REQUIRE_API_KEY:
         configured_api_key = settings.API_KEY
         client_key = x_api_key
@@ -186,14 +176,13 @@ async def get_current_user(
         if not client_key or not hmac.compare_digest(client_key, configured_api_key):
             raise HTTPException(
                 status_code=401,
-                detail="Invalid or missing API key (X-API-Key required by deployment)."
+                detail="Invalid or missing API key."
             )
 
-    # 2. Trusted Gateway Identity Header (in gateway/multi-user mode)
+    # Check for gateway headers if in gateway mode
     if settings.AUTH_MODE == "gateway":
         gateway_user = request.headers.get(settings.GATEWAY_USER_HEADER)
         if gateway_user and gateway_user.strip():
-            # If GATEWAY_SHARED_SECRET is configured, verify that the gateway authenticated itself
             if settings.GATEWAY_SHARED_SECRET:
                 provided_gw_secret = request.headers.get(settings.GATEWAY_SECRET_HEADER)
                 if not provided_gw_secret or not hmac.compare_digest(
@@ -201,7 +190,7 @@ async def get_current_user(
                 ):
                     raise HTTPException(
                         status_code=401,
-                        detail="Untrusted gateway request: missing or invalid gateway authentication secret."
+                        detail="Untrusted gateway request."
                     )
 
             gateway_role = request.headers.get(settings.GATEWAY_ROLE_HEADER, "user").strip()
@@ -212,7 +201,7 @@ async def get_current_user(
                 role=gateway_role
             )
 
-    # 3. Bearer Token Extraction
+    # Extract bearer token from header
     candidate_token = None
     if authorization:
         if authorization.lower().startswith("bearer "):
@@ -224,10 +213,9 @@ async def get_current_user(
 
     if not candidate_token:
         detail_msg = (
-            "Authentication required. Provide a valid Bearer token in the Authorization header "
-            "or route requests through an authenticated API gateway."
+            "Authentication required. Provide a valid Bearer token."
             if settings.AUTH_MODE == "gateway"
-            else "Authentication required. Provide a Bearer token in the Authorization header (or acquire a demo token via POST /api/auth/demo-token)."
+            else "Authentication required. Provide a Bearer token in the Authorization header."
         )
         raise HTTPException(
             status_code=401,
@@ -244,17 +232,10 @@ async def require_admin_or_maintenance(
     x_api_key: Optional[str] = Header(None),
     x_admin_key: Optional[str] = Header(None),
 ) -> UserContext:
-    """
-    Dedicated FastAPI dependency scoped strictly to administrative maintenance endpoints
-    (e.g., retention pruning).
-
-    Allows access if:
-    1. Request provides a valid X-Admin-Key matching ADMIN_API_KEY, OR
-    2. Request is authenticated by a trusted user identity whose role is explicitly "admin".
-    """
+    """FastAPI dependency to require admin role or admin API key."""
     settings = get_settings()
 
-    # 1. Check scoped Admin Key for maintenance automation / cron jobs
+    # Check for admin API key
     if settings.ADMIN_API_KEY:
         admin_candidate = x_admin_key
         if not admin_candidate and authorization and authorization.startswith("AdminKey "):
@@ -267,7 +248,7 @@ async def require_admin_or_maintenance(
                 role="admin"
             )
 
-    # 2. Otherwise authenticate caller identity via standard user authentication
+    # Check user role
     user = await get_current_user(
         request=request,
         authorization=authorization,
@@ -277,6 +258,6 @@ async def require_admin_or_maintenance(
     if user.role != "admin":
         raise HTTPException(
             status_code=403,
-            detail="Access denied: Administrator privileges required for this maintenance operation."
+            detail="Access denied: Administrator privileges required."
         )
     return user

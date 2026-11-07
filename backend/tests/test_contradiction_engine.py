@@ -65,8 +65,8 @@ class TestContradictionEngine:
         assert report.alignment_score == 1.0
         assert len(report.conflicts) == 0
 
-    def test_api_audit_contradictions_demo_session(self):
-        response = client.post(
+    def test_api_audit_contradictions_demo_session(self, test_client: TestClient):
+        response = test_client.post(
             "/api/audit/contradictions",
             json={
                 "session_id": "demo-session",

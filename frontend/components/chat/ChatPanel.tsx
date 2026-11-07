@@ -15,10 +15,6 @@ import { streamQuery, type CitationInfo, type ClaimVerificationItem, type RagTri
 import ReactMarkdown from "react-markdown";
 import VerificationDrawer from "./VerificationDrawer";
 
-// ──────────────────────────────────────
-// Chat Panel (main export)
-// ──────────────────────────────────────
-
 export default function ChatPanel() {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -723,10 +719,6 @@ A 99.5% uptime commitment permits up to **3.6 hours of uncredited downtime per m
   );
 }
 
-// ──────────────────────────────────────
-// Message Bubble
-// ──────────────────────────────────────
-
 function MessageBubble({
   message,
   animationDelay = 0,
@@ -805,10 +797,6 @@ function MessageBubble({
   );
 }
 
-// ──────────────────────────────────────
-// Empty State
-// ──────────────────────────────────────
-
 function EmptyState({
   suggestedQuestions,
   onQuestionClick,
@@ -866,10 +854,6 @@ function EmptyState({
     </div>
   );
 }
-
-// ──────────────────────────────────────
-// Suggested Follow-ups
-// ──────────────────────────────────────
 
 function SuggestedFollowups({
   messages,

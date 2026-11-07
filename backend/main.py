@@ -1,19 +1,10 @@
 """
-Veridocs — FastAPI Application
-Enterprise-grade document intelligence platform.
-
-Endpoints:
-- POST /api/upload          — Upload and process documents
-- POST /api/query           — Query documents (JSON response)
-- POST /api/query/stream    — Query with SSE streaming
-- GET  /api/documents/{id}/pdf       — Serve uploaded PDF
-- GET  /api/documents/{id}/insights  — Document insights
-- GET  /api/sessions/{id}/history    — Conversation history
-- GET  /api/health          — Health check
+Veridocs — FastAPI Backend
+Endpoints for uploading documents, querying with citations, and document comparison.
 """
 
 import os
-# Constrain thread pools to 1 thread to avoid OOM crashes on free-tier cloud containers
+# Limit thread pools to prevent high memory usage
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -29,7 +20,9 @@ import logging
 import uuid
 import secrets
 import asyncio
+import threading
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Any
 
@@ -45,6 +38,7 @@ from pdf_processor import (
     extract_text_from_file,
     chunk_text,
 )
+import database
 from vector_store import VectorStore
 from reranker import rerank_chunks
 from llm_service import FreeLLMService
@@ -74,19 +68,15 @@ from insights_engine import generate_document_insights
 from verification import calculate_grounding_score, calculate_rag_triad_metrics, extract_citations_from_answer
 from contradiction_engine import run_cross_document_audit, AuditDiffReport
 
-# ──────────────────────────────────────────────
-# Setup
-# ──────────────────────────────────────────────
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
 async def _retention_cleanup_loop():
-    """Background lifecycle task executing periodic retention pruning."""
+    """Periodic task to clean up old sessions."""
     logger.info(
-        f"Automated retention worker initialized (interval: {settings.CLEANUP_INTERVAL_MINUTES}m, "
+        f"Retention cleaner started (interval: {settings.CLEANUP_INTERVAL_MINUTES}m, "
         f"retention: {settings.RETENTION_HOURS}h)"
     )
     while True:
@@ -95,28 +85,26 @@ async def _retention_cleanup_loop():
             res = cleanup_expired_sessions(max_age_hours=settings.RETENTION_HOURS)
             if res.get("purged_sessions", 0) > 0 or res.get("purged_files", 0) > 0:
                 logger.info(
-                    f"Automated retention cleanup cycle: {res['purged_sessions']} sessions, "
-                    f"{res['purged_files']} files purged."
+                    f"Cleaned up {res['purged_sessions']} sessions, {res['purged_files']} files."
                 )
         except asyncio.CancelledError:
-            logger.info("Automated retention worker received shutdown signal.")
             break
         except Exception as e:
-            logger.error(f"Error during automated retention cycle: {e}")
+            logger.error(f"Error during retention cleanup: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Enforce strict security validation on production startup
+    # Validate configuration on startup
     settings.validate_production_configuration()
 
-    logger.info(
-        f"Starting {settings.APP_NAME} v{settings.APP_VERSION} "
-        f"[env: {settings.ENVIRONMENT}, auth_mode: {settings.AUTH_MODE}]"
-    )
+    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
 
-    # 2. Warm up models in RAM so first query is instantaneous
-    import threading
+    # Initialize PostgreSQL + pgvector if configured
+    if database.is_database_configured():
+        await database.init_db()
+
+    # Preload models in background
     def _warmup():
         reg = get_model_registry()
         _ = reg.embedding_model
@@ -124,14 +112,16 @@ async def lifespan(app: FastAPI):
             _ = reg.reranker_model
     threading.Thread(target=_warmup, daemon=True).start()
 
-    # 3. Launch automatic retention cleanup background task
+    # Start background cleanup task if enabled
     cleanup_task = None
     if settings.AUTO_CLEANUP_ENABLED:
         cleanup_task = asyncio.create_task(_retention_cleanup_loop())
 
     yield
 
-    # Graceful shutdown
+    if database.is_database_configured():
+        await database.close_db()
+
     if cleanup_task:
         cleanup_task.cancel()
         try:
@@ -143,11 +133,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Enterprise AI Document Intelligence Platform",
+    description="Document Intelligence API",
     lifespan=lifespan
 )
 
-# CORS: Configured whitelist from environment
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -159,9 +149,54 @@ app.add_middleware(
 # Ensure upload directory exists
 Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
-# ──────────────────────────────────────────────
-# Authentication Models & Endpoints
-# ──────────────────────────────────────────────
+class InMemoryRateLimiter:
+    """Sliding window rate limiter to prevent request flooding."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._history: Dict[str, List[float]] = {}
+        self._last_cleanup = time.time()
+
+    def check(self, key: str, max_requests: int, window_seconds: int = 60) -> bool:
+        now = time.time()
+        with self._lock:
+            if now - self._last_cleanup > 300:
+                expired_threshold = now - 3600
+                keys_to_delete = [
+                    k for k, timestamps in self._history.items()
+                    if not timestamps or timestamps[-1] < expired_threshold
+                ]
+                for k in keys_to_delete:
+                    del self._history[k]
+                self._last_cleanup = now
+
+            timestamps = self._history.setdefault(key, [])
+            cutoff = now - window_seconds
+            valid_timestamps = [t for t in timestamps if t > cutoff]
+            self._history[key] = valid_timestamps
+
+            if len(valid_timestamps) >= max_requests:
+                return False
+
+            valid_timestamps.append(now)
+            return True
+
+
+_rate_limiter = InMemoryRateLimiter()
+
+
+def enforce_rate_limit(request: Request, key_suffix: str, max_requests: int = 60, window_seconds: int = 60):
+    """Check that the request rate is within limits."""
+    if not settings.RATE_LIMITING_ENABLED:
+        return
+    client_ip = request.client.host if request.client else "unknown_client"
+    limiter_key = f"{client_ip}:{key_suffix}"
+    if not _rate_limiter.check(limiter_key, max_requests=max_requests, window_seconds=window_seconds):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded ({max_requests} requests per {window_seconds}s).",
+            headers={"Retry-After": str(window_seconds)}
+        )
+
 
 class DemoTokenResponse(BaseModel):
     access_token: str
@@ -173,24 +208,19 @@ class DemoTokenResponse(BaseModel):
 
 @app.post("/api/auth/demo-token", response_model=DemoTokenResponse)
 @app.post("/api/auth/token", response_model=DemoTokenResponse)
-async def generate_demo_token(x_api_key: Optional[str] = Header(None)):
-    """
-    Issue an ephemeral, single-user demo access token for local development.
-    Client-chosen identities and roles are rejected. In production/gateway mode,
-    this endpoint is disabled to ensure identity must be asserted via trusted gateways.
-    """
+async def generate_demo_token(request: Request, x_api_key: Optional[str] = Header(None)):
+    """Generate a demo user token for development."""
+    enforce_rate_limit(request, "auth_token", max_requests=60, window_seconds=60)
     if settings.ENVIRONMENT == "production" or settings.AUTH_MODE == "gateway":
         raise HTTPException(
             status_code=403,
-            detail="Demo token issuance is disabled in production/gateway mode. "
-                   "Authentication must be provided by your trusted upstream identity provider or API gateway."
+            detail="Demo tokens are disabled in production mode."
         )
 
     if settings.REQUIRE_API_KEY:
         if not x_api_key or x_api_key != settings.API_KEY:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Generate a random, server-assigned demo user ID (clients cannot pick their own ID or role)
     demo_uid = f"demo_usr_{secrets.token_hex(6)}"
     token = create_access_token(user_id=demo_uid, role="user")
     user_ctx = verify_access_token(token)
@@ -201,30 +231,20 @@ async def generate_demo_token(x_api_key: Optional[str] = Header(None)):
         user_id=user_ctx.user_id,
         expires_in=int(settings.TOKEN_EXPIRE_HOURS * 3600),
         mode="demo",
-        warning="Local demo token only. For multi-tenant production, configure AUTH_MODE=gateway with a trusted identity provider."
+        warning="Local demo token."
     )
 
-# ──────────────────────────────────────────────
-# In-Memory Session Storage
-# ──────────────────────────────────────────────
 
+# In-memory sessions storage
 sessions: Dict[str, Dict] = {}
-# Each session: {
-#   "vector_store": VectorStore,
-#   "chunks": List[Dict],
-#   "file_paths": List[str],
-#   "file_names": List[str],
-#   "metadata": List[Dict],
-#   "insights": Optional[DocumentInsights],
-#   "created_at": float,
-#   "owner_id": str,
-# }
+_sessions_lock = threading.Lock()
 
 
 def _generate_insights_background(session_id: str, chunks_by_file: Dict, doc_metadata: List[Dict], provider: str):
-    """Generate insights asynchronously in the background so upload returns in sub-second time."""
+    """Generate summary and questions in the background."""
     try:
-        session_data = sessions.get(session_id)
+        with _sessions_lock:
+            session_data = sessions.get(session_id)
         if not session_data:
             return
         llm = FreeLLMService(provider=provider)
@@ -237,23 +257,24 @@ def _generate_insights_background(session_id: str, chunks_by_file: Dict, doc_met
             matching_meta = next((m for m in doc_metadata if m.get("filename") == fn), {})
             pages_count = matching_meta.get("num_pages", 0)
 
-            logger.info(f"Background generating insights for {fn} ({len(file_chunks)} chunks)...")
+            logger.info(f"Generating background insights for {fn}...")
             doc_insights = generate_document_insights(
                 session_id=session_id,
                 chunks=file_chunks,
                 llm_service=llm,
                 total_pages=pages_count
             )
-            insights_dict[fn] = doc_insights
+            with _sessions_lock:
+                if session_id in sessions:
+                    sessions[session_id].setdefault("insights", {})[fn] = doc_insights
 
-        session_data["insights"] = insights_dict
         logger.info(f"Background insights complete for session {session_id}")
     except Exception as e:
         logger.error(f"Background insights generation failed: {e}", exc_info=True)
 
 
 def _persist_session_background(session_id: str, vector_store: VectorStore, saved_paths: List[str], file_names: List[str], doc_metadata: List[Dict], owner_id: str):
-    """Persist session and vector index to disk asynchronously to keep upload response sub-second."""
+    """Save session to disk."""
     try:
         session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
         vector_store.save_to_disk(session_dir)
@@ -267,26 +288,21 @@ def _persist_session_background(session_id: str, vector_store: VectorStore, save
         }
         with open(session_dir / "session.json", "w", encoding="utf-8") as f:
             json.dump(session_meta, f)
-        logger.info(f"Persisted session {session_id} to disk at {session_dir} for owner {owner_id}")
+        logger.info(f"Saved session {session_id} to disk")
     except Exception as e:
         logger.warning(f"Could not persist session {session_id} to disk: {e}")
 
 
-# ──────────────────────────────────────────────
-# Upload Endpoint
-# ──────────────────────────────────────────────
-
 @app.post("/api/upload", response_model=UploadResponse)
 async def upload_documents(
+    request: Request,
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     session_id: Optional[str] = Form(None),
     current_user: UserContext = Depends(get_current_user)
 ):
-    """
-    Upload and process documents (PDF, DOCX, TXT).
-    Returns session_id and processing results.
-    """
+    """Upload and process document files (PDF, DOCX, TXT)."""
+    enforce_rate_limit(request, "upload", max_requests=settings.UPLOAD_RATE_LIMIT, window_seconds=60)
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
 
@@ -307,12 +323,24 @@ async def upload_documents(
             continue
 
         try:
-            contents = await file.read()
+            # Stream read file in 1MB chunks to prevent memory spikes
+            max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+            chunk_bytes_list = []
+            total_read = 0
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_read += len(chunk)
+                if total_read > max_bytes:
+                    failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")
+                    break
+                chunk_bytes_list.append(chunk)
 
-            # Validate file size
-            if len(contents) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
-                failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")
+            if total_read > max_bytes:
                 continue
+
+            contents = b"".join(chunk_bytes_list)
 
             logger.info(f"Processing upload for user {current_user.user_id}: {filename} ({len(contents)} bytes)")
 
@@ -323,7 +351,7 @@ async def upload_documents(
             saved_paths.append(str(save_path))
             file_names.append(filename)
 
-            # Extract text (single pass)
+            # Extract text
             pages = extract_text_from_file(contents, filename)
 
             if not pages:
@@ -338,7 +366,7 @@ async def upload_documents(
                 "metadata": {}
             }
 
-            # Chunk the text with table detection and document breadcrumbs
+            # Split text into chunks
             chunks = chunk_text(
                 pages,
                 chunk_size=settings.CHUNK_SIZE,
@@ -372,44 +400,62 @@ async def upload_documents(
         raise HTTPException(status_code=400, detail=error_msg)
 
     try:
-        # If we have an existing session, verify ownership before merging
         existing_insights = {}
         if session_id:
-            existing_session = _get_session(session_id, current_user)
+            existing_session = await _get_session(session_id, current_user)
             saved_paths = existing_session.get("file_paths", []) + saved_paths
             file_names = existing_session.get("file_names", []) + file_names
             doc_metadata = existing_session.get("metadata", []) + doc_metadata
             all_chunks = existing_session.get("chunks", []) + all_chunks
             existing_insights = existing_session.get("insights", {})
 
-        # Create vector store and index with all combined chunks
+        # Create vector store
         vector_store = VectorStore()
         vector_store.add_documents(all_chunks)
 
-        # Generate session ID if not existing
-        if not session_id or session_id not in sessions:
-            session_id = str(uuid.uuid4())
+        with _sessions_lock:
+            if not session_id or session_id not in sessions:
+                session_id = str(uuid.uuid4())
 
-        # Group chunks by filename
-        from collections import defaultdict
-        chunks_by_file = defaultdict(list)
-        for chunk in all_chunks:
-            fn = chunk.get("source_file", "unknown")
-            chunks_by_file[fn].append(chunk)
+            from collections import defaultdict
+            chunks_by_file = defaultdict(list)
+            for chunk in all_chunks:
+                fn = chunk.get("source_file", "unknown")
+                chunks_by_file[fn].append(chunk)
 
-        # Store session immediately so client gets sub-second response
-        sessions[session_id] = {
-            "vector_store": vector_store,
-            "chunks": all_chunks,
-            "file_paths": saved_paths,
-            "file_names": file_names,
-            "metadata": doc_metadata,
-            "insights": existing_insights,
-            "created_at": time.time(),
-            "owner_id": current_user.user_id,
-        }
+            sessions[session_id] = {
+                "vector_store": vector_store,
+                "chunks": all_chunks,
+                "file_paths": saved_paths,
+                "file_names": file_names,
+                "metadata": doc_metadata,
+                "insights": existing_insights,
+                "created_at": time.time(),
+                "owner_id": current_user.user_id,
+            }
 
-        # Dispatch session disk persistence to background so upload returns in sub-second time
+            if len(sessions) > settings.MAX_SESSIONS:
+                oldest_key = min(sessions, key=lambda k: sessions[k]["created_at"])
+                _cleanup_session(oldest_key)
+
+        # Save session to PostgreSQL if configured
+        if database.is_database_configured():
+            try:
+                await database.save_session(
+                    session_id=session_id,
+                    owner_id=current_user.user_id,
+                    file_names=file_names,
+                    file_paths=saved_paths,
+                    metadata=doc_metadata,
+                    insights=existing_insights,
+                    created_at=time.time()
+                )
+                if hasattr(vector_store, "embeddings") and vector_store.embeddings is not None:
+                    await database.save_chunks(session_id, all_chunks, vector_store.embeddings)
+            except Exception as e:
+                logger.error(f"Failed to persist session {session_id} to PostgreSQL: {e}")
+
+        # Save session to disk in background
         background_tasks.add_task(
             _persist_session_background,
             session_id=session_id,
@@ -420,7 +466,7 @@ async def upload_documents(
             owner_id=current_user.user_id,
         )
 
-        # Dispatch background insights generation without blocking the upload response
+        # Generate summary and questions in background
         background_tasks.add_task(
             _generate_insights_background,
             session_id=session_id,
@@ -428,11 +474,6 @@ async def upload_documents(
             doc_metadata=doc_metadata,
             provider=settings.LLM_PROVIDER
         )
-
-        # Evict old sessions
-        if len(sessions) > settings.MAX_SESSIONS:
-            oldest_key = min(sessions, key=lambda k: sessions[k]["created_at"])
-            _cleanup_session(oldest_key)
 
         message = f"Successfully processed {processed_files} file(s) with {len(all_chunks)} text chunks"
         if failed_files:
@@ -454,13 +495,10 @@ async def upload_documents(
         raise HTTPException(status_code=500, detail=f"Error indexing documents: {str(e)}")
 
 
-# ──────────────────────────────────────────────
-# Async Background Job Processing (SEC 10-K & Heavy OCR)
-# ──────────────────────────────────────────────
-
 @app.post("/api/jobs/upload", response_model=JobResponse, status_code=202)
 @app.post("/api/upload/async", response_model=JobResponse, status_code=202)
 async def submit_async_document_job(
+    request: Request,
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     session_id: Optional[str] = Form(None),
@@ -471,6 +509,7 @@ async def submit_async_document_job(
     for asynchronous background processing via Celery and Redis.
     Immediately returns HTTP 202 Accepted with a job_id for non-blocking polling.
     """
+    enforce_rate_limit(request, "async_upload", max_requests=settings.UPLOAD_RATE_LIMIT, window_seconds=60)
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
 
@@ -526,9 +565,9 @@ async def submit_async_document_job(
         background_tasks=background_tasks
     )
 
-    logger.info(f"Accepted async job {job_id} for user {current_user.user_id} with {len(file_names)} file(s)")
+    logger.info(f"Accepted job {job_id} for user {current_user.user_id} with {len(file_names)} file(s)")
 
-    msg = f"Document(s) successfully queued for background OCR and indexing. Track progress via GET /api/jobs/{job_id}"
+    msg = f"Document queued for processing. Track progress via GET /api/jobs/{job_id}"
     if failed_files:
         msg += f" Note: {len(failed_files)} file(s) skipped."
 
@@ -546,28 +585,21 @@ async def get_job_status(
     job_id: str,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """
-    Poll the status and real-time page progress of a background document processing job.
-    Enforces strict anti-IDOR user ownership isolation.
-    """
+    """Check the status of a background processing job."""
     tracker = get_job_tracker()
     job = tracker.get_job(job_id)
 
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
 
-    # Anti-IDOR Ownership check
+    # Check job ownership
     if job.get("owner_id") != current_user.user_id and current_user.role != "admin":
-        logger.warning(
-            f"IDOR violation: User {current_user.user_id} attempted reading job {job_id} owned by {job.get('owner_id')}"
-        )
         raise HTTPException(status_code=403, detail="Access denied: You do not have permission to view this job.")
 
-    # If completed and session is on disk but not in memory, ensure it can be loaded
     session_id = job.get("session_id")
     if session_id and session_id not in sessions:
         try:
-            _get_session(session_id, current_user)
+            await _get_session(session_id, current_user)
         except Exception:
             pass
 
@@ -656,17 +688,15 @@ async def delete_or_cancel_job(
     return {"status": "deleted", "job_id": job_id}
 
 
-# ──────────────────────────────────────────────
-# Query Endpoint (JSON response)
-# ──────────────────────────────────────────────
-
 @app.post("/api/query", response_model=QueryResponse)
 async def answer_query(
+    http_request: Request,
     request: QueryRequest,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """Answer a question using uploaded documents. Returns full JSON response."""
-    session_data = _get_session(request.session_id, current_user)
+    """Answer a question using uploaded documents."""
+    enforce_rate_limit(http_request, "query", max_requests=settings.QUERY_RATE_LIMIT, window_seconds=60)
+    session_data = await _get_session(request.session_id, current_user)
     vector_store = session_data["vector_store"]
     question = request.question.strip()
 
@@ -675,8 +705,23 @@ async def answer_query(
     conversation = get_conversation_manager()
 
     try:
-        # 1. Retrieve candidates (hybrid search)
-        candidates = vector_store.search(question, k=settings.RETRIEVAL_INITIAL_K)
+        # Retrieve candidates (in-memory FAISS/BM25, or PostgreSQL pgvector hybrid search)
+        if vector_store and vector_store.index is not None:
+            candidates = vector_store.search(question, k=settings.RETRIEVAL_INITIAL_K)
+        elif database.is_database_configured():
+            reg = get_model_registry()
+            q_emb = reg.embedding_model.encode([question], convert_to_numpy=True)[0]
+            candidates = await database.hybrid_search_postgres(
+                session_id=request.session_id,
+                query=question,
+                query_embedding=q_emb,
+                k=settings.RETRIEVAL_INITIAL_K,
+                dense_weight=settings.DENSE_WEIGHT,
+                bm25_weight=settings.BM25_WEIGHT,
+                active_files=request.active_files or None
+            )
+        else:
+            candidates = []
 
         if request.active_files is not None:
             candidates = [c for c in candidates if c.get("source_file") in request.active_files]
@@ -688,29 +733,28 @@ async def answer_query(
                 confidence_score=0.0
             )
 
-        # 2. Re-rank
+        # Re-rank chunks
         relevant_chunks = rerank_chunks(question, candidates, top_k=settings.RETRIEVAL_FINAL_K)
 
-        # 3. Get conversation history
         history = None
         if request.history:
             history = request.history
         else:
             history = conversation.get_history_for_prompt(request.session_id)
 
-        # 4. Generate answer
+        # Generate answer
         llm = FreeLLMService(provider=settings.LLM_PROVIDER)
         answer = llm.generate_answer(question, relevant_chunks, history=history)
 
-        # 5. Verify grounding
+        # Check grounding against sources
         grounding = calculate_grounding_score(answer, relevant_chunks)
         confidence_score = grounding["confidence_score"]
 
-        # 6. Extract structured citations
+        # Extract citations
         citations_data = extract_citations_from_answer(answer, relevant_chunks)
         citations = [CitationInfo(**c) for c in citations_data]
 
-        # 7. Build sources with detailed retriever observability
+        # Build list of source passages
         sources = []
         seen_pages = set()
         for c in relevant_chunks:
@@ -729,7 +773,7 @@ async def answer_query(
                 ))
                 seen_pages.add(page_key)
 
-        # 8. Compute RAG Triad observability scores
+        # Calculate evaluation metrics
         triad_dict = calculate_rag_triad_metrics(
             question=question,
             answer=answer,
@@ -738,7 +782,7 @@ async def answer_query(
         )
         rag_triad = RagTriadMetrics(**triad_dict)
 
-        # 9. Store in conversation history
+        # Save to conversation history
         conversation.add_message(request.session_id, MessageRole.USER, question)
         conversation.add_message(
             request.session_id,
@@ -748,13 +792,25 @@ async def answer_query(
             confidence_score=confidence_score
         )
 
-        # 10. Generate follow-up suggestions
+        if database.is_database_configured():
+            try:
+                await database.save_chat_message(request.session_id, str(uuid.uuid4()), "user", question)
+                await database.save_chat_message(
+                    request.session_id,
+                    str(uuid.uuid4()),
+                    "assistant",
+                    answer,
+                    {"confidence_score": confidence_score, "citations": [c.model_dump() if hasattr(c, 'model_dump') else c.dict() for c in citations]}
+                )
+            except Exception as e:
+                logger.debug(f"Failed to persist chat message to database: {e}")
+
+        # Generate suggested follow-ups
         followups = _generate_followups(question, answer)
 
         logger.info(
             f"Query answered for session {request.session_id[:8]}: "
-            f"{len(sources)} sources, confidence={confidence_score:.2f}, "
-            f"groundedness={rag_triad.groundedness:.2f}, answer_relevance={rag_triad.answer_relevance:.2f}"
+            f"{len(sources)} sources, confidence={confidence_score:.2f}"
         )
 
         claim_verifications = [
@@ -778,20 +834,15 @@ async def answer_query(
         raise HTTPException(status_code=500, detail="An unexpected error occurred. Please try again.")
 
 
-# ──────────────────────────────────────────────
-# Streaming Query Endpoint (SSE)
-# ──────────────────────────────────────────────
-
 @app.post("/api/query/stream")
 async def stream_query(
+    http_request: Request,
     request: StreamQueryRequest,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """
-    Stream answer tokens via Server-Sent Events.
-    Emits: token, citation, confidence, done events.
-    """
-    session_data = _get_session(request.session_id, current_user)
+    """Stream answer tokens as Server-Sent Events."""
+    enforce_rate_limit(http_request, "stream_query", max_requests=settings.QUERY_RATE_LIMIT, window_seconds=60)
+    session_data = await _get_session(request.session_id, current_user)
     vector_store = session_data["vector_store"]
     question = request.question.strip()
 
@@ -801,8 +852,23 @@ async def stream_query(
         conversation = get_conversation_manager()
 
         try:
-            # 1. Retrieve and re-rank
-            candidates = vector_store.search(question, k=settings.RETRIEVAL_INITIAL_K)
+            # Search relevant chunks (in-memory FAISS/BM25, or PostgreSQL pgvector hybrid search)
+            if vector_store and vector_store.index is not None:
+                candidates = vector_store.search(question, k=settings.RETRIEVAL_INITIAL_K)
+            elif database.is_database_configured():
+                reg = get_model_registry()
+                q_emb = reg.embedding_model.encode([question], convert_to_numpy=True)[0]
+                candidates = await database.hybrid_search_postgres(
+                    session_id=request.session_id,
+                    query=question,
+                    query_embedding=q_emb,
+                    k=settings.RETRIEVAL_INITIAL_K,
+                    dense_weight=settings.DENSE_WEIGHT,
+                    bm25_weight=settings.BM25_WEIGHT,
+                    active_files=request.active_files or None
+                )
+            else:
+                candidates = []
 
             if request.active_files is not None:
                 candidates = [c for c in candidates if c.get("source_file") in request.active_files]
@@ -816,7 +882,7 @@ async def stream_query(
 
             relevant_chunks = rerank_chunks(question, candidates, top_k=settings.RETRIEVAL_FINAL_K)
 
-            # 2. Send citations early
+            # Send citations
             seen_pages = set()
             citation_id = 1
             for c in relevant_chunks:
@@ -832,7 +898,7 @@ async def stream_query(
                     citation_id += 1
                     seen_pages.add(page_key)
 
-            # 3. Stream answer
+            # Stream answer
             history = None
             if request.history:
                 history = request.history
@@ -849,7 +915,7 @@ async def stream_query(
                 token_count += 1
                 yield _sse_event("token", {"text": token})
 
-            # 4. Grounding verification with 3-state claim analysis
+            # Check grounding
             grounding = calculate_grounding_score(full_answer, relevant_chunks)
             elapsed_ms = (time.time() - start_time) * 1000
 
@@ -875,7 +941,7 @@ async def stream_query(
             })
             yield _sse_event("audit_metrics", triad_dict)
 
-            # 5. Store conversation
+            # Store conversation
             conversation.add_message(request.session_id, MessageRole.USER, question)
             conversation.add_message(
                 request.session_id,
@@ -884,7 +950,19 @@ async def stream_query(
                 confidence_score=grounding["confidence_score"]
             )
 
-            # 6. Done
+            if database.is_database_configured():
+                try:
+                    await database.save_chat_message(request.session_id, str(uuid.uuid4()), "user", question)
+                    await database.save_chat_message(
+                        request.session_id,
+                        str(uuid.uuid4()),
+                        "assistant",
+                        full_answer,
+                        {"confidence_score": grounding["confidence_score"]}
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to persist chat message to database: {e}")
+
             elapsed_ms = (time.time() - start_time) * 1000
             yield _sse_event("done", {
                 "total_tokens": token_count,
@@ -908,19 +986,13 @@ async def stream_query(
 
 @app.post("/api/chat/stream")
 async def chat_stream(
+    http_request: Request,
     request: StreamQueryRequest,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """
-    Alias endpoint for /api/query/stream for high-speed SSE streaming.
-    Provides sub-400ms Time-To-First-Token (TTFT) and citation grounding.
-    """
-    return await stream_query(request, current_user=current_user)
+    """Alias for /api/query/stream."""
+    return await stream_query(http_request=http_request, request=request, current_user=current_user)
 
-
-# ──────────────────────────────────────────────
-# Document Serving
-# ──────────────────────────────────────────────
 
 @app.get("/api/documents/{session_id}/pdf")
 async def get_document_pdf(
@@ -930,7 +1002,7 @@ async def get_document_pdf(
     current_user: UserContext = Depends(get_current_user)
 ):
     """Serve the uploaded PDF for the viewer."""
-    session_data = _get_session(session_id, current_user)
+    session_data = await _get_session(session_id, current_user)
     file_paths = session_data.get("file_paths", [])
     file_names = session_data.get("file_names", [])
 
@@ -958,18 +1030,14 @@ async def get_document_pdf(
     )
 
 
-# ──────────────────────────────────────────────
-# Insights Endpoint
-# ──────────────────────────────────────────────
-
 @app.get("/api/documents/{session_id}/insights")
 async def get_document_insights(
     session_id: str,
     document_name: Optional[str] = None,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """Get pre-generated document insights (summary, questions, entities)."""
-    session_data = _get_session(session_id, current_user)
+    """Get document summary, questions, and entities."""
+    session_data = await _get_session(session_id, current_user)
     insights_dict = session_data.get("insights", {})
 
     if not isinstance(insights_dict, dict):
@@ -1010,27 +1078,19 @@ async def get_document_insights(
         raise HTTPException(status_code=500, detail=f"Failed to generate insights for {document_name}")
 
 
-# ──────────────────────────────────────────────
-# Forensic Contradiction Audit Endpoint
-# ──────────────────────────────────────────────
-
 @app.post("/api/audit/contradictions", response_model=AuditDiffReport)
 async def audit_contradictions(
     req: CrossDocAuditRequest,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """
-    Forensic Cross-Document Contradiction & Diff Engine.
-    Compares two documents within a session and detects conflicting clauses,
-    altered numerical values, and risk discrepancies with exact citations.
-    """
-    # Demo session handler for instant evaluation
+    """Compare two documents to find differences and conflicting clauses."""
+    # Demo session handler
     if req.session_id == "demo-session":
         return AuditDiffReport(
             doc_a_name=req.doc_a or "SaaS_Agreement_2024_v1.pdf",
             doc_b_name=req.doc_b or "SaaS_Agreement_2025_Amended.pdf",
             alignment_score=0.68,
-            summary="Forensic cross-document analysis identified 3 critical discrepancies: Payment terms extended from 30 to 60 days, liability cap reduced by 75%, and SLA uptime commitment downgraded.",
+            summary="Identified 3 discrepancies: Payment terms changed, liability cap reduced, and SLA uptime changed.",
             critical_count=2,
             warning_count=1,
             conflicts=[
@@ -1039,18 +1099,18 @@ async def audit_contradictions(
                     "topic": "Payment Terms & Late Penalties",
                     "severity": "critical",
                     "conflict_type": "contradiction",
-                    "explanation": "Doc A requires payment within 30 days with a 1.5% monthly late fee. Doc B extends payment to 60 days and deletes all late penalty clauses.",
-                    "risk_analysis": "Increases working capital cycle and removes financial incentive for timely invoice settlement.",
+                    "explanation": "Doc A requires payment within 30 days. Doc B extends payment to 60 days.",
+                    "risk_analysis": "Increases payment delay.",
                     "doc_a": {
                         "filename": req.doc_a or "SaaS_Agreement_2024_v1.pdf",
                         "page": 1,
-                        "snippet": "Invoices are payable within 30 days of receipt. Overdue balances shall accrue interest at 1.5% per month.",
+                        "snippet": "Invoices are payable within 30 days of receipt.",
                         "section": "4.1 Payment Terms"
                     },
                     "doc_b": {
                         "filename": req.doc_b or "SaaS_Agreement_2025_Amended.pdf",
                         "page": 1,
-                        "snippet": "Customer shall remit payment within 60 calendar days from invoice date without late fees or interest charges.",
+                        "snippet": "Customer shall remit payment within 60 calendar days from invoice date.",
                         "section": "4.1 Settlement"
                     }
                 },
@@ -1059,18 +1119,18 @@ async def audit_contradictions(
                     "topic": "Limitation of Liability Cap",
                     "severity": "critical",
                     "conflict_type": "numeric_mismatch",
-                    "explanation": "Aggregate liability cap was slashed from $1,000,000 in Doc A down to $250,000 in Doc B.",
-                    "risk_analysis": "Significantly impairs recovery rights in the event of gross negligence, data breaches, or major system failure.",
+                    "explanation": "Liability cap changed from $1,000,000 to $250,000.",
+                    "risk_analysis": "Reduces liability coverage.",
                     "doc_a": {
                         "filename": req.doc_a or "SaaS_Agreement_2024_v1.pdf",
                         "page": 2,
-                        "snippet": "The total aggregate liability of either party shall not exceed $1,000,000 under any circumstances.",
+                        "snippet": "The total aggregate liability of either party shall not exceed $1,000,000.",
                         "section": "8. Liability Limitation"
                     },
                     "doc_b": {
                         "filename": req.doc_b or "SaaS_Agreement_2025_Amended.pdf",
                         "page": 2,
-                        "snippet": "Maximum cumulative liability arising out of this agreement is capped at $250,000 or the fees paid in the prior 3 months.",
+                        "snippet": "Maximum cumulative liability arising out of this agreement is capped at $250,000.",
                         "section": "8. Damages Cap"
                     }
                 },
@@ -1079,31 +1139,31 @@ async def audit_contradictions(
                     "topic": "Service Level Agreement (SLA) & Uptime",
                     "severity": "warning",
                     "conflict_type": "modification",
-                    "explanation": "Guaranteed uptime threshold decreased from 99.95% to 99.5%, allowing an extra 3.6 hours of uncredited downtime per month.",
-                    "risk_analysis": "Reduces operational reliability guarantees for production workflows.",
+                    "explanation": "Uptime threshold decreased from 99.95% to 99.5%.",
+                    "risk_analysis": "Decreases uptime guarantee.",
                     "doc_a": {
                         "filename": req.doc_a or "SaaS_Agreement_2024_v1.pdf",
                         "page": 3,
-                        "snippet": "Provider guarantees monthly service availability of at least 99.95% excluding scheduled maintenance windows.",
+                        "snippet": "Provider guarantees monthly service availability of at least 99.95%.",
                         "section": "Schedule B: SLA"
                     },
                     "doc_b": {
                         "filename": req.doc_b or "SaaS_Agreement_2025_Amended.pdf",
                         "page": 3,
-                        "snippet": "Service availability commitment is target 99.5% with service credits capped at 5% of monthly recurring revenue.",
+                        "snippet": "Service availability commitment is target 99.5%.",
                         "section": "Schedule B: Availability"
                     }
                 }
             ]
         )
 
-    session_data = _get_session(req.session_id, current_user)
+    session_data = await _get_session(req.session_id, current_user)
     chunks = session_data.get("chunks", [])
 
     doc_a_chunks = [c for c in chunks if c.get("source_file") == req.doc_a]
     doc_b_chunks = [c for c in chunks if c.get("source_file") == req.doc_b]
 
-    # Fallback to file index if document names don't match exactly
+    # Match by order if names don't match directly
     if not doc_a_chunks or not doc_b_chunks:
         file_names = session_data.get("file_names", [])
         if len(file_names) >= 2:
@@ -1121,7 +1181,7 @@ async def audit_contradictions(
     try:
         llm = FreeLLMService(provider=settings.LLM_PROVIDER)
     except Exception as e:
-        logger.warning(f"Could not initialize LLM for audit: {e}. Will use deterministic engine.")
+        logger.warning(f"Could not initialize LLM for audit: {e}")
         llm = None
 
     report = run_cross_document_audit(
@@ -1135,19 +1195,36 @@ async def audit_contradictions(
     return report
 
 
-# ──────────────────────────────────────────────
-# Conversation History
-# ──────────────────────────────────────────────
-
 @app.get("/api/sessions/{session_id}/history")
 async def get_conversation_history(
     session_id: str,
     current_user: UserContext = Depends(get_current_user)
 ):
     """Get conversation history for a session."""
-    _get_session(session_id, current_user)  # Validate session exists
+    await _get_session(session_id, current_user)
     conversation = get_conversation_manager()
     messages = conversation.get_history(session_id)
+
+    if not messages and database.is_database_configured():
+        try:
+            db_msgs = await database.get_chat_history(session_id)
+            if db_msgs:
+                return {
+                    "session_id": session_id,
+                    "messages": [
+                        {
+                            "id": m["id"],
+                            "role": m["role"],
+                            "content": m["content"],
+                            "citations": m.get("metadata", {}).get("citations", []),
+                            "confidence_score": m.get("metadata", {}).get("confidence_score"),
+                            "timestamp": datetime.fromtimestamp(m["created_at"]).isoformat()
+                        }
+                        for m in db_msgs
+                    ]
+                }
+        except Exception as e:
+            logger.debug(f"Error loading chat history from database: {e}")
 
     return {
         "session_id": session_id,
@@ -1165,13 +1242,9 @@ async def get_conversation_history(
     }
 
 
-# ──────────────────────────────────────────────
-# Health Check
-# ──────────────────────────────────────────────
-
 @app.get("/api/health", response_model=HealthResponse)
 async def health_check():
-    """Health check with model and provider status."""
+    """Health check returning model and service status."""
     registry = get_model_registry()
     return HealthResponse(
         status="healthy",
@@ -1190,17 +1263,13 @@ async def health_check():
     )
 
 
-# ──────────────────────────────────────────────
-# Session Info
-# ──────────────────────────────────────────────
-
 @app.get("/api/sessions/{session_id}")
 async def get_session_info(
     session_id: str,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """Get session metadata."""
-    session_data = _get_session(session_id, current_user)
+    """Get session metadata and document list."""
+    session_data = await _get_session(session_id, current_user)
     return {
         "session_id": session_id,
         "file_names": session_data.get("file_names", []),
@@ -1211,45 +1280,45 @@ async def get_session_info(
     }
 
 
-# ──────────────────────────────────────────────
-# Data Lifecycle & Deletion Endpoints
-# ──────────────────────────────────────────────
-
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(
     session_id: str,
     current_user: UserContext = Depends(get_current_user)
 ):
-    """
-    Securely delete an active session, its uploaded files, persisted vector indices,
-    and conversation history with path traversal protection.
-    """
-    session_data = _get_session(session_id, current_user)
+    """Delete a session, its files, and conversation history."""
+    session_data = await _get_session(session_id, current_user)
     deleted_files = 0
 
-    # 1. Delete associated uploaded files
+    # Delete uploaded files
     for path_str in session_data.get("file_paths", []):
         if _safe_delete_file(path_str):
             deleted_files += 1
 
-    # 2. Delete persisted session directory on disk
+    # Delete session directory on disk
     session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
     _safe_delete_file(session_dir)
 
-    # 3. Clear conversation manager
+    # Clear conversation history
     conversation = get_conversation_manager()
     conversation.clear_history(session_id)
 
-    # 4. Remove from in-memory sessions
-    if session_id in sessions:
-        del sessions[session_id]
+    # Remove from memory
+    with _sessions_lock:
+        sessions.pop(session_id, None)
 
-    logger.info(f"User {current_user.user_id} deleted session {session_id} ({deleted_files} files purged)")
+    # Delete from PostgreSQL if configured
+    if database.is_database_configured():
+        try:
+            await database.delete_session(session_id)
+        except Exception as e:
+            logger.error(f"Error deleting session {session_id} from database: {e}")
+
+    logger.info(f"User {current_user.user_id} deleted session {session_id}")
     return {
         "status": "success",
         "session_id": session_id,
         "deleted_files_count": deleted_files,
-        "message": "Session, documents, vector indices, and conversation history permanently deleted."
+        "message": "Session permanently deleted."
     }
 
 
@@ -1260,7 +1329,7 @@ async def delete_document_from_session(
     current_user: UserContext = Depends(get_current_user)
 ):
     """Delete a single document from an active session and update the index."""
-    session_data = _get_session(session_id, current_user)
+    session_data = await _get_session(session_id, current_user)
     file_names = session_data.get("file_names", [])
     file_paths = session_data.get("file_paths", [])
 
@@ -1272,28 +1341,39 @@ async def delete_document_from_session(
     if target_path:
         _safe_delete_file(target_path)
 
-    # Remove from lists
     file_names.pop(idx)
     if idx < len(file_paths):
         file_paths.pop(idx)
 
-    # Filter chunks
     remaining_chunks = [c for c in session_data.get("chunks", []) if c.get("source_file") != document_name]
     session_data["chunks"] = remaining_chunks
     session_data["file_names"] = file_names
     session_data["file_paths"] = file_paths
     session_data.get("insights", {}).pop(document_name, None)
 
-    # Re-index remaining chunks
     vector_store = VectorStore()
     if remaining_chunks:
         vector_store.add_documents(remaining_chunks)
     session_data["vector_store"] = vector_store
 
-    # Persist updated session to disk
     session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
     if session_dir.exists():
         vector_store.save_to_disk(session_dir)
+
+    # Delete chunks for this document from PostgreSQL if configured
+    if database.is_database_configured():
+        try:
+            await database.delete_document_from_session(session_id, document_name)
+            await database.save_session(
+                session_id=session_id,
+                owner_id=current_user.user_id,
+                file_names=file_names,
+                file_paths=file_paths,
+                metadata=session_data.get("metadata", []),
+                insights=session_data.get("insights", {}),
+            )
+        except Exception as e:
+            logger.error(f"Error updating PostgreSQL after document deletion: {e}")
 
     return {
         "status": "success",
@@ -1309,15 +1389,12 @@ async def trigger_retention_cleanup(
     max_age_hours: Optional[int] = None,
     admin_user: UserContext = Depends(require_admin_or_maintenance)
 ):
-    """
-    Trigger retention policy cleanup of expired sessions and orphaned files.
-    Restricted to administrator role or admin maintenance key. Rejects arbitrary or out-of-bound cleanup ages.
-    """
+    """Clean up expired sessions and orphaned files."""
     target_max_age = max_age_hours if max_age_hours is not None else settings.RETENTION_HOURS
     if target_max_age < 1 or target_max_age > 720:
         raise HTTPException(
             status_code=400,
-            detail="Invalid max_age_hours: Must be between 1 and 720 hours (up to 30 days)."
+            detail="Invalid max_age_hours: Must be between 1 and 720 hours."
         )
 
     result = cleanup_expired_sessions(max_age_hours=target_max_age)
@@ -1328,11 +1405,7 @@ async def trigger_retention_cleanup(
     }
 
 
-# ──────────────────────────────────────────────
-# Static Files & Root
-# ──────────────────────────────────────────────
-
-# Serve the Next.js frontend build (production)
+# Static frontend files for production
 try:
     frontend_path = Path(__file__).parent.parent / "frontend" / "out"
     if frontend_path.exists():
@@ -1343,19 +1416,11 @@ except Exception as e:
 
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    """Root redirect and health ping."""
     return {"message": f"Welcome to {settings.APP_NAME} API v{settings.APP_VERSION}. Visit /docs for API documentation."}
 
 
-# ──────────────────────────────────────────────
-# Helper Functions & Retention Cleanup
-# ──────────────────────────────────────────────
-
 def _safe_delete_file(file_path: Union[str, Path]) -> bool:
-    """
-    Safely delete a file or directory with path traversal protection.
-    Verifies that the target path resolves strictly within settings.UPLOAD_DIR.
-    """
+    """Safely delete a file ensuring it is within the upload directory."""
     try:
         target = Path(file_path).resolve()
         base = Path(settings.UPLOAD_DIR).resolve()
@@ -1374,13 +1439,14 @@ def _safe_delete_file(file_path: Union[str, Path]) -> bool:
     return False
 
 
-def _get_session(session_id: str, current_user: UserContext) -> Dict:
-    """Get session data from memory or restore from disk, verifying user ownership."""
+async def _get_session(session_id: str, current_user: UserContext) -> Dict:
+    """Retrieve session from memory, disk, or PostgreSQL, checking user ownership."""
     session_data = None
-    if session_id in sessions:
-        session_data = sessions[session_id]
-    else:
-        # Try restoring session from disk if backend restarted
+    with _sessions_lock:
+        if session_id in sessions:
+            session_data = sessions[session_id]
+
+    if not session_data:
         try:
             session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
             session_meta_file = session_dir / "session.json"
@@ -1400,11 +1466,39 @@ def _get_session(session_id: str, current_user: UserContext) -> Dict:
                         "created_at": meta.get("created_at", time.time()),
                         "owner_id": meta.get("owner_id"),
                     }
-                    sessions[session_id] = restored_session
+                    with _sessions_lock:
+                        sessions[session_id] = restored_session
                     session_data = restored_session
-                    logger.info(f"Successfully restored session {session_id} from disk")
+                    logger.info(f"Loaded session {session_id} from disk")
         except Exception as e:
-            logger.error(f"Error restoring session {session_id} from disk: {e}")
+            logger.error(f"Error loading session {session_id} from disk: {e}")
+
+    # Fallback to PostgreSQL if configured
+    if not session_data and database.is_database_configured():
+        try:
+            db_session = await database.get_session(session_id)
+            if db_session:
+                chunks = await database.get_chunks_for_session(session_id)
+                vector_store = VectorStore()
+                if chunks:
+                    vector_store.add_documents(chunks)
+
+                restored_session = {
+                    "vector_store": vector_store,
+                    "chunks": chunks,
+                    "file_paths": db_session.get("file_paths", []),
+                    "file_names": db_session.get("file_names", []),
+                    "metadata": db_session.get("metadata", []),
+                    "insights": db_session.get("insights", {}),
+                    "created_at": db_session.get("created_at", time.time()),
+                    "owner_id": db_session.get("owner_id"),
+                }
+                with _sessions_lock:
+                    sessions[session_id] = restored_session
+                session_data = restored_session
+                logger.info(f"Loaded session {session_id} from PostgreSQL")
+        except Exception as e:
+            logger.error(f"Error loading session {session_id} from PostgreSQL: {e}")
 
     if not session_data:
         raise HTTPException(
@@ -1412,22 +1506,17 @@ def _get_session(session_id: str, current_user: UserContext) -> Dict:
             detail="Session not found or expired. Please upload documents again."
         )
 
-    # Ownership enforcement: require explicit ownership on every session
     owner_id = session_data.get("owner_id")
     if not owner_id:
-        logger.warning(f"Access denied: Session {session_id} has missing or unknown ownership.")
         raise HTTPException(
             status_code=403,
             detail="Access denied: Session ownership is missing or unverified."
         )
 
     if owner_id != current_user.user_id and current_user.role != "admin":
-        logger.warning(
-            f"Access denied: user {current_user.user_id} attempted access to session {session_id} owned by {owner_id}"
-        )
         raise HTTPException(
             status_code=403,
-            detail="Access denied: You do not have permission to access this session or document."
+            detail="Access denied: You do not have permission to access this session."
         )
 
     return session_data
@@ -1442,44 +1531,44 @@ def _validate_question(question: str):
 
 
 def _cleanup_session(session_id: str):
-    """Clean up session data including saved files, vector indices, and history."""
-    if session_id in sessions:
-        session_data = sessions[session_id]
+    """Delete session data, files, and conversation history."""
+    session_data = None
+    with _sessions_lock:
+        if session_id in sessions:
+            session_data = sessions.pop(session_id, None)
+
+    if session_data:
         for path in session_data.get("file_paths", []):
             _safe_delete_file(path)
         _safe_delete_file(Path(settings.UPLOAD_DIR) / "sessions" / session_id)
         get_conversation_manager().clear_history(session_id)
-        del sessions[session_id]
         logger.info(f"Cleaned up session {session_id[:8]}")
 
 
 def cleanup_expired_sessions(max_age_hours: Optional[int] = None) -> Dict[str, int]:
-    """
-    Purge expired sessions, persisted vector indices, and orphaned files older than RETENTION_HOURS.
-    Protects against disk exhaustion and enforces strict privacy data retention.
-    Safe against missing files and partial writes.
-    """
+    """Delete expired sessions and files older than retention limit."""
     ttl_hours = max_age_hours if max_age_hours is not None else (settings.RETENTION_HOURS or 24)
     cutoff_time = time.time() - (ttl_hours * 3600)
     purged_sessions = 0
     purged_files = 0
 
-    # 1. Purge expired in-memory sessions
-    expired_session_ids = [
-        sid for sid, data in list(sessions.items())
-        if data.get("created_at", 0) < cutoff_time
-    ]
-    for sid in expired_session_ids:
-        session_data = sessions.get(sid, {})
-        for p in session_data.get("file_paths", []):
-            if _safe_delete_file(p):
-                purged_files += 1
-        _safe_delete_file(Path(settings.UPLOAD_DIR) / "sessions" / sid)
-        get_conversation_manager().clear_history(sid)
-        sessions.pop(sid, None)
-        purged_sessions += 1
+    # Purge expired in-memory sessions
+    with _sessions_lock:
+        expired_session_ids = [
+            sid for sid, data in list(sessions.items())
+            if data.get("created_at", 0) < cutoff_time
+        ]
+        for sid in expired_session_ids:
+            session_data = sessions.pop(sid, None)
+            if session_data:
+                for path in session_data.get("file_paths", []):
+                    if _safe_delete_file(path):
+                        purged_files += 1
+                _safe_delete_file(Path(settings.UPLOAD_DIR) / "sessions" / sid)
+                get_conversation_manager().clear_history(sid)
+                purged_sessions += 1
 
-    # 2. Purge expired persisted sessions on disk
+    # Purge expired sessions on disk
     sessions_root = Path(settings.UPLOAD_DIR) / "sessions"
     if sessions_root.exists():
         for session_folder in list(sessions_root.iterdir()):
@@ -1504,7 +1593,7 @@ def cleanup_expired_sessions(max_age_hours: Optional[int] = None) -> Dict[str, i
                     sessions.pop(session_folder.name, None)
                     purged_sessions += 1
 
-    # 3. Purge orphaned uploaded files older than cutoff
+    # Purge orphaned uploaded files
     upload_root = Path(settings.UPLOAD_DIR)
     if upload_root.exists():
         for f in list(upload_root.iterdir()):
@@ -1513,14 +1602,14 @@ def cleanup_expired_sessions(max_age_hours: Optional[int] = None) -> Dict[str, i
                     if _safe_delete_file(f):
                         purged_files += 1
 
-    # 4. Purge expired async job files
+    # Purge expired job files
     jobs_root = Path(settings.UPLOAD_DIR) / "jobs"
     if jobs_root.exists():
         for jf in list(jobs_root.glob("*.json")):
             if jf.stat().st_mtime < cutoff_time:
                 _safe_delete_file(jf)
 
-    logger.info(f"Retention cleanup completed: {purged_sessions} sessions, {purged_files} files purged.")
+    logger.info(f"Retention cleanup: {purged_sessions} sessions, {purged_files} files removed.")
     return {"purged_sessions": purged_sessions, "purged_files": purged_files}
 
 

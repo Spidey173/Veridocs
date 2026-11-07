@@ -1,9 +1,3 @@
-"""
-Hybrid Vector Store for Veridocs.
-Combines dense retrieval (FAISS) with sparse retrieval (BM25)
-and fuses results using Reciprocal Rank Fusion (RRF).
-"""
-
 import logging
 import math
 import re
@@ -14,27 +8,38 @@ from typing import List, Dict, Optional, Tuple
 
 import faiss
 import numpy as np
+import threading
 
 from config import get_model_registry, get_settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global in-memory cache for query embeddings to avoid redundant FastEmbed ONNX inference
+# Cache for query embeddings
 _QUERY_CACHE: Dict[str, np.ndarray] = {}
+_QUERY_CACHE_LOCK = threading.Lock()
 _MAX_QUERY_CACHE_SIZE = 512
 
 
+def _get_cached_query_embedding(query_norm: str) -> Optional[np.ndarray]:
+    """Get query embedding from cache if present."""
+    with _QUERY_CACHE_LOCK:
+        if query_norm in _QUERY_CACHE:
+            return _QUERY_CACHE[query_norm].copy()
+    return None
 
-# ──────────────────────────────────────────────
-# BM25 Sparse Retriever
-# ──────────────────────────────────────────────
+
+def _set_cached_query_embedding(query_norm: str, embedding: np.ndarray):
+    """Save query embedding to cache."""
+    with _QUERY_CACHE_LOCK:
+        if len(_QUERY_CACHE) >= _MAX_QUERY_CACHE_SIZE:
+            first_key = next(iter(_QUERY_CACHE))
+            del _QUERY_CACHE[first_key]
+        _QUERY_CACHE[query_norm] = embedding.copy()
+
 
 class BM25:
-    """
-    Lightweight BM25 implementation for sparse keyword retrieval.
-    Used alongside dense retrieval for hybrid search.
-    """
+    """BM25 keyword search index."""
 
     def __init__(self, k1: float = 1.5, b: float = 0.75):
         self.k1 = k1
@@ -42,19 +47,19 @@ class BM25:
         self.doc_count = 0
         self.avg_doc_len = 0.0
         self.doc_lengths: List[int] = []
-        self.doc_freqs: Dict[str, int] = defaultdict(int)  # term → num docs containing it
-        self.term_freqs: List[Dict[str, int]] = []  # per-doc term frequencies
+        self.doc_freqs: Dict[str, int] = defaultdict(int)
+        self.term_freqs: List[Dict[str, int]] = []
         self.corpus_size = 0
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
-        """Simple whitespace + lowercasing tokenizer."""
+        """Convert text into lowercase word tokens."""
         text = text.lower()
         text = re.sub(r'[^\w\s]', ' ', text)
         return [t for t in text.split() if len(t) > 1]
 
     def fit(self, documents: List[str]):
-        """Index a corpus of documents."""
+        """Build the index from a list of documents."""
         self.doc_count = len(documents)
         self.term_freqs = []
         self.doc_lengths = []
@@ -79,9 +84,7 @@ class BM25:
         logger.debug(f"BM25: indexed {self.doc_count} documents, {len(self.doc_freqs)} unique terms")
 
     def search(self, query: str, k: int = 20) -> List[Tuple[int, float]]:
-        """
-        Score all documents against query and return top-k (index, score) pairs.
-        """
+        """Score documents against a query and return top k matches."""
         query_tokens = self._tokenize(query)
         scores = []
 
@@ -97,43 +100,24 @@ class BM25:
                 tf = tf_dict[term]
                 df = self.doc_freqs.get(term, 0)
 
-                # IDF with smoothing
                 idf = math.log((self.doc_count - df + 0.5) / (df + 0.5) + 1.0)
-
-                # BM25 TF normalization
                 tf_norm = (tf * (self.k1 + 1)) / (
                     tf + self.k1 * (1 - self.b + self.b * doc_len / max(self.avg_doc_len, 1))
                 )
-
                 score += idf * tf_norm
 
             scores.append((doc_idx, score))
 
-        # Sort by score descending
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores[:k]
 
-
-# ──────────────────────────────────────────────
-# Reciprocal Rank Fusion
-# ──────────────────────────────────────────────
 
 def reciprocal_rank_fusion(
     rankings: List[List[Tuple[int, float]]],
     weights: Optional[List[float]] = None,
     k: int = 60
 ) -> List[Tuple[int, float]]:
-    """
-    Merge multiple ranked lists using Reciprocal Rank Fusion.
-
-    Args:
-        rankings: List of ranked results, each is [(doc_idx, score), ...]
-        weights: Optional weight for each ranking list
-        k: RRF constant (higher = more weight to lower-ranked items)
-
-    Returns:
-        Fused ranking as [(doc_idx, fused_score), ...]
-    """
+    """Combine rankings from multiple search methods."""
     if weights is None:
         weights = [1.0] * len(rankings)
 
@@ -143,22 +127,12 @@ def reciprocal_rank_fusion(
         for rank, (doc_idx, _score) in enumerate(ranking):
             fused_scores[doc_idx] += weight / (k + rank + 1)
 
-    # Sort by fused score descending
     result = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
     return result
 
 
-# ──────────────────────────────────────────────
-# Hybrid Vector Store
-# ──────────────────────────────────────────────
-
 class VectorStore:
-    """
-    Hybrid retrieval store combining:
-    1. Dense retrieval via FAISS (semantic similarity)
-    2. Sparse retrieval via BM25 (keyword matching)
-    3. Reciprocal Rank Fusion to merge results
-    """
+    """Combines vector search (FAISS) and keyword search (BM25)."""
 
     def __init__(self):
         self.registry = get_model_registry()
@@ -171,7 +145,7 @@ class VectorStore:
         self._bm25_fitted = False
 
     def add_documents(self, chunks: List[Dict]):
-        """Index documents for both dense and sparse retrieval."""
+        """Index text chunks with both embeddings and BM25."""
         if not chunks:
             logger.warning("No chunks to add")
             return
@@ -180,7 +154,7 @@ class VectorStore:
             texts = [c["text"] for c in chunks]
             logger.info(f"Generating embeddings for {len(texts)} chunks...")
 
-            # Dense indexing: encode all texts into embeddings
+            # Generate embeddings
             model = self.registry.embedding_model
             self.embeddings = model.encode(
                 texts,
@@ -189,34 +163,25 @@ class VectorStore:
                 batch_size=self.settings.EMBEDDING_BATCH_SIZE
             )
 
+            # Build FAISS index
             dimension = self.embeddings.shape[1]
-            self.index = faiss.IndexFlatIP(dimension)  # Inner product for cosine similarity
-
-            # Normalize embeddings for cosine similarity
+            self.index = faiss.IndexFlatIP(dimension)
             faiss.normalize_L2(self.embeddings)
             self.index.add(self.embeddings)
 
-            # Sparse indexing: fit BM25
+            # Build BM25 index
             self.bm25.fit(texts)
             self._bm25_fitted = True
 
             self.chunks.extend(chunks)
-            logger.info(f"Successfully indexed {len(chunks)} chunks (dense + sparse)")
+            logger.info(f"Successfully indexed {len(chunks)} chunks")
 
         except Exception as e:
             logger.error(f"Error adding documents to vector store: {e}")
             raise
 
     def search(self, query: str, k: int = 5) -> List[Dict]:
-        """
-        Hybrid search: combine dense and sparse retrieval with RRF.
-
-        Pipeline:
-        1. Dense search → top RETRIEVAL_INITIAL_K candidates
-        2. BM25 search → top RETRIEVAL_INITIAL_K candidates
-        3. RRF fusion → merged ranking
-        4. Return top k results
-        """
+        """Perform hybrid search combining vector search and BM25."""
         if self.index is None:
             logger.warning("Search attempted on empty index")
             return []
@@ -224,10 +189,11 @@ class VectorStore:
         initial_k = self.settings.RETRIEVAL_INITIAL_K
 
         try:
-            # === Dense Retrieval with In-Memory Query Embedding Cache ===
+            # 1. Vector search
             query_norm = query.strip().lower()
-            if query_norm in _QUERY_CACHE:
-                query_embedding = _QUERY_CACHE[query_norm].copy()
+            cached_emb = _get_cached_query_embedding(query_norm)
+            if cached_emb is not None:
+                query_embedding = cached_emb
             else:
                 model = self.registry.embedding_model
                 query_embedding = model.encode(
@@ -235,10 +201,7 @@ class VectorStore:
                     convert_to_numpy=True
                 )
                 faiss.normalize_L2(query_embedding)
-                if len(_QUERY_CACHE) >= _MAX_QUERY_CACHE_SIZE:
-                    first_key = next(iter(_QUERY_CACHE))
-                    del _QUERY_CACHE[first_key]
-                _QUERY_CACHE[query_norm] = query_embedding.copy()
+                _set_cached_query_embedding(query_norm, query_embedding)
 
             distances, indices = self.index.search(query_embedding, min(initial_k, len(self.chunks)))
 
@@ -247,12 +210,12 @@ class VectorStore:
                 if 0 <= idx < len(self.chunks):
                     dense_results.append((int(idx), float(dist)))
 
-            # === Sparse Retrieval (BM25) ===
+            # 2. BM25 keyword search
             sparse_results = []
             if self._bm25_fitted:
                 sparse_results = self.bm25.search(query, k=initial_k)
 
-            # === Reciprocal Rank Fusion ===
+            # 3. Merge results with RRF
             rankings = [dense_results]
             weights = [self.settings.DENSE_WEIGHT]
 
@@ -269,24 +232,18 @@ class VectorStore:
             dense_score_map = {idx: round(score, 4) for idx, score in dense_results}
             bm25_score_map = {idx: round(score, 4) for idx, score in sparse_results}
 
-            # Take top k results
             top_indices = [idx for idx, _score in fused[:k]]
 
             results = []
             for idx in top_indices:
                 if 0 <= idx < len(self.chunks):
                     chunk = self.chunks[idx].copy()
-                    # Add relevance score from RRF and individual retriever scores
                     rrf_score = next((s for i, s in fused if i == idx), 0.0)
                     chunk["relevance_score"] = round(rrf_score, 4)
                     chunk["dense_score"] = dense_score_map.get(idx, 0.0)
                     chunk["bm25_score"] = bm25_score_map.get(idx, 0.0)
                     results.append(chunk)
 
-            logger.debug(
-                f"Hybrid search: {len(dense_results)} dense + {len(sparse_results)} sparse "
-                f"→ {len(results)} results after RRF"
-            )
             return results
 
         except Exception as e:
@@ -294,21 +251,20 @@ class VectorStore:
             return []
 
     def search_dense_only(self, query: str, k: int = 5) -> List[Dict]:
-        """Fallback: dense-only search (original behavior)."""
+        """Perform vector search only."""
         if self.index is None:
             return []
 
         try:
             query_norm = query.strip().lower()
-            if query_norm in _QUERY_CACHE:
-                query_embedding = _QUERY_CACHE[query_norm].copy()
+            cached_emb = _get_cached_query_embedding(query_norm)
+            if cached_emb is not None:
+                query_embedding = cached_emb
             else:
                 model = self.registry.embedding_model
                 query_embedding = model.encode([query], convert_to_numpy=True)
                 faiss.normalize_L2(query_embedding)
-                if len(_QUERY_CACHE) >= _MAX_QUERY_CACHE_SIZE:
-                    del _QUERY_CACHE[next(iter(_QUERY_CACHE))]
-                _QUERY_CACHE[query_norm] = query_embedding.copy()
+                _set_cached_query_embedding(query_norm, query_embedding)
 
             distances, indices = self.index.search(query_embedding, k)
 
@@ -324,10 +280,7 @@ class VectorStore:
             return []
 
     def save_to_disk(self, directory: Path):
-        """
-        Serialize the FAISS index and chunk metadata to disk.
-        Allows instant session restoration across server restarts without re-embedding.
-        """
+        """Save the FAISS index and chunk metadata to disk."""
         try:
             directory.mkdir(parents=True, exist_ok=True)
             if self.index is not None:
@@ -342,15 +295,13 @@ class VectorStore:
             }
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest, f)
-            logger.info(f"Successfully saved VectorStore ({len(self.chunks)} chunks) to {directory}")
+            logger.info(f"Saved VectorStore to {directory}")
         except Exception as e:
             logger.error(f"Failed to save VectorStore to {directory}: {e}")
 
     @classmethod
     def load_from_disk(cls, directory: Path) -> Optional["VectorStore"]:
-        """
-        Deserialize pre-computed FAISS index and chunk metadata from disk.
-        """
+        """Load an existing index and chunks from disk."""
         manifest_path = directory / "manifest.json"
         index_path = directory / "faiss.index"
 
@@ -367,13 +318,12 @@ class VectorStore:
             if index_path.exists():
                 store.index = faiss.read_index(str(index_path))
 
-            # Fast BM25 rebuild from loaded chunks
             texts = [c["text"] for c in store.chunks]
             if texts:
                 store.bm25.fit(texts)
                 store._bm25_fitted = True
 
-            logger.info(f"Restored VectorStore from {directory} ({len(store.chunks)} chunks)")
+            logger.info(f"Loaded VectorStore from {directory}")
             return store
         except Exception as e:
             logger.error(f"Failed to load VectorStore from {directory}: {e}")

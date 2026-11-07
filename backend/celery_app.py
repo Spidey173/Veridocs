@@ -1,9 +1,3 @@
-"""
-Celery distributed task application for Veridocs.
-Handles asynchronous background job processing for heavy OCR, multi-hundred-page
-SEC 10-K filings, and embedding index construction without blocking FastAPI HTTP requests.
-"""
-
 import logging
 from celery import Celery
 from config import get_settings
@@ -30,7 +24,7 @@ celery_app.conf.update(
     worker_concurrency=settings.ASYNC_WORKER_CONCURRENCY,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    result_expires=86400,  # 24 hours
+    result_expires=86400,
 )
 
 if settings.CELERY_TASK_ALWAYS_EAGER:
@@ -41,21 +35,14 @@ if settings.CELERY_TASK_ALWAYS_EAGER:
 
 
 def is_celery_broker_reachable() -> bool:
-    """
-    Check if the configured Celery/Redis broker is active and reachable.
-    Provides sub-second failure detection to allow seamless graceful fallback.
-    """
+    """Check if Redis broker is reachable."""
     if settings.CELERY_TASK_ALWAYS_EAGER:
         return True
 
     try:
         import redis
-        client = redis.from_url(
-            settings.CELERY_BROKER_URL,
-            socket_timeout=0.6,
-            socket_connect_timeout=0.6,
-        )
-        return bool(client.ping())
-    except Exception as e:
-        logger.debug(f"Celery broker not reachable at {settings.CELERY_BROKER_URL}: {e}")
+        client = redis.Redis.from_url(settings.CELERY_BROKER_URL, socket_connect_timeout=0.5)
+        client.ping()
+        return True
+    except Exception:
         return False

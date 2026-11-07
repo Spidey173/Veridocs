@@ -19,8 +19,7 @@ export function getApiBase(): string {
     return envUrl.trim().replace(/\/$/, "");
   }
   if (!isLocalDev()) {
-    // In production web demo without external API backend,
-    // operate client-side with zero network timeout latency
+    // Static demo fallback
     return "";
   }
   return "http://localhost:8000";
@@ -69,7 +68,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// === Types ===
+// Types
 
 export interface UploadResponse {
   session_id: string;
@@ -171,7 +170,7 @@ export interface SessionInfo {
   has_insights: boolean;
 }
 
-// === API Functions ===
+// API functions
 
 export async function uploadDocuments(
   files: File[],
@@ -180,7 +179,7 @@ export async function uploadDocuments(
 ): Promise<UploadResponse> {
   const apiBase = getApiBase();
 
-  // Instant sub-second client-side indexing when deployed without external API server
+  // Client-side demo fallback when no API server is connected
   if (!apiBase) {
     if (onProgress) {
       onProgress(50);
@@ -437,7 +436,7 @@ export async function deleteDocument(
   return response.json();
 }
 
-// === Cross-Document Contradiction Audit ===
+// Cross-document contradiction audit
 
 export interface ConflictSnippet {
   filename: string;
@@ -479,7 +478,7 @@ export async function auditContradictions(
       doc_a_name: docA,
       doc_b_name: docB,
       alignment_score: 0.68,
-      summary: `Automated forensic diffing between ${docA} and ${docB} identified 3 critical covenant discrepancies and financial modifications.`,
+      summary: `Comparison between ${docA} and ${docB} identified 3 discrepancies and modifications.`,
       critical_count: 2,
       warning_count: 1,
       conflicts: [

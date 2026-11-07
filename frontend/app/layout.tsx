@@ -21,17 +21,15 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Veridocs — Forensic Document Intelligence & Grounding Engine",
+  title: "Veridocs — Document QA & Verification",
   description:
-    "Enterprise-grade AI document intelligence platform. Forensic cross-document contradiction auditing, pixel-level canvas visual grounding, and sub-second hybrid retrieval.",
+    "An AI-powered document QA assistant with source citations, visual highlighting, and document comparison.",
   keywords: [
     "AI",
     "document analysis",
-    "contradiction engine",
-    "PDF visual grounding",
     "RAG",
-    "forensics",
-    "intelligence",
+    "PDF",
+    "citations",
   ],
 };
 

@@ -32,7 +32,7 @@ export default function FileManager() {
     setUploadProgress(0, "Staging additional files...");
 
     try {
-      // 1. Generate local blob URLs immediately for instant zero-lag rendering
+      // Create local preview URLs
       const blobUrls: Record<string, string> = {};
       acceptedFiles.forEach((f) => {
         blobUrls[f.name] = URL.createObjectURL(f);
@@ -52,13 +52,13 @@ export default function FileManager() {
         type: f.type,
       }));
 
-      // 2. Combine existing files and new files, immediately active
+      // Combine existing files with newly uploaded files
       const updatedFiles = [...files, ...newFiles];
       setSession(result.session_id, updatedFiles);
       setUploadProgress(100, "Done!");
       setUploading(false);
 
-      // 3. Update insights in background
+      // Refresh insights in the background
       setLoadingInsights(true);
       getInsights(result.session_id)
         .then((insights) => {

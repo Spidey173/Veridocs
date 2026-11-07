@@ -12,7 +12,7 @@ class TestConfig:
         """Verify default configuration values."""
         settings = Settings()
         assert settings.APP_NAME == "Veridocs"
-        assert settings.APP_VERSION == "2.0.0"
+        assert settings.APP_VERSION == "1.0.0"
         assert settings.RETRIEVAL_INITIAL_K == 20
         assert settings.RETRIEVAL_FINAL_K == 5
         assert settings.BM25_WEIGHT == 0.3

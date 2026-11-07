@@ -52,7 +52,7 @@ export default function DropZone() {
       setUploadProgress(25, "Extracting text chunks & generating embeddings...");
       setError(null);
 
-      // Fast, responsive progress indicator (<150ms)
+      // Progress indicator
       let currentPct = 25;
       const progressTicker = setInterval(() => {
         if (currentPct < 90) {
@@ -85,12 +85,12 @@ export default function DropZone() {
           type: f.type,
         }));
 
-        // Immediately enter workspace in sub-second time
+        // Update session state
         setSession(result.session_id, files);
         setUploading(false);
         setSelectedFiles([]);
 
-        // Fetch insights asynchronously in background without blocking UI
+        // Fetch document insights in the background
         setLoadingInsights(true);
         getInsights(result.session_id)
           .then((insights) => {
@@ -141,7 +141,7 @@ export default function DropZone() {
         return;
       }
       setSelectedFiles(valid);
-      // Auto-trigger instant upload on file drop
+      // Start upload when files are dropped
       executeUpload(valid);
     },
     [executeUpload]

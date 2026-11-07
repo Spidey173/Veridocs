@@ -1,11 +1,3 @@
-"""
-Forensic Cross-Document Contradiction & Diff Engine for Veridocs.
-Analyzes two documents, identifies matching clauses/topics, and flags:
-- Direct contradictions (numbers, deadlines, payment terms)
-- Material omissions
-- Modified covenants and risk liabilities
-"""
-
 import re
 import json
 import logging
@@ -26,8 +18,8 @@ class ConflictSnippet(BaseModel):
 class AuditDiffItem(BaseModel):
     id: str
     topic: str
-    severity: str = "warning"  # "critical" | "warning" | "info"
-    conflict_type: str = "contradiction"  # "contradiction" | "omission" | "modification" | "numeric_mismatch"
+    severity: str = "warning"
+    conflict_type: str = "contradiction"
     explanation: str
     risk_analysis: str
     doc_a: ConflictSnippet
@@ -37,19 +29,18 @@ class AuditDiffItem(BaseModel):
 class AuditDiffReport(BaseModel):
     doc_a_name: str
     doc_b_name: str
-    alignment_score: float = Field(default=0.8, description="0.0 (total conflict) to 1.0 (identical)")
+    alignment_score: float = Field(default=0.8, description="0.0 to 1.0 score")
     summary: str
     critical_count: int = 0
     warning_count: int = 0
     conflicts: List[AuditDiffItem] = []
 
 
-CONTRADICTION_PROMPT = """You are a senior forensic contract auditor and document intelligence examiner.
-You are comparing two documents:
+CONTRADICTION_PROMPT = """You are comparing two documents:
 - Document A: "{doc_a_name}"
 - Document B: "{doc_b_name}"
 
-Your goal is to detect ANY contradictions, altered numbers, deleted obligations, or conflicting clauses between them.
+Your goal is to detect any contradictions, altered numbers, deleted obligations, or conflicting clauses between them.
 
 --- DOCUMENT A EXCERPTS ---
 {doc_a_text}
@@ -58,19 +49,19 @@ Your goal is to detect ANY contradictions, altered numbers, deleted obligations,
 {doc_b_text}
 
 TASK:
-Identify any direct contradictions, numerical discrepancies (e.g. 30 days vs 60 days, $1M vs $250k), or material covenant alterations between Document A and Document B.
+Identify any direct contradictions, numerical discrepancies (e.g. 30 days vs 60 days, $1M vs $250k), or altered terms between Document A and Document B.
 
-Return your audit STRICTLY as a valid JSON object matching this schema:
+Return your audit as a valid JSON object matching this schema:
 {{
   "alignment_score": 0.65,
-  "summary": "Brief 1-2 sentence executive summary of the differences found.",
+  "summary": "Brief 1-2 sentence summary of the differences found.",
   "conflicts": [
     {{
-      "topic": "Clause or Topic Name (e.g., Payment Terms & Penalties)",
+      "topic": "Clause or Topic Name",
       "severity": "critical",
       "conflict_type": "contradiction",
-      "explanation": "Exact description of how Doc A and Doc B contradict each other.",
-      "risk_analysis": "Operational or legal risk caused by this discrepancy.",
+      "explanation": "Description of how Doc A and Doc B contradict each other.",
+      "risk_analysis": "Impact of this discrepancy.",
       "doc_a": {{
         "page": 2,
         "snippet": "Exact quote from Document A",
@@ -85,67 +76,61 @@ Return your audit STRICTLY as a valid JSON object matching this schema:
   ]
 }}
 
-CRITICAL INSTRUCTIONS:
-1. ONLY flag genuine conflicts or alterations.
-2. Provide exact verbatim quotes in `snippet` so they can be highlighted on the document canvas.
+INSTRUCTIONS:
+1. Only flag genuine conflicts or alterations.
+2. Provide exact verbatim quotes in `snippet`.
 3. If no conflicts exist, return an empty "conflicts" list and alignment_score 1.0.
 4. Return ONLY valid JSON.
 """
 
-INTERNAL_CONSISTENCY_PROMPT = """You are a senior document intelligence examiner.
-You are auditing the document "{doc_name}" for INTERNAL consistency, chronological timeline alignment, and self-contradictions across its different pages and sections.
+INTERNAL_CONSISTENCY_PROMPT = """You are checking the document "{doc_name}" for internal consistency and timeline alignment across its pages.
 
 --- DOCUMENT EXCERPTS ---
 {doc_text}
 
 TASK:
-Examine all dates, numerical amounts, commitments, and claims made throughout "{doc_name}".
-Detect any chronological inconsistencies (e.g., future dates for past completed experience, conflicting graduation or employment dates), contradictory numerical values, or conflicting requirements between different sections.
+Examine dates, numbers, commitments, and statements throughout "{doc_name}".
+Detect any chronological inconsistencies, contradictory numbers, or conflicting statements between different sections.
 
-Return your audit STRICTLY as a valid JSON object matching this schema:
+Return your audit as a valid JSON object matching this schema:
 {{
   "alignment_score": 0.85,
-  "summary": "Brief 1-2 sentence executive summary of internal document consistency findings.",
+  "summary": "Brief 1-2 sentence summary of findings.",
   "conflicts": [
     {{
-      "topic": "Timeline or Discrepancy Topic (e.g., Internship Timeline Discrepancy)",
+      "topic": "Topic Name",
       "severity": "critical",
       "conflict_type": "contradiction",
-      "explanation": "Exact description of the conflicting statements or dates within the document.",
-      "risk_analysis": "Operational, credibility, or compliance impact of this inconsistency.",
+      "explanation": "Description of the conflicting statements or dates.",
+      "risk_analysis": "Impact of this inconsistency.",
       "doc_a": {{
         "page": 1,
-        "snippet": "Exact quote from earlier in document",
+        "snippet": "Quote from earlier in document",
         "section": "Section name"
       }},
       "doc_b": {{
         "page": 2,
-        "snippet": "Exact quote from later in document",
+        "snippet": "Quote from later in document",
         "section": "Section name"
       }}
     }}
   ]
 }}
 
-CRITICAL INSTRUCTIONS:
-1. If the document is internally consistent and has no discrepancies, return an empty "conflicts" list, alignment_score 1.0, and a summary confirming high internal consistency.
-2. Provide exact verbatim quotes in `snippet` so they can be highlighted on the document canvas.
+INSTRUCTIONS:
+1. If the document is consistent, return an empty "conflicts" list and alignment_score 1.0.
+2. Provide exact verbatim quotes in `snippet`.
 3. Return ONLY valid JSON.
 """
 
 
-
 def _deterministic_diff(doc_a_chunks: List[Dict], doc_b_chunks: List[Dict], doc_a_name: str, doc_b_name: str) -> AuditDiffReport:
-    """
-    High-precision heuristic fallback that compares numerical entities, payment terms,
-    liability caps, and key contract terminology between two sets of document chunks.
-    """
+    """Compare numbers, dates, and common keywords between document chunks."""
     conflicts: List[AuditDiffItem] = []
     
-    # Extract numerical patterns: currency, percentages, days/months
+    # Match numbers, currencies, and dates
     num_pattern = re.compile(r'(\$\s?[\d,]+(?:\.\d+)?|\b\d+\s?%|\b\d+\s+(?:days?|months?|business days|years?))', re.IGNORECASE)
     
-    # Topic keywords to monitor
     topics = [
         ("Payment & Invoicing", ["payment", "invoice", "net", "payable", "fee", "penalty"]),
         ("Limitation of Liability", ["liability", "indemnif", "damages", "cap", "aggregate"]),
@@ -176,7 +161,6 @@ def _deterministic_diff(doc_a_chunks: List[Dict], doc_b_chunks: List[Dict], doc_
             chunk_a, nums_a = matched_a[0]
             chunk_b, nums_b = matched_b[0]
             
-            # Check if numbers differ
             set_a = set(n.lower().strip() for n in nums_a)
             set_b = set(n.lower().strip() for n in nums_b)
             
@@ -190,7 +174,7 @@ def _deterministic_diff(doc_a_chunks: List[Dict], doc_b_chunks: List[Dict], doc_
                     severity="critical" if "liability" in topic_name.lower() or "payment" in topic_name.lower() else "warning",
                     conflict_type="numeric_mismatch" if (set_a and set_b) else "modification",
                     explanation=f"Discrepancy detected in {topic_name}: {doc_a_name} specifies {', '.join(set_a) or 'standard terms'} whereas {doc_b_name} specifies {', '.join(set_b) or 'altered terms'}.",
-                    risk_analysis=f"Alters commercial commitments and obligations between parties for {topic_name.lower()}.",
+                    risk_analysis=f"Alters commitments between parties for {topic_name.lower()}.",
                     doc_a=ConflictSnippet(
                         filename=doc_a_name,
                         page=chunk_a.get("page", 1),
@@ -217,12 +201,11 @@ def _deterministic_diff(doc_a_chunks: List[Dict], doc_b_chunks: List[Dict], doc_
         )
     else:
         summary = (
-            f"Forensic cross-document analysis identified {len(conflicts)} potential discrepancies "
-            f"across contractual covenants between {doc_a_name} and {doc_b_name}."
+            f"Cross-document analysis identified {len(conflicts)} potential discrepancies "
+            f"between {doc_a_name} and {doc_b_name}."
             if conflicts else f"No material discrepancies or numerical contradictions identified between {doc_a_name} and {doc_b_name}."
         )
 
-    
     return AuditDiffReport(
         doc_a_name=doc_a_name,
         doc_b_name=doc_b_name,
@@ -234,6 +217,49 @@ def _deterministic_diff(doc_a_chunks: List[Dict], doc_b_chunks: List[Dict], doc_
     )
 
 
+def _select_salient_chunks(chunks: List[Dict], max_chars: int = 7500) -> List[Dict]:
+    """Select key chunks with numbers or important terms across the document."""
+    if not chunks:
+        return []
+
+    total_len = sum(len(c.get("text", "")) for c in chunks)
+    if total_len <= max_chars:
+        return chunks
+
+    salience_pattern = re.compile(
+        r'(\$\s?[\d,]+|\b\d+[\d,.]*(?:%|\b)|liability|indemnif|payment|termination|sla|warranty|penalty|cure period|days|months)',
+        re.IGNORECASE
+    )
+
+    scored_chunks = []
+    for idx, c in enumerate(chunks):
+        text = c.get("text", "")
+        matches = len(salience_pattern.findall(text))
+        score = matches * 3
+        if c.get("section"):
+            score += 2
+        scored_chunks.append((idx, score, c))
+
+    scored_chunks.sort(key=lambda x: x[1], reverse=True)
+
+    selected_indices = set()
+    current_chars = 0
+
+    for idx, score, c in scored_chunks:
+        c_len = len(c.get("text", ""))
+        if current_chars + c_len > max_chars and len(selected_indices) >= 5:
+            continue
+        selected_indices.add(idx)
+        current_chars += c_len
+        if current_chars >= max_chars:
+            break
+
+    if 0 not in selected_indices and len(chunks) > 0:
+        selected_indices.add(0)
+
+    return [chunks[i] for i in sorted(selected_indices)]
+
+
 def run_cross_document_audit(
     doc_a_chunks: List[Dict],
     doc_b_chunks: List[Dict],
@@ -241,10 +267,7 @@ def run_cross_document_audit(
     doc_b_name: str,
     llm_service: Optional[Any] = None
 ) -> AuditDiffReport:
-    """
-    Executes a forensic cross-document contradiction and discrepancy audit.
-    Uses LLM reasoning with JSON validation and falls back to deterministic analysis.
-    """
+    """Compare two documents to find differences and contradictions."""
     if not doc_a_chunks or not doc_b_chunks:
         return AuditDiffReport(
             doc_a_name=doc_a_name,
@@ -256,29 +279,32 @@ def run_cross_document_audit(
             conflicts=[]
         )
 
-    # Prepare excerpts (top 10 chunks from each document)
-    a_parts = [f"[Page {c.get('page', 1)} | Section: {c.get('section', 'General')}]\n{c.get('text', '')}" for c in doc_a_chunks[:10]]
-    b_parts = [f"[Page {c.get('page', 1)} | Section: {c.get('section', 'General')}]\n{c.get('text', '')}" for c in doc_b_chunks[:10]]
-    
+    # Select representative chunks from both documents
+    salient_a = _select_salient_chunks(doc_a_chunks, max_chars=6000)
+    salient_b = _select_salient_chunks(doc_b_chunks, max_chars=6000)
+
+    a_parts = [f"[Page {c.get('page', 1)} | Section: {c.get('section', 'General')}]\n{c.get('text', '')}" for c in salient_a]
+    b_parts = [f"[Page {c.get('page', 1)} | Section: {c.get('section', 'General')}]\n{c.get('text', '')}" for c in salient_b]
+
     doc_a_text = "\n\n---\n\n".join(a_parts)
     doc_b_text = "\n\n---\n\n".join(b_parts)
 
     if doc_a_name == doc_b_name:
         prompt = INTERNAL_CONSISTENCY_PROMPT.format(
             doc_name=doc_a_name,
-            doc_text=doc_a_text[:5000]
+            doc_text=doc_a_text[:8000]
         )
     else:
         prompt = CONTRADICTION_PROMPT.format(
             doc_a_name=doc_a_name,
             doc_b_name=doc_b_name,
-            doc_a_text=doc_a_text[:3500],
-            doc_b_text=doc_b_text[:3500]
+            doc_a_text=doc_a_text[:6000],
+            doc_b_text=doc_b_text[:6000]
         )
 
     if llm_service:
         try:
-            logger.info(f"Running LLM forensic contradiction audit between {doc_a_name} and {doc_b_name}...")
+            logger.info(f"Running LLM contradiction audit between {doc_a_name} and {doc_b_name}...")
             
             if hasattr(llm_service, "provider") and llm_service.provider == "google":
                 response = llm_service.client.generate_content(prompt)
@@ -294,7 +320,6 @@ def run_cross_document_audit(
             else:
                 raw = ""
 
-            # Extract JSON block
             json_match = re.search(r'\{.*\}', raw, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group())
@@ -338,7 +363,7 @@ def run_cross_document_audit(
                     conflicts=conflicts
                 )
         except Exception as e:
-            logger.warning(f"LLM contradiction audit failed or JSON parse error: {e}. Falling back to deterministic diff.")
+            logger.warning(f"LLM contradiction audit failed: {e}. Falling back to rule-based diff.")
 
-    # Fallback to deterministic rule-based analysis
+    # Rule-based fallback if LLM is unavailable
     return _deterministic_diff(doc_a_chunks, doc_b_chunks, doc_a_name, doc_b_name)

@@ -1,9 +1,3 @@
-"""
-Document Insights Engine for Veridocs.
-Generates executive summaries, suggested questions, and extracts key entities
-immediately after document upload.
-"""
-
 import re
 import logging
 import time
@@ -18,12 +12,7 @@ from models import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-# ──────────────────────────────────────────────
-# Entity Extraction (regex-based, no spaCy dependency)
-# ──────────────────────────────────────────────
-
-# Common patterns for entity extraction
+# Regular expressions for entity extraction
 MONEY_PATTERN = re.compile(
     r'[\$€£¥₹]\s*\d[\d,]*(?:\.\d{1,2})?\s*(?:million|billion|trillion|mn|bn|M|B|K)?'
     r'|\d[\d,]*(?:\.\d{1,2})?\s*(?:dollars|euros|pounds|USD|EUR|GBP|INR)',
@@ -45,7 +34,6 @@ PERCENTAGE_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-# Capitalized multi-word names that likely are organizations or people
 ORG_PATTERN = re.compile(
     r'\b(?:[A-Z][a-z]+(?:\s+(?:Inc|Corp|Ltd|LLC|Co|Group|Holdings|International|Technologies|Solutions|Partners|Association|Foundation|Institute|University|Commission|Committee|Department|Agency|Board))+\.?)\b'
 )
@@ -62,15 +50,12 @@ LOCATION_PATTERN = re.compile(
 
 
 def extract_entities(chunks: List[Dict]) -> List[EntityInfo]:
-    """
-    Extract named entities from document chunks using regex patterns.
-    Groups and deduplicates entities.
-    """
-    entities: Dict[str, Dict] = {}  # key: (type, normalized_value)
+    """Extract money, dates, percentages, organizations, people, and locations."""
+    entities: Dict[str, Dict] = {}
 
     full_text = "\n".join(c["text"] for c in chunks)
 
-    # Extract monetary values
+    # Monetary values
     for match in MONEY_PATTERN.finditer(full_text):
         value = match.group().strip()
         key = f"MONEY:{value.lower()}"
@@ -78,7 +63,7 @@ def extract_entities(chunks: List[Dict]) -> List[EntityInfo]:
             entities[key] = {"entity_type": "MONEY", "value": value, "count": 0}
         entities[key]["count"] += 1
 
-    # Extract dates
+    # Dates
     for match in DATE_PATTERN.finditer(full_text):
         value = match.group().strip()
         key = f"DATE:{value.lower()}"
@@ -86,7 +71,7 @@ def extract_entities(chunks: List[Dict]) -> List[EntityInfo]:
             entities[key] = {"entity_type": "DATE", "value": value, "count": 0}
         entities[key]["count"] += 1
 
-    # Extract percentages
+    # Percentages
     for match in PERCENTAGE_PATTERN.finditer(full_text):
         value = match.group().strip()
         key = f"PERCENTAGE:{value.lower()}"
@@ -94,7 +79,7 @@ def extract_entities(chunks: List[Dict]) -> List[EntityInfo]:
             entities[key] = {"entity_type": "PERCENTAGE", "value": value, "count": 0}
         entities[key]["count"] += 1
 
-    # Extract organizations
+    # Organizations
     for match in ORG_PATTERN.finditer(full_text):
         value = match.group().strip()
         if len(value) > 3:
@@ -103,7 +88,7 @@ def extract_entities(chunks: List[Dict]) -> List[EntityInfo]:
                 entities[key] = {"entity_type": "ORGANIZATION", "value": value, "count": 0}
             entities[key]["count"] += 1
 
-    # Extract people
+    # People
     for match in PERSON_PATTERN.finditer(full_text):
         value = match.group(1).strip() if match.group(1) else match.group().strip()
         key = f"PERSON:{value.lower()}"
@@ -111,7 +96,7 @@ def extract_entities(chunks: List[Dict]) -> List[EntityInfo]:
             entities[key] = {"entity_type": "PERSON", "value": value, "count": 0}
         entities[key]["count"] += 1
 
-    # Extract locations
+    # Locations
     for match in LOCATION_PATTERN.finditer(full_text):
         value = match.group().strip()
         key = f"LOCATION:{value.lower()}"
@@ -119,7 +104,6 @@ def extract_entities(chunks: List[Dict]) -> List[EntityInfo]:
             entities[key] = {"entity_type": "LOCATION", "value": value, "count": 0}
         entities[key]["count"] += 1
 
-    # Convert to EntityInfo objects, sorted by count
     entity_list = [
         EntityInfo(
             entity_type=e["entity_type"],
@@ -130,13 +114,8 @@ def extract_entities(chunks: List[Dict]) -> List[EntityInfo]:
     ]
     entity_list.sort(key=lambda x: x.count, reverse=True)
 
-    # Limit to top 50 entities
     return entity_list[:50]
 
-
-# ──────────────────────────────────────────────
-# Insights Generation
-# ──────────────────────────────────────────────
 
 def generate_document_insights(
     session_id: str,
@@ -144,36 +123,19 @@ def generate_document_insights(
     llm_service=None,
     total_pages: int = 0
 ) -> DocumentInsights:
-    """
-    Generate comprehensive document insights including:
-    - Executive summary
-    - Suggested questions
-    - Key entities
-
-    Args:
-        session_id: Current session identifier
-        chunks: Processed document chunks
-        llm_service: Initialized FreeLLMService instance
-        total_pages: Total document pages
-
-    Returns:
-        DocumentInsights with all generated data
-    """
+    """Generate executive summary, questions, and extracted entities."""
     start_time = time.time()
 
-    # 1. Extract entities (fast, no LLM needed)
-    logger.info("Extracting entities...")
+    # Extract entities
     key_entities = extract_entities(chunks)
-    logger.info(f"Found {len(key_entities)} entities")
 
-    # 2. Generate summary & suggested questions (single fast call)
+    # Generate summary and suggested questions
     executive_summary = None
     suggested_questions = []
 
     if llm_service:
         try:
             if hasattr(llm_service, "generate_summary_and_questions"):
-                logger.info("Generating unified executive summary & questions in single LLM call...")
                 summary_dict, questions = llm_service.generate_summary_and_questions(chunks)
                 executive_summary = ExecutiveSummary(
                     purpose=summary_dict.get("purpose", ""),
@@ -183,7 +145,6 @@ def generate_document_insights(
                 )
                 suggested_questions = questions
             else:
-                logger.info("Generating executive summary...")
                 summary_dict = llm_service.generate_summary(chunks)
                 executive_summary = ExecutiveSummary(
                     purpose=summary_dict.get("purpose", ""),
@@ -210,7 +171,7 @@ def generate_document_insights(
 
 
 def _default_questions() -> List[str]:
-    """Fallback questions when LLM-based generation fails."""
+    """Default questions if LLM is unavailable."""
     return [
         "What is the main topic of this document?",
         "What are the key findings or conclusions?",

@@ -13,7 +13,7 @@ import type {
 } from "./api";
 import { deleteSession } from "./api";
 
-// === Types ===
+// Types
 
 export interface VisualHighlight {
   documentName: string;
@@ -83,7 +83,7 @@ interface AppState {
   highlightedCitation: CitationInfo | null;
   pdfScale: number;
 
-  // Local file Blob URLs for instant 0ms PDF viewer rendering
+  // Local file blob URLs for preview
   localFileUrls: Record<string, string>;
   setLocalFileUrls: (urls: Record<string, string>) => void;
 
@@ -96,7 +96,7 @@ interface AppState {
   leftSidebarWidth: number;
   rightSidebarWidth: number;
 
-  // Visual Grounding & Forensic Diff State
+  // Visual highlighting and contradiction report state
   activeVisualHighlight: VisualHighlight | null;
   activeDiffReport: AuditDiffReport | null;
   isAuditingDiff: boolean;

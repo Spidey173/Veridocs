@@ -1,35 +1,37 @@
-# === Core Framework ===
+# Core framework
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 python-multipart==0.0.20
 python-dotenv==1.0.1
 
-# === Document Processing ===
+# Document processing
 pypdf==5.1.0
 python-docx==1.1.2
 
-# === AI / Embeddings (Ultra-lightweight CPU ONNX, zero-PyTorch) ===
+# Embeddings
 fastembed>=0.4.0
 langchain-text-splitters==0.3.5
 
-# === Vector Search ===
+# Vector search & database
 faiss-cpu>=1.9.0
 numpy==1.26.4
+asyncpg>=0.29.0
+pgvector>=0.3.0
 
-# === LLM Providers ===
+# LLM providers
 openai==1.59.3
 google-generativeai==0.8.4
 groq==0.18.0
 
-# === HTTP ===
+# HTTP client
 httpx==0.28.1
 
-# === Async Background Job Processing (Multi-hundred page SEC 10-K / Heavy OCR) ===
+# Background tasks (optional)
 celery>=5.3.0
 redis>=5.0.0
 
-# === Testing ===
+# Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
 pytest-cov>=5.0.0

@@ -1,11 +1,6 @@
 @import "tailwindcss";
 
-/* ============================================
-   Veridocs — Design System
-   Premium dark-mode glassmorphism theme
-   ============================================ */
-
-/* === Custom Theme Layer === */
+/* Theme variables */
 @theme {
   --color-midnight-950: #0a0b0d;
   --color-midnight-900: #111216;
@@ -35,7 +30,7 @@
   --color-border-active: rgba(255, 176, 0, 0.35);
 }
 
-/* === Base === */
+/* Base */
 
 html {
   scroll-behavior: smooth;
@@ -51,7 +46,7 @@ body {
   height: 100vh;
 }
 
-/* === Scrollbar === */
+/* Scrollbar */
 
 ::-webkit-scrollbar {
   width: 6px;
@@ -71,7 +66,7 @@ body {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* === Glass Panels === */
+/* Glass panels */
 
 .glass {
   background: rgba(17, 18, 22, 0.85);
@@ -94,7 +89,7 @@ body {
   border: 1px solid rgba(255, 176, 0, 0.2);
 }
 
-/* === Animations === */
+/* Animations */
 
 @keyframes fadeInUp {
   from {
@@ -149,7 +144,7 @@ body {
   animation: pulse-glow 2s infinite;
 }
 
-/* === Typography === */
+/* Typography */
 
 .text-gradient {
   background: linear-gradient(135deg, #ff6b00, #ff9d42, #ff8c3a);
@@ -165,7 +160,7 @@ body {
   color: transparent;
 }
 
-/* === Glow Effects === */
+/* Glow effects */
 
 .glow-indigo {
   box-shadow: 0 0 20px rgba(255, 107, 0, 0.1), 0 0 60px rgba(255, 107, 0, 0.03);
@@ -181,7 +176,7 @@ body {
   height: 1px;
 }
 
-/* === Markdown Content === */
+/* Markdown content */
 
 .markdown-content h1,
 .markdown-content h2,
@@ -232,7 +227,7 @@ body {
   color: var(--color-text-muted);
 }
 
-/* === Citation Highlight in PDF === */
+/* Citation highlight in PDF */
 
 .citation-highlight {
   background: rgba(255, 107, 0, 0.15);
@@ -241,7 +236,7 @@ body {
   transition: all 0.3s ease;
 }
 
-/* === Drop Zone === */
+/* Drop zone */
 
 .dropzone-active {
   border-color: var(--color-accent-primary) !important;
@@ -249,7 +244,7 @@ body {
   box-shadow: inset 0 0 30px rgba(255, 107, 0, 0.03);
 }
 
-/* === Confidence Meter === */
+/* Confidence meter */
 
 .confidence-meter {
   height: 4px;
@@ -264,7 +259,7 @@ body {
   transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* === Selection === */
+/* Selection */
 
 ::selection {
   background: rgba(255, 107, 0, 0.25);

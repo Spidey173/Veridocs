@@ -1,15 +1,8 @@
-"""
-Extended Pydantic models for the Veridocs platform.
-Covers requests, responses, streaming events, and domain entities.
-"""
-
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from datetime import datetime
 
-
-# === Enums ===
 
 class MessageRole(str, Enum):
     USER = "user"
@@ -38,8 +31,6 @@ class ProcessingStage(str, Enum):
     ERROR = "error"
 
 
-# === Source & Citation Models ===
-
 class SourceInfo(BaseModel):
     page: int
     snippet: str
@@ -52,7 +43,6 @@ class SourceInfo(BaseModel):
 
 
 class CitationInfo(BaseModel):
-    """Structured citation with page location and highlighted text."""
     citation_id: int
     page: int
     source_file: str
@@ -61,12 +51,10 @@ class CitationInfo(BaseModel):
     confidence: Optional[float] = None
 
 
-# === Request Models ===
-
 class QueryRequest(BaseModel):
     session_id: str
     question: str
-    history: Optional[List[Dict[str, str]]] = None  # Multi-turn conversation
+    history: Optional[List[Dict[str, str]]] = None
     active_files: Optional[List[str]] = None
 
 
@@ -83,8 +71,6 @@ class CrossDocAuditRequest(BaseModel):
     doc_b: str
     focus_topic: Optional[str] = "all"
 
-
-# === Response Models ===
 
 class ClaimStatus(str, Enum):
     VERIFIED = "verified"
@@ -103,13 +89,12 @@ class ClaimVerification(BaseModel):
 
 
 class RagTriadMetrics(BaseModel):
-    """Production RAG Triad observability scores (0.0 - 1.0)."""
-    context_relevance: float = Field(default=0.0, description="Fraction of retrieved chunks relevant to the query")
-    groundedness: float = Field(default=0.0, description="Faithfulness of generated claims to source text")
-    answer_relevance: float = Field(default=0.0, description="Semantic alignment of answer to user question")
-    numeric_accuracy: float = Field(default=1.0, description="Factual alignment of numerical tokens")
+    context_relevance: float = Field(default=0.0, description="Fraction of retrieved chunks relevant to query")
+    groundedness: float = Field(default=0.0, description="Agreement between answer and sources")
+    answer_relevance: float = Field(default=0.0, description="How well the answer addresses the question")
+    numeric_accuracy: float = Field(default=1.0, description="Accuracy of numbers and dates")
     latency_ms: Optional[float] = None
-    retrieval_pipeline: Optional[str] = "Hybrid BM25 + FAISS + Cross-Encoder RRF"
+    retrieval_pipeline: Optional[str] = "Hybrid BM25 + FAISS"
 
 
 class QueryResponse(BaseModel):
@@ -123,16 +108,13 @@ class QueryResponse(BaseModel):
 
 
 class StreamEvent(BaseModel):
-    """Server-Sent Event payload for streaming responses."""
     event: StreamEventType
     data: Dict[str, Any]
 
 
-# === Upload Models ===
-
 class UploadProgress(BaseModel):
     stage: ProcessingStage
-    progress: float = 0.0  # 0.0 to 1.0
+    progress: float = 0.0
     message: str = ""
     file_name: Optional[str] = None
     pages_processed: Optional[int] = None
@@ -148,8 +130,6 @@ class UploadResponse(BaseModel):
     message: str
     document_metadata: Optional[List[Dict[str, Any]]] = None
 
-
-# === Conversation Models ===
 
 class ConversationMessage(BaseModel):
     id: Optional[str] = None
@@ -167,11 +147,8 @@ class ConversationHistory(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-# === Insights Models ===
-
 class EntityInfo(BaseModel):
-    """Extracted named entity from documents."""
-    entity_type: str  # PERSON, ORG, DATE, MONEY, LOCATION
+    entity_type: str
     value: str
     page: Optional[int] = None
     count: int = 1
@@ -194,8 +171,6 @@ class DocumentInsights(BaseModel):
     processing_time_ms: Optional[float] = None
 
 
-# === Document Metadata ===
-
 class DocumentMetadata(BaseModel):
     filename: str
     num_pages: int
@@ -205,8 +180,6 @@ class DocumentMetadata(BaseModel):
     upload_timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
-# === Health Check ===
-
 class HealthResponse(BaseModel):
     status: str
     version: str
@@ -214,8 +187,6 @@ class HealthResponse(BaseModel):
     models_loaded: Dict[str, bool]
     providers_available: Dict[str, bool]
 
-
-# === Async Background Job Processing Models (SEC 10-K & Heavy OCR) ===
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -240,7 +211,7 @@ class JobResponse(BaseModel):
     status: JobStatus
     created_at: float
     file_names: List[str]
-    message: str = "Document queued for background processing and OCR"
+    message: str = "Document queued for processing"
 
 
 class JobDetailResponse(BaseModel):

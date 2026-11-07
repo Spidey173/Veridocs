@@ -1,10 +1,6 @@
-"""
-Centralized configuration for the Veridocs platform.
-Singleton pattern for model loading and environment management.
-"""
-
 import os
-# Constrain thread pools to 1 thread to prevent OOM crash on multi-core cloud containers
+
+# Limit thread pools to prevent high memory usage
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -25,14 +21,14 @@ class Settings:
     """Application settings loaded from environment variables."""
 
     def __init__(self):
-        # === API Keys ===
+        # API Keys
         self.GOOGLE_API_KEY: str = (os.getenv("GOOGLE_API_KEY", "") or os.getenv("GOOGLE", "") or os.getenv("google", "")).strip()
         self.GROQ_API_KEY: str = (os.getenv("GROQ_API_KEY", "")).strip()
         self.GROQ_MODEL: str = (os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")).strip()
         self.OPENROUTER_API_KEY: str = (os.getenv("OPENROUTER_API_KEY", "")).strip()
         self.GITHUB_TOKEN: str = (os.getenv("GITHUB_TOKEN", "") or os.getenv("GITHUB_API_KEY", "") or os.getenv("GITHUB", "") or os.getenv("github", "")).strip()
 
-        # === LLM Configuration ===
+        # LLM Provider settings
         _has_groq = bool(self.GROQ_API_KEY)
         _has_github = bool(self.GITHUB_TOKEN)
         _has_google = bool(self.GOOGLE_API_KEY)
@@ -46,49 +42,52 @@ class Settings:
         self.LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
         self.LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "750"))
 
-        # === Embedding Configuration ===
+        # Embedding settings
         self.EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
         self.EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
 
-        # === Retrieval Configuration ===
+        # Search settings
         self.RETRIEVAL_INITIAL_K: int = int(os.getenv("RETRIEVAL_INITIAL_K", "20"))
         self.RETRIEVAL_FINAL_K: int = int(os.getenv("RETRIEVAL_FINAL_K", "5"))
         self.BM25_WEIGHT: float = float(os.getenv("BM25_WEIGHT", "0.3"))
         self.DENSE_WEIGHT: float = float(os.getenv("DENSE_WEIGHT", "0.7"))
         self.RRF_K: int = int(os.getenv("RRF_K", "60"))
 
-        # === Re-ranker Configuration ===
+        # Re-ranker settings
         self.RERANKER_MODEL: str = os.getenv("RERANKER_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2")
         self.RERANKER_ENABLED: bool = (
             os.getenv("RERANKER_ENABLED", os.getenv("ENABLE_RERANKER", "false")).lower() == "true"
         )
 
-        # === Chunking Configuration ===
+        # Chunking settings
         self.CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "500"))
         self.CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "50"))
 
-        # === OCR Configuration ===
+        # OCR settings
         self.OCR_ENABLED: bool = os.getenv("OCR_ENABLED", "false").lower() == "true"
         self.OCR_MIN_TEXT_LENGTH: int = int(os.getenv("OCR_MIN_TEXT_LENGTH", "30"))
 
-        # === Celery & Redis Background Processing (SEC 10-K & Heavy OCR) ===
+        # Background processing settings
         self.CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0").strip()
         self.CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0").strip()
         self.CELERY_TASK_ALWAYS_EAGER: bool = os.getenv("CELERY_TASK_ALWAYS_EAGER", "false").lower() in ("true", "1", "yes")
         self.JOB_TIMEOUT_SECONDS: int = int(os.getenv("JOB_TIMEOUT_SECONDS", "3600"))
         self.ASYNC_WORKER_CONCURRENCY: int = int(os.getenv("ASYNC_WORKER_CONCURRENCY", "4"))
 
-        # === Application ===
+        # Database settings (PostgreSQL + pgvector)
+        self.DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
+
+        # Application settings
         self.APP_NAME: str = os.getenv("APP_NAME", "Veridocs")
-        self.APP_VERSION: str = "2.0.0"
+        self.APP_VERSION: str = "1.0.0"
         self.MAX_SESSIONS: int = int(os.getenv("MAX_SESSIONS", "200"))
         self.MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
         self.ALLOWED_EXTENSIONS: set = {".pdf", ".docx", ".txt"}
 
-        # === Upload Storage ===
+        # File upload directory
         self.UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./uploads")
 
-        # === CORS ===
+        # CORS allowed origins
         self.CORS_ORIGINS: list = [
             origin.strip()
             for origin in os.getenv(
@@ -98,13 +97,13 @@ class Settings:
             if origin.strip()
         ]
 
-        # === Deployment & Environment ===
+        # Environment & Auth mode
         self.ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
         self.AUTH_MODE: str = os.getenv(
             "AUTH_MODE", "demo" if self.ENVIRONMENT != "production" else "gateway"
         ).lower()
 
-        # === Security & Access Control ===
+        # Security keys and headers
         self.AUTH_SECRET_KEY: str = os.getenv("AUTH_SECRET_KEY", "").strip()
         self.ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "").strip()
         self.REQUIRE_API_KEY: bool = os.getenv("REQUIRE_API_KEY", "false").lower() in ("true", "1", "yes")
@@ -115,16 +114,18 @@ class Settings:
         self.GATEWAY_SHARED_SECRET: str = os.getenv("GATEWAY_SHARED_SECRET", "").strip()
         self.GATEWAY_SECRET_HEADER: str = os.getenv("GATEWAY_SECRET_HEADER", "X-Gateway-Secret")
 
-        # === Data Lifecycle & Retention ===
+        # Rate limiting
+        self.RATE_LIMITING_ENABLED: bool = os.getenv("RATE_LIMITING_ENABLED", "true").lower() in ("true", "1", "yes")
+        self.UPLOAD_RATE_LIMIT: int = int(os.getenv("UPLOAD_RATE_LIMIT", "60"))
+        self.QUERY_RATE_LIMIT: int = int(os.getenv("QUERY_RATE_LIMIT", "180"))
+
+        # Retention & cleanup
         self.RETENTION_HOURS: int = int(os.getenv("RETENTION_HOURS", "24"))
         self.AUTO_CLEANUP_ENABLED: bool = os.getenv("AUTO_CLEANUP_ENABLED", "true").lower() in ("true", "1", "yes")
         self.CLEANUP_INTERVAL_MINUTES: int = int(os.getenv("CLEANUP_INTERVAL_MINUTES", "60"))
 
     def validate_production_configuration(self):
-        """
-        Validate critical security parameters for production deployments.
-        Fails fast if production is configured with insecure or missing secrets.
-        """
+        """Validate critical security settings in production."""
         is_prod = self.ENVIRONMENT == "production" or self.AUTH_MODE == "gateway"
         if is_prod:
             insecure_placeholders = {
@@ -150,7 +151,6 @@ class Settings:
                     "You must provide a unique, random secret in production."
                 )
 
-            # In gateway mode under production, protect against direct internet header spoofing
             if self.AUTH_MODE == "gateway":
                 allow_unprotected = os.getenv("ALLOW_UNPROTECTED_GATEWAY_HEADERS", "false").lower() in ("true", "1", "yes")
                 if not self.GATEWAY_SHARED_SECRET and not self.REQUIRE_API_KEY and not allow_unprotected:
@@ -165,33 +165,27 @@ class Settings:
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings singleton."""
+    """Return the cached settings object."""
     return Settings()
 
 
-# === Lightweight FastEmbed Wrapper ===
-
 class FastEmbeddingWrapper:
-    """
-    Lightweight CPU embedding wrapper using FastEmbed (ONNX runtime).
-    Zero PyTorch, zero CUDA, ~70MB RAM, 100% local, drop-in replacement for SentenceTransformer.
-    """
+    """Local embedding wrapper using FastEmbed."""
 
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         import logging
         logger = logging.getLogger(__name__)
         if model_name == "all-MiniLM-L6-v2":
             model_name = "sentence-transformers/all-MiniLM-L6-v2"
-        logger.info(f"Initializing FastEmbed ONNX model: {model_name}")
+        logger.info(f"Loading embedding model: {model_name}")
         from fastembed import TextEmbedding
         try:
             self._model = TextEmbedding(model_name=model_name, threads=1)
         except TypeError:
             self._model = TextEmbedding(model_name=model_name)
-        logger.info("FastEmbed ONNX model loaded successfully (zero-torch, single-thread)")
 
     def encode(self, texts, batch_size: int = 32, **kwargs):
-        """Encode text or list of texts into float32 numpy embeddings."""
+        """Encode text into float32 numpy vectors."""
         import numpy as np
         if isinstance(texts, str):
             texts = [texts]
@@ -199,13 +193,8 @@ class FastEmbeddingWrapper:
         return np.array(embeddings, dtype=np.float32)
 
 
-# === Singleton Model Registry ===
-
 class ModelRegistry:
-    """
-    Singleton registry for ML models to prevent re-loading.
-    Models are loaded lazily on first access with thread-safe locking.
-    """
+    """Loads and caches models in memory."""
 
     _instance: Optional["ModelRegistry"] = None
     _embedding_model = None
@@ -256,20 +245,19 @@ class ModelRegistry:
                             from fastembed import TextCrossEncoder
                         import logging
                         logger = logging.getLogger(__name__)
-                        logger.info(f"Loading FastEmbed CrossEncoder: {settings.RERANKER_MODEL}")
+                        logger.info(f"Loading reranker model: {settings.RERANKER_MODEL}")
                         try:
                             self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL, threads=1)
                         except TypeError:
                             self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL)
-                        logger.info("FastEmbed CrossEncoder loaded successfully")
                     except Exception as e:
                         import logging
                         logger = logging.getLogger(__name__)
-                        logger.warning(f"Re-ranking disabled or model unavailable: {e}")
+                        logger.warning(f"Reranker unavailable: {e}")
                         return None
         return self._reranker_model
 
 
 def get_model_registry() -> ModelRegistry:
-    """Get the singleton model registry."""
+    """Return the global ModelRegistry singleton."""
     return ModelRegistry()

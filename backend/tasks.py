@@ -1,9 +1,3 @@
-"""
-Asynchronous background document processing tasks for Veridocs.
-Handles heavy OCR, multi-hundred-page SEC 10-K filings, and embedding indexing.
-Executes out-of-process via Celery workers or in background threads.
-"""
-
 import time
 import uuid
 import json
@@ -31,16 +25,12 @@ def process_document_job(
     owner_id: str,
     session_id: Optional[str] = None
 ) -> Dict[str, Any]:
-    """
-    Celery background worker task for heavy document processing.
-    Extracts text/OCR page-by-page, tracks progress, chunks structured tables,
-    and builds the FAISS + BM25 hybrid vector store.
-    """
+    """Background task to extract text, create chunks, and build vector index."""
     tracker = get_job_tracker()
     tracker.update_progress(
         job_id,
         percent=5.0,
-        stage="Initializing background worker & loading files..."
+        stage="Loading files..."
     )
 
     all_chunks = []
@@ -54,14 +44,13 @@ def process_document_job(
         for idx, (path_str, filename) in enumerate(zip(file_paths, file_names)):
             file_path = Path(path_str)
             if not file_path.exists():
-                logger.warning(f"File not found during task execution: {path_str}")
+                logger.warning(f"File not found: {path_str}")
                 continue
 
             file_bytes = file_path.read_bytes()
             base_pct = 10.0 + (float(idx) / max(total_files, 1)) * 60.0
 
             def _on_page_progress(cur_page: int, total_pages: int, message: str):
-                # Scale file progress across the allocated 60% window
                 step_pct = base_pct + (float(cur_page) / max(total_pages, 1)) * (60.0 / total_files)
                 tracker.update_progress(
                     job_id,
@@ -74,10 +63,9 @@ def process_document_job(
             tracker.update_progress(
                 job_id,
                 percent=round(base_pct, 1),
-                stage=f"Processing {filename} (page analysis & text extraction)..."
+                stage=f"Extracting text from {filename}..."
             )
 
-            # Extract pages with real-time progress callbacks for scans & SEC 10-K filings
             pages = extract_text_from_file(
                 file_bytes,
                 filename,
@@ -102,10 +90,9 @@ def process_document_job(
             }
             doc_metadata.append(metadata)
 
-            # Chunk document preserving tables and injecting hierarchical breadcrumbs
             tracker.update_progress(
                 job_id,
-                stage=f"Detecting tables & generating chunks for {filename}..."
+                stage=f"Generating chunks for {filename}..."
             )
             chunks = chunk_text(
                 pages,
@@ -120,15 +107,15 @@ def process_document_job(
             processed_count += 1
 
         if not all_chunks:
-            error_msg = "No readable text or content could be extracted from uploaded files."
+            error_msg = "No readable text could be extracted from uploaded files."
             tracker.fail_job(job_id, error_msg)
             raise ValueError(error_msg)
 
-        # Build Vector Store
+        # Build vector index
         tracker.update_progress(
             job_id,
             percent=75.0,
-            stage="Generating neural FastEmbed vectors & building FAISS index...",
+            stage="Building vector index...",
             chunks_created=len(all_chunks),
             total_pages=total_pages_count,
             scanned_pages=total_scanned_count
@@ -140,11 +127,11 @@ def process_document_job(
         if not session_id:
             session_id = str(uuid.uuid4())
 
-        # Persist session to disk storage
+        # Save session to disk
         tracker.update_progress(
             job_id,
             percent=90.0,
-            stage="Persisting session and vector store to disk storage..."
+            stage="Saving session to disk..."
         )
 
         session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
@@ -166,7 +153,6 @@ def process_document_job(
         with open(session_dir / "session.json", "w", encoding="utf-8") as f:
             json.dump(session_meta, f, indent=2)
 
-        # Update in-memory session if main server is running in same process
         try:
             import main
             main.sessions[session_id] = {
@@ -196,11 +182,11 @@ def process_document_job(
             session_id=session_id,
             result_summary=result_summary
         )
-        logger.info(f"Async job {job_id} successfully completed. Session: {session_id}")
+        logger.info(f"Job {job_id} completed for session {session_id}")
         return result_summary
 
     except Exception as e:
-        logger.error(f"Async job {job_id} failed: {e}", exc_info=True)
+        logger.error(f"Job {job_id} failed: {e}", exc_info=True)
         tracker.fail_job(job_id, str(e))
         raise
 
@@ -213,13 +199,8 @@ def dispatch_document_job(
     session_id: Optional[str] = None,
     background_tasks: Optional[BackgroundTasks] = None
 ):
-    """
-    Route job execution dynamically:
-    1. If Celery broker is reachable or eager mode is active, dispatch to Celery.
-    2. Otherwise, fall back to FastAPI BackgroundTasks or a daemon thread.
-    """
+    """Run document processing via Celery or local background thread."""
     if is_celery_broker_reachable() or settings.CELERY_TASK_ALWAYS_EAGER:
-        logger.info(f"Dispatching job {job_id} to Celery worker queue...")
         try:
             process_document_job.delay(
                 job_id=job_id,
@@ -230,10 +211,8 @@ def dispatch_document_job(
             )
             return
         except Exception as e:
-            logger.warning(f"Celery dispatch failed ({e}), falling back to background runner")
+            logger.warning(f"Celery dispatch failed ({e}), falling back to thread")
 
-    # Local fallback execution
-    logger.info(f"Executing job {job_id} via local background thread runner...")
     if background_tasks:
         background_tasks.add_task(
             process_document_job,

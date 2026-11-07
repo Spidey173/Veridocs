@@ -33,10 +33,6 @@ export default function Home() {
   );
 }
 
-// ──────────────────────────────────────
-// Header
-// ──────────────────────────────────────
-
 function Header() {
   const { sessionId, clearSession } = useAppStore();
 
@@ -67,10 +63,6 @@ function Header() {
     </header>
   );
 }
-
-// ──────────────────────────────────────
-// Clean, Focused Premium Landing Screen
-// ──────────────────────────────────────
 
 function LandingScreen() {
   return (

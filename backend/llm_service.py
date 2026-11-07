@@ -1,12 +1,9 @@
-"""
-Enhanced LLM Service for Veridocs.
-Features: streaming responses, multi-turn conversations, structured citations,
-document summarization, and suggested questions generation.
-"""
-
 import json
 import logging
-from typing import List, Dict, AsyncGenerator, Optional, Tuple
+import asyncio
+import time
+import re
+from typing import List, Dict, AsyncGenerator, Optional, Tuple, Callable, Any
 
 from config import get_settings
 
@@ -14,20 +11,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# ──────────────────────────────────────────────
-# Prompt Templates
-# ──────────────────────────────────────────────
-
-ANSWER_SYSTEM_PROMPT = """You are Veridocs, a highly accurate document intelligence assistant.
-You answer questions based SOLELY on the provided context from uploaded documents.
+ANSWER_SYSTEM_PROMPT = """You are Veridocs, a document assistant.
+You answer questions based on the provided context from uploaded documents.
 
 RULES:
 1. Only use information from the provided context.
 2. Cite your sources using [Page X] notation inline with your answer.
 3. If the answer is not in the context, say "I cannot find this information in the uploaded documents."
-4. Be precise, thorough, and well-structured.
-5. Use markdown formatting for clarity (bold, lists, headers where appropriate).
-6. When multiple sources support a point, cite all of them.
+4. Be precise and clear.
+5. Use markdown formatting where appropriate.
 """
 
 ANSWER_PROMPT_TEMPLATE = """Context from uploaded documents:
@@ -38,7 +30,7 @@ ANSWER_PROMPT_TEMPLATE = """Context from uploaded documents:
 
 Question: {question}
 
-Provide a comprehensive, well-cited answer based on the context above."""
+Provide an answer based on the context above."""
 
 MULTI_TURN_PROMPT_TEMPLATE = """Context from uploaded documents:
 
@@ -51,9 +43,9 @@ Conversation History:
 
 Current Question: {question}
 
-Provide a comprehensive, well-cited answer. Reference the conversation history for context if relevant."""
+Provide an answer based on the context and conversation history."""
 
-SUMMARY_PROMPT = """Analyze the following document content and provide a structured executive summary.
+SUMMARY_PROMPT = """Analyze the following document content and provide a structured summary.
 
 Document Content:
 {content}
@@ -66,30 +58,20 @@ Provide your response as a JSON object with this exact structure:
     "conclusions": ["Conclusion 1", "Conclusion 2"]
 }}
 
-Be specific and draw directly from the content. If a category doesn't apply, use an empty list."""
+Return ONLY valid JSON."""
 
-QUESTIONS_PROMPT = """Based on the following document content, generate 10 highly relevant questions
-that a reader would want to ask about this document.
+QUESTIONS_PROMPT = """Based on the following document content, generate 10 relevant questions about it.
 
 Document Content:
 {content}
 
-Generate questions that:
-1. Cover the most important topics in the document
-2. Range from factual to analytical
-3. Would help someone understand the document deeply
-4. Are specific enough to be answered from the document
-
-Return ONLY a JSON array of question strings, like:
+Return ONLY a JSON array of question strings:
 ["Question 1?", "Question 2?", ...]"""
 
-SUMMARY_AND_QUESTIONS_PROMPT = """Analyze the following document content and provide both a structured executive summary and 4-5 relevant suggested questions.
+SUMMARY_AND_QUESTIONS_PROMPT = """Analyze the following document content and provide both a summary and 4-5 suggested questions.
 
 Document Content:
 {content}
-
-CRITICAL RULE FOR QUESTIONS:
-Only suggest questions whose answers are DIRECTLY and EXPLICITLY contained in the text above. Do NOT ask speculative questions or ask about details not mentioned in the text.
 
 Provide your response as a valid JSON object with this exact structure:
 {{
@@ -100,23 +82,11 @@ Provide your response as a valid JSON object with this exact structure:
     "suggested_questions": ["Question 1?", "Question 2?", "Question 3?", "Question 4?"]
 }}
 
-Be specific and draw directly from the content. If a category does not apply, use an empty list. Return ONLY the valid JSON object."""
+Return ONLY valid JSON."""
 
-
-# ──────────────────────────────────────────────
-# LLM Service
-# ──────────────────────────────────────────────
 
 class FreeLLMService:
-    """
-    Multi-provider LLM service with streaming support.
-
-    Supported providers:
-    - 'google' : Google Gemini (free tier)
-    - 'groq'   : Groq (fast inference)
-    - 'openrouter': OpenRouter (many free models)
-    - 'github' : GitHub Models
-    """
+    """Handles communication with LLM providers (Google, Groq, OpenRouter, GitHub)."""
 
     def __init__(self, provider: str = None, model: str = None):
         settings = get_settings()
@@ -174,7 +144,7 @@ class FreeLLMService:
             )
 
     def _build_context(self, chunks: List[Dict]) -> str:
-        """Build context string from retrieved chunks with metadata."""
+        """Format retrieved chunks into a context string."""
         context_parts = []
         for c in chunks:
             source = c.get("source_file", "Document")
@@ -186,19 +156,15 @@ class FreeLLMService:
         return "\n\n---\n\n".join(context_parts)
 
     def _build_history_str(self, history: List[Dict[str, str]]) -> str:
-        """Format conversation history for prompt."""
+        """Format conversation history into a string."""
         if not history:
             return ""
         parts = []
-        for msg in history[-6:]:  # Keep last 6 messages for context window
+        for msg in history[-6:]:
             role = msg.get("role", "user").capitalize()
             content = msg.get("content", "")
             parts.append(f"{role}: {content}")
         return "\n".join(parts)
-
-    # ──────────────────────────────
-    # Standard (non-streaming) answer
-    # ──────────────────────────────
 
     def generate_answer(
         self,
@@ -206,7 +172,7 @@ class FreeLLMService:
         context_chunks: List[Dict],
         history: Optional[List[Dict[str, str]]] = None
     ) -> str:
-        """Generate an answer using the selected provider."""
+        """Generate a complete answer to the question."""
         context_text = self._build_context(context_chunks)
 
         if history:
@@ -223,26 +189,49 @@ class FreeLLMService:
             )
 
         if self.provider == "google":
-            response = self.client.generate_content(
-                [{"role": "user", "parts": [{"text": ANSWER_SYSTEM_PROMPT + "\n\n" + prompt}]}]
-            )
-            return response.text.strip()
+            def _call_google():
+                response = self.client.generate_content(
+                    [{"role": "user", "parts": [{"text": ANSWER_SYSTEM_PROMPT + "\n\n" + prompt}]}]
+                )
+                return response.text.strip()
+            return self._with_retry(_call_google)
 
         elif self.provider in ["groq", "openrouter", "github"]:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=self.settings.LLM_TEMPERATURE,
-                max_tokens=self.settings.LLM_MAX_TOKENS
-            )
-            return response.choices[0].message.content.strip()
+            def _call_openai_compat():
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=self.settings.LLM_TEMPERATURE,
+                    max_tokens=self.settings.LLM_MAX_TOKENS
+                )
+                return response.choices[0].message.content.strip()
+            return self._with_retry(_call_openai_compat)
 
-    # ──────────────────────────────
-    # Streaming answer
-    # ──────────────────────────────
+    @staticmethod
+    def _with_retry(func: Callable[[], Any], max_retries: int = 3, initial_delay: float = 0.5) -> Any:
+        """Retry a function on temporary network or rate limit errors."""
+        delay = initial_delay
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                return func()
+            except Exception as e:
+                last_exception = e
+                err_str = str(e).lower()
+                is_transient = any(
+                    term in err_str
+                    for term in ["rate limit", "429", "timeout", "temporarily unavailable", "503", "connection reset", "econnreset"]
+                )
+                if not is_transient or attempt == max_retries - 1:
+                    raise
+                logger.warning(f"Temporary LLM error (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+                delay *= 2
+        if last_exception:
+            raise last_exception
 
     async def generate_answer_stream(
         self,
@@ -250,10 +239,7 @@ class FreeLLMService:
         context_chunks: List[Dict],
         history: Optional[List[Dict[str, str]]] = None
     ) -> AsyncGenerator[str, None]:
-        """
-        Generate answer with token-by-token streaming.
-        Yields individual text tokens.
-        """
+        """Stream the generated answer token-by-token."""
         context_text = self._build_context(context_chunks)
 
         if history:
@@ -270,32 +256,34 @@ class FreeLLMService:
             )
 
         if self.provider == "google":
-            yield await self._stream_google(prompt)
+            async for token in self._stream_google(prompt):
+                yield token
 
         elif self.provider in ["groq", "openrouter", "github"]:
             async for token in self._stream_openai_compat(prompt):
                 yield token
 
-    async def _stream_google(self, prompt: str) -> str:
-        """Stream from Google Gemini (uses generate_content with stream=True)."""
+    async def _stream_google(self, prompt: str) -> AsyncGenerator[str, None]:
+        """Stream tokens from Google Gemini."""
         try:
-            response = self.client.generate_content(
+            response = await asyncio.to_thread(
+                self.client.generate_content,
                 [{"role": "user", "parts": [{"text": ANSWER_SYSTEM_PROMPT + "\n\n" + prompt}]}],
                 stream=True
             )
-            full_text = ""
             for chunk in response:
                 if chunk.text:
-                    full_text += chunk.text
-            return full_text
+                    yield chunk.text
+                    await asyncio.sleep(0)
         except Exception as e:
             logger.error(f"Google streaming error: {e}")
             raise
 
     async def _stream_openai_compat(self, prompt: str) -> AsyncGenerator[str, None]:
-        """Stream from OpenAI-compatible APIs (Groq, OpenRouter, GitHub)."""
+        """Stream tokens from OpenAI-compatible APIs."""
         try:
-            stream = self.client.chat.completions.create(
+            stream = await asyncio.to_thread(
+                self.client.chat.completions.create,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
@@ -309,21 +297,14 @@ class FreeLLMService:
             for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
+                    await asyncio.sleep(0)
 
         except Exception as e:
             logger.error(f"Streaming error ({self.provider}): {e}")
             raise
 
-    # ──────────────────────────────
-    # Document analysis utilities
-    # ──────────────────────────────
-
     def generate_summary(self, chunks: List[Dict]) -> Dict:
-        """
-        Generate an executive summary of the document.
-        Returns structured summary dict.
-        """
-        # Use first ~15 chunks for summary to stay within context limits
+        """Generate a summary of the document."""
         content_parts = []
         for c in chunks[:15]:
             content_parts.append(f"[Page {c['page']}] {c['text']}")
@@ -344,8 +325,6 @@ class FreeLLMService:
                 )
                 raw = response.choices[0].message.content.strip()
 
-            # Parse JSON response
-            # Try to extract JSON from response (handle markdown code blocks)
             json_match = re.search(r'\{.*\}', raw, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
@@ -358,7 +337,7 @@ class FreeLLMService:
                 }
 
         except json.JSONDecodeError:
-            logger.warning("Failed to parse summary JSON, returning raw text")
+            logger.warning("Failed to parse summary JSON")
             return {
                 "purpose": raw[:500] if 'raw' in dir() else "Summary generation failed",
                 "key_findings": [],
@@ -375,7 +354,7 @@ class FreeLLMService:
             }
 
     def generate_suggested_questions(self, chunks: List[Dict]) -> List[str]:
-        """Generate suggested questions based on document content."""
+        """Generate sample questions that can be answered by the document."""
         content_parts = []
         for c in chunks[:10]:
             content_parts.append(f"[Page {c['page']}] {c['text']}")
@@ -396,13 +375,11 @@ class FreeLLMService:
                 )
                 raw = response.choices[0].message.content.strip()
 
-            # Parse JSON array
             json_match = re.search(r'\[.*\]', raw, re.DOTALL)
             if json_match:
                 questions = json.loads(json_match.group())
                 return [q for q in questions if isinstance(q, str)][:15]
             else:
-                # Fallback: split by newlines
                 return [line.strip().lstrip('0123456789.-) ') for line in raw.split('\n') if '?' in line][:10]
 
         except Exception as e:
@@ -416,10 +393,7 @@ class FreeLLMService:
             ]
 
     def generate_summary_and_questions(self, chunks: List[Dict]) -> Tuple[Dict, List[str]]:
-        """
-        Generate both executive summary and suggested questions in a single LLM call.
-        Eliminates duplicate round-trips and speeds up insights generation by 2x.
-        """
+        """Generate both summary and sample questions in a single call."""
         content_parts = []
         for c in chunks[:12]:
             content_parts.append(f"[Page {c['page']}] {c['text']}")
@@ -469,14 +443,10 @@ class FreeLLMService:
                     "conclusions": []
                 }, default_qs
         except Exception as e:
-            logger.error(f"Unified insights generation error: {e}")
+            logger.error(f"Insights generation error: {e}")
             return {
                 "purpose": "Unable to generate summary at this time.",
                 "key_findings": [],
                 "risks": [],
                 "conclusions": []
             }, default_qs
-
-
-# Need re import for summary parsing
-import re

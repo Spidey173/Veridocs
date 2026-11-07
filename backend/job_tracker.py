@@ -1,8 +1,3 @@
-"""
-Job status tracking manager for Veridocs async document processing.
-Supports distributed Redis state caching with local memory and disk persistence fallbacks.
-"""
-
 import os
 import json
 import time
@@ -18,10 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class JobTracker:
-    """
-    Manages document processing background job lifecycle.
-    Stores job metadata, progress telemetry, owner verification, and results.
-    """
+    """Tracks status of background document processing jobs."""
 
     def __init__(self):
         self.settings = get_settings()
@@ -33,7 +25,7 @@ class JobTracker:
         self._init_redis()
 
     def _init_redis(self):
-        """Attempt initializing connection to Redis backend if available."""
+        """Connect to Redis if available."""
         try:
             import redis
             client = redis.from_url(
@@ -45,11 +37,11 @@ class JobTracker:
                 self._redis_client = client
                 logger.info(f"JobTracker connected to Redis at {self.settings.CELERY_RESULT_BACKEND}")
         except Exception as e:
-            logger.debug(f"JobTracker using local memory/disk storage (Redis unavailable: {e})")
+            logger.debug(f"JobTracker using local storage (Redis unavailable: {e})")
             self._redis_client = None
 
     def _save_to_disk(self, job_data: Dict[str, Any]):
-        """Persist job record to disk."""
+        """Save job state to a JSON file."""
         try:
             job_id = job_data["job_id"]
             job_file = self._jobs_dir / f"{job_id}.json"
@@ -59,7 +51,7 @@ class JobTracker:
             logger.warning(f"Could not persist job {job_data.get('job_id')} to disk: {e}")
 
     def _save_to_redis(self, job_data: Dict[str, Any]):
-        """Save job state to Redis with 24-hour expiration."""
+        """Save job state to Redis."""
         if not self._redis_client:
             return
         try:
@@ -77,7 +69,7 @@ class JobTracker:
         session_id: Optional[str] = None,
         total_pages: int = 0
     ) -> Dict[str, Any]:
-        """Initialize a new job record with queued status."""
+        """Create a new job record with queued status."""
         now = time.time()
         job_data = {
             "job_id": job_id,
@@ -117,32 +109,29 @@ class JobTracker:
         scanned_pages: Optional[int] = None,
         chunks_created: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Update job stage, percentage, and page counts."""
+        """Update job progress fields."""
         job = self.get_job(job_id)
         if not job:
             return None
 
         with self._lock:
-            now = time.time()
-            job["updated_at"] = now
-            if job["status"] == "queued":
-                job["status"] = "processing"
+            job["status"] = "processing"
+            job["updated_at"] = time.time()
+            prog = job.setdefault("progress", {})
 
-            prog = job.get("progress", {})
             if percent is not None:
-                prog["percent"] = min(100.0, max(0.0, percent))
+                prog["percent"] = min(100.0, max(0.0, float(percent)))
             if stage is not None:
-                prog["stage"] = stage
+                prog["stage"] = str(stage)
             if current_page is not None:
-                prog["current_page"] = current_page
+                prog["current_page"] = int(current_page)
             if total_pages is not None:
-                prog["total_pages"] = total_pages
+                prog["total_pages"] = int(total_pages)
             if scanned_pages is not None:
-                prog["scanned_pages"] = scanned_pages
+                prog["scanned_pages"] = int(scanned_pages)
             if chunks_created is not None:
-                prog["chunks_created"] = chunks_created
+                prog["chunks_created"] = int(chunks_created)
 
-            job["progress"] = prog
             self._memory_jobs[job_id] = job
 
         self._save_to_redis(job)
@@ -153,20 +142,20 @@ class JobTracker:
         self,
         job_id: str,
         session_id: str,
-        result_summary: Optional[Dict[str, Any]] = None
+        result_summary: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Mark job as successfully completed."""
+        """Mark job as completed."""
         job = self.get_job(job_id)
         if not job:
             return None
 
         with self._lock:
-            now = time.time()
-            job["updated_at"] = now
             job["status"] = "completed"
             job["session_id"] = session_id
-            job["result_summary"] = result_summary or {}
-            job["progress"]["percent"] = 100.0
+            job["updated_at"] = time.time()
+            job["result_summary"] = result_summary
+            job["error"] = None
+            job.setdefault("progress", {})["percent"] = 100.0
             job["progress"]["stage"] = "Document processing complete"
             self._memory_jobs[job_id] = job
 
@@ -181,11 +170,10 @@ class JobTracker:
             return None
 
         with self._lock:
-            now = time.time()
-            job["updated_at"] = now
             job["status"] = "failed"
-            job["error"] = error_message
-            job["progress"]["stage"] = f"Failed: {error_message}"
+            job["updated_at"] = time.time()
+            job["error"] = str(error_message)
+            job.setdefault("progress", {})["stage"] = f"Failed: {error_message}"
             self._memory_jobs[job_id] = job
 
         self._save_to_redis(job)
@@ -193,12 +181,11 @@ class JobTracker:
         return job
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieve job from memory, Redis, or disk storage."""
+        """Retrieve job from memory, Redis, or disk."""
         with self._lock:
             if job_id in self._memory_jobs:
                 return self._memory_jobs[job_id]
 
-        # Check Redis
         if self._redis_client:
             try:
                 raw = self._redis_client.get(f"veridocs:job:{job_id}")
@@ -210,7 +197,6 @@ class JobTracker:
             except Exception as e:
                 logger.debug(f"Redis get error for job {job_id}: {e}")
 
-        # Check Disk
         job_file = self._jobs_dir / f"{job_id}.json"
         if job_file.exists():
             try:
@@ -225,14 +211,12 @@ class JobTracker:
         return None
 
     def list_jobs(self, owner_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """List active and historical jobs, filtered by owner if provided."""
+        """List jobs filtered by owner."""
         all_jobs: Dict[str, Dict[str, Any]] = {}
 
-        # 1. From memory
         with self._lock:
             all_jobs.update(self._memory_jobs)
 
-        # 2. From disk
         try:
             for p in self._jobs_dir.glob("*.json"):
                 jid = p.stem
@@ -249,11 +233,11 @@ class JobTracker:
         if owner_id:
             jobs_list = [j for j in jobs_list if j.get("owner_id") == owner_id]
 
-        jobs_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+        jobs_list.sort(key=lambda j: j.get("created_at", 0), reverse=True)
         return jobs_list[:limit]
 
     def delete_job(self, job_id: str) -> bool:
-        """Remove a job record from memory, Redis, and disk."""
+        """Remove job from memory, Redis, and disk."""
         with self._lock:
             self._memory_jobs.pop(job_id, None)
 
@@ -267,26 +251,20 @@ class JobTracker:
         if job_file.exists():
             try:
                 job_file.unlink()
-            except Exception:
-                pass
-
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to delete job file {job_file}: {e}")
+                return False
         return True
 
     def clear(self):
-        """Reset all in-memory and disk jobs (for testing)."""
+        """Clear all in-memory jobs and remove job files from disk."""
         with self._lock:
             self._memory_jobs.clear()
-        if self._redis_client:
-            try:
-                keys = self._redis_client.keys("veridocs:job:*")
-                if keys:
-                    self._redis_client.delete(*keys)
-            except Exception:
-                pass
         try:
             for p in self._jobs_dir.glob("*.json"):
                 try:
-                    p.unlink()
+                    p.unlink(missing_ok=True)
                 except Exception:
                     pass
         except Exception:
@@ -295,5 +273,5 @@ class JobTracker:
 
 @lru_cache()
 def get_job_tracker() -> JobTracker:
-    """Singleton getter for JobTracker instance."""
+    """Return JobTracker singleton."""
     return JobTracker()

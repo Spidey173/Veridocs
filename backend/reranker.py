@@ -1,9 +1,3 @@
-"""
-Cross-Encoder Re-ranking module for Veridocs.
-Re-ranks retrieved candidates using a more powerful cross-encoder model
-for significantly improved precision.
-"""
-
 import logging
 from typing import List, Dict
 
@@ -14,15 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class Reranker:
-    """
-    Re-ranks retrieved document chunks using a cross-encoder model.
-
-    Pipeline:
-    1. Receive query + candidate chunks (typically top 20 from hybrid search)
-    2. Score each (query, chunk) pair with cross-encoder
-    3. Sort by cross-encoder score
-    4. Return top-K (typically 5)
-    """
+    """Scores retrieved chunks using a cross-encoder model to improve search accuracy."""
 
     def __init__(self):
         self.registry = get_model_registry()
@@ -34,24 +20,13 @@ class Reranker:
         chunks: List[Dict],
         top_k: int = None
     ) -> List[Dict]:
-        """
-        Re-rank chunks using cross-encoder model.
-
-        Args:
-            query: The user's question
-            chunks: List of candidate chunks from retrieval
-            top_k: Number of top results to return (default from settings)
-
-        Returns:
-            Re-ranked list of top-K chunks with added 'rerank_score'
-        """
+        """Re-rank candidate chunks against the query and return the top results."""
         if top_k is None:
             top_k = self.settings.RETRIEVAL_FINAL_K
 
         if not chunks:
             return []
 
-        # If fewer chunks than top_k, just return them all
         if len(chunks) <= top_k:
             return chunks
 
@@ -64,7 +39,7 @@ class Reranker:
         try:
             doc_texts = [chunk["text"] for chunk in chunks]
 
-            # FastEmbed TextCrossEncoder uses .rerank(query, documents)
+            # FastEmbed CrossEncoder
             if hasattr(model, "rerank") and callable(getattr(model, "rerank")):
                 reranked_items = list(model.rerank(query, doc_texts))
                 scored_chunks = []
@@ -78,10 +53,9 @@ class Reranker:
 
                 if scored_chunks:
                     scored_chunks.sort(key=lambda x: x["rerank_score"], reverse=True)
-                    logger.debug(f"FastEmbed re-ranked {len(chunks)} chunks → top {top_k}")
                     return scored_chunks[:top_k]
 
-            # SentenceTransformers or test mocks use .predict(pairs)
+            # SentenceTransformers cross-encoder
             if hasattr(model, "predict") and callable(getattr(model, "predict")):
                 pairs = [(query, text) for text in doc_texts]
                 try:
@@ -96,24 +70,16 @@ class Reranker:
                     scored_chunks.append(chunk_copy)
 
                 scored_chunks.sort(key=lambda x: x["rerank_score"], reverse=True)
-                logger.debug(
-                    f"Re-ranked {len(chunks)} chunks → top {top_k}. "
-                    f"Score range: [{scored_chunks[-1]['rerank_score']:.3f}, {scored_chunks[0]['rerank_score']:.3f}]"
-                )
                 return scored_chunks[:top_k]
 
-            # Fallback if no matching method
             return chunks[:top_k]
 
         except Exception as e:
-            logger.error(f"Re-ranking failed: {e}. Returning un-re-ranked results.")
+            logger.error(f"Re-ranking failed: {e}. Returning unranked results.")
             return chunks[:top_k]
 
 
 def rerank_chunks(query: str, chunks: List[Dict], top_k: int = None) -> List[Dict]:
-    """
-    Convenience function for re-ranking.
-    Creates a Reranker instance and re-ranks the chunks.
-    """
+    """Helper to re-rank chunks using Reranker."""
     reranker = Reranker()
     return reranker.rerank(query, chunks, top_k)

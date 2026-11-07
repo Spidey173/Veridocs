@@ -39,6 +39,7 @@ def clean_environment(tmp_path, monkeypatch):
     
     settings = get_settings()
     monkeypatch.setattr(settings, "UPLOAD_DIR", str(test_upload_dir))
+    monkeypatch.setattr(settings, "DATABASE_URL", "")
     
     # Clear active sessions in main
     main.sessions.clear()
