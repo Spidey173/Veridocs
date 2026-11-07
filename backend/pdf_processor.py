@@ -2,7 +2,7 @@ import io
 import re
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Callable
+from typing import List, Dict, Optional, Tuple, Callable, Union, Generator, Iterable, Any
 import pypdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -87,16 +87,23 @@ def detect_sections(text: str) -> List[Dict[str, str]]:
     return sections
 
 
-def extract_text_from_pdf(
-    file_bytes: bytes,
+def iter_pdf_pages(
+    file_input: Union[bytes, str, Path, io.IOBase],
     progress_callback: Optional[Callable[[int, int, str], None]] = None
-) -> List[Dict[str, str]]:
-    """Extract text from PDF pages."""
-    try:
-        pdf_file = io.BytesIO(file_bytes)
+) -> Generator[Dict[str, Any], None, None]:
+    """Stream PDF pages one by one to minimize memory usage on large documents."""
+    close_stream = False
+    if isinstance(file_input, (str, Path)):
+        stream = open(file_input, "rb")
+        close_stream = True
+    elif isinstance(file_input, bytes):
+        stream = io.BytesIO(file_input)
+    else:
+        stream = file_input
 
+    try:
         try:
-            reader = pypdf.PdfReader(pdf_file)
+            reader = pypdf.PdfReader(stream)
         except Exception as e:
             logger.error(f"Failed to read PDF: {str(e)}")
             raise ValueError(f"Invalid or corrupted PDF file: {str(e)}")
@@ -108,10 +115,12 @@ def extract_text_from_pdf(
                 logger.error(f"Cannot decrypt PDF: {str(e)}")
                 raise ValueError("PDF is encrypted and cannot be processed")
 
-        pages = []
         total_pages = len(reader.pages)
         scanned_page_count = 0
-        logger.info(f"Processing PDF with {total_pages} pages")
+        logger.info(f"Streaming text extraction for {total_pages} PDF pages")
+
+        yielded_any = False
+        scanned_indices = []
 
         for i, page in enumerate(reader.pages):
             if progress_callback and (i % 5 == 0 or i == total_pages - 1):
@@ -128,45 +137,58 @@ def extract_text_from_pdf(
                         sections = detect_sections(text)
                         section_names = [s["heading"] for s in sections]
 
-                        pages.append({
+                        yielded_any = True
+                        yield {
                             "page": i + 1,
                             "text": cleaned_text.strip(),
                             "raw_text": text,
                             "sections": section_names,
                             "is_scanned": False
-                        })
+                        }
                     else:
                         scanned_page_count += 1
+                        scanned_indices.append(i + 1)
                 else:
                     scanned_page_count += 1
+                    scanned_indices.append(i + 1)
 
             except Exception as e:
                 logger.warning(f"Error extracting text from page {i + 1}: {str(e)}")
                 continue
 
-        # Run OCR if most pages appear to be scanned images
+        # If most pages appear to be scanned images, run OCR fallback
         if scanned_page_count > 0 and scanned_page_count >= total_pages * 0.5:
-            logger.info(f"{scanned_page_count}/{total_pages} pages appear scanned. Attempting OCR...")
-            ocr_pages = _ocr_pdf_pages(file_bytes, total_pages, progress_callback=progress_callback)
-            if ocr_pages:
-                existing_page_nums = {p["page"] for p in pages}
-                for ocr_page in ocr_pages:
-                    if ocr_page["page"] not in existing_page_nums:
-                        pages.append(ocr_page)
-                pages.sort(key=lambda p: p["page"])
+            logger.info(f"{scanned_page_count}/{total_pages} pages appear scanned. Running OCR fallback...")
+            if isinstance(file_input, bytes):
+                ocr_bytes = file_input
+            elif isinstance(file_input, (str, Path)):
+                ocr_bytes = Path(file_input).read_bytes()
+            else:
+                stream.seek(0)
+                ocr_bytes = stream.read()
 
-        if not pages:
+            ocr_pages = _ocr_pdf_pages(ocr_bytes, total_pages, progress_callback=progress_callback)
+            for ocr_p in ocr_pages:
+                if not yielded_any or ocr_p["page"] in scanned_indices:
+                    yield ocr_p
+                    yielded_any = True
+
+        if not yielded_any:
             raise ValueError(
                 "No readable text found in the PDF. The file might be scanned images only."
             )
 
-        return pages
+    finally:
+        if close_stream:
+            stream.close()
 
-    except ValueError:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error processing PDF: {str(e)}")
-        raise Exception(f"Error processing PDF: {str(e)}")
+
+def extract_text_from_pdf(
+    file_input: Union[bytes, str, Path, io.IOBase],
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> List[Dict[str, Any]]:
+    """Extract text from PDF pages as a list."""
+    return list(iter_pdf_pages(file_input, progress_callback=progress_callback))
 
 
 def _ocr_pdf_pages(
@@ -305,21 +327,33 @@ def extract_text_from_txt(file_bytes: bytes) -> List[Dict[str, str]]:
 
 
 def extract_text_from_file(
-    file_bytes: bytes,
-    filename: str,
+    file_input: Union[bytes, str, Path],
+    filename: Optional[str] = None,
     progress_callback: Optional[Callable[[int, int, str], None]] = None
-) -> List[Dict[str, str]]:
-    """Extract text from PDF, DOCX, or TXT file bytes."""
-    ext = Path(filename).suffix.lower()
-
-    if ext == ".pdf":
-        return extract_text_from_pdf(file_bytes, progress_callback=progress_callback)
-    elif ext == ".docx":
-        return extract_text_from_docx(file_bytes)
-    elif ext == ".txt":
-        return extract_text_from_txt(file_bytes)
+) -> List[Dict[str, Any]]:
+    """Extract text from PDF, DOCX, or TXT file bytes or path on disk."""
+    if isinstance(file_input, (str, Path)):
+        fname = filename or Path(file_input).name
+        ext = Path(fname).suffix.lower()
+        if ext == ".pdf":
+            return extract_text_from_pdf(file_input, progress_callback=progress_callback)
+        elif ext == ".docx":
+            return extract_text_from_docx(Path(file_input).read_bytes())
+        elif ext == ".txt":
+            return extract_text_from_txt(Path(file_input).read_bytes())
+        else:
+            raise ValueError(f"Unsupported file type: {ext}. Supported: .pdf, .docx, .txt")
     else:
-        raise ValueError(f"Unsupported file type: {ext}. Supported: .pdf, .docx, .txt")
+        fname = filename or "document"
+        ext = Path(fname).suffix.lower()
+        if ext == ".pdf":
+            return extract_text_from_pdf(file_input, progress_callback=progress_callback)
+        elif ext == ".docx":
+            return extract_text_from_docx(file_input)
+        elif ext == ".txt":
+            return extract_text_from_txt(file_input)
+        else:
+            raise ValueError(f"Unsupported file type: {ext}. Supported: .pdf, .docx, .txt")
 
 
 def _is_table_line(line: str) -> bool:
@@ -468,17 +502,26 @@ def chunk_text(
         ]
 
 
-def get_pdf_metadata(file_bytes: bytes) -> Optional[Dict]:
+def get_pdf_metadata(file_input: Union[bytes, str, Path]) -> Optional[Dict]:
     """Extract metadata from PDF header."""
     try:
-        pdf_file = io.BytesIO(file_bytes)
-        reader = pypdf.PdfReader(pdf_file)
+        close_file = False
+        if isinstance(file_input, (str, Path)):
+            stream = open(file_input, "rb")
+            close_file = True
+        else:
+            stream = io.BytesIO(file_input)
 
-        return {
-            "num_pages": len(reader.pages),
-            "is_encrypted": reader.is_encrypted,
-            "metadata": dict(reader.metadata) if reader.metadata else {}
-        }
+        try:
+            reader = pypdf.PdfReader(stream)
+            return {
+                "num_pages": len(reader.pages),
+                "is_encrypted": reader.is_encrypted,
+                "metadata": dict(reader.metadata) if reader.metadata else {}
+            }
+        finally:
+            if close_file:
+                stream.close()
     except Exception as e:
         logger.error(f"Failed to extract PDF metadata: {str(e)}")
         return None

@@ -351,8 +351,8 @@ async def upload_documents(
             saved_paths.append(str(save_path))
             file_names.append(filename)
 
-            # Extract text
-            pages = extract_text_from_file(contents, filename)
+            # Stream extract text from disk to avoid in-memory byte duplication
+            pages = extract_text_from_file(save_path, filename=filename)
 
             if not pages:
                 failed_files.append(f"{filename} (no extractable text)")

@@ -159,3 +159,12 @@ class TestPDFProcessor:
         chunks = chunk_text(pages, chunk_size=200)
         assert len(chunks) >= 1
         assert any(c.get("is_table") for c in chunks)
+
+    def test_extract_text_from_file_path_and_streaming(self, tmp_path, sample_txt_bytes):
+        """Verify streaming extraction directly from a file path on disk without memory bloat."""
+        sample_file = tmp_path / "test_sec_doc.txt"
+        sample_file.write_bytes(sample_txt_bytes)
+
+        pages = extract_text_from_file(sample_file, filename="test_sec_doc.txt")
+        assert len(pages) > 0
+        assert "revenue" in pages[0]["text"].lower()

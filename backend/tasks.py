@@ -47,7 +47,6 @@ def process_document_job(
                 logger.warning(f"File not found: {path_str}")
                 continue
 
-            file_bytes = file_path.read_bytes()
             base_pct = 10.0 + (float(idx) / max(total_files, 1)) * 60.0
 
             def _on_page_progress(cur_page: int, total_pages: int, message: str):
@@ -66,9 +65,10 @@ def process_document_job(
                 stage=f"Extracting text from {filename}..."
             )
 
+            # Stream extract directly from disk file to prevent high memory usage on large documents
             pages = extract_text_from_file(
-                file_bytes,
-                filename,
+                file_path,
+                filename=filename,
                 progress_callback=_on_page_progress
             )
 
@@ -82,7 +82,7 @@ def process_document_job(
 
             metadata = {
                 "filename": filename,
-                "file_size_bytes": len(file_bytes),
+                "file_size_bytes": file_path.stat().st_size,
                 "num_pages": num_pages,
                 "is_scanned": scanned_pages > 0,
                 "scanned_pages_count": scanned_pages,
