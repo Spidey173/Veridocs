@@ -22,6 +22,7 @@ export default function ChatPanel() {
 
   const {
     sessionId,
+    files,
     messages,
     isQuerying,
     insights,
@@ -484,12 +485,35 @@ A 99.5% uptime commitment permits up to **3.6 hours of uncredited downtime per m
             },
           ];
         } else {
-          answerText = `Based on forensic review of **${selectedFileNames[0] || "the loaded documents"}**:
+          const isCustom = files.some(
+            (f) =>
+              !f.name.includes("SaaS_Agreement") &&
+              !f.name.includes("Veridocs_Technical_Architecture")
+          );
+
+          if (isCustom) {
+            const docName = selectedFileNames[0] || files[0]?.name || "your document";
+            answerText = `⚠️ **Python Backend Not Connected (Offline Client Mode)**
+
+You are currently viewing **${docName}** in offline browser mode because the Python FastAPI backend is not running or unreachable at \`http://localhost:8000\`.
+
+To get real AI-powered answers, hybrid vector search, and citations for **${docName}**:
+1. Start the backend server in your terminal:
+   \`\`\`bash
+   ./run.sh
+   \`\`\`
+   *(or run: \`cd backend && ../.venv/bin/uvicorn main:app --port 8000 --reload\`)*
+2. Once the backend is running, click **New Workspace** and re-upload **${docName}**.`;
+            demoCitations = [];
+            demoClaims = [];
+          } else {
+            answerText = `Based on forensic review of **${selectedFileNames[0] || "the loaded documents"}**:
 
 ### Analysis of "${question.replace(/\?$/, "")}":
 - **Grounded Verification:** The query was evaluated across hybrid lexical indices and dense vector stores.
 - **Cross-Document Alignment:** Key provisions correlate directly with **Section 4** (Payment & Financial Terms) and **Section 8** (Liability Limitations).
 - **Audit Findings:** To inspect clause-by-clause discrepancies and text coordinates, review the citations below or switch to the **Contradiction Matrix** tab.`;
+          }
           demoCitations = [
             {
               citation_id: 1,
