@@ -93,57 +93,12 @@ async def init_db() -> bool:
             command_timeout=30,
         )
 
-        # Initialize tables and indexes
+        # Register pgvector extension on pool connections
         async with _pool.acquire() as conn:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             await register_vector(conn)
 
-            # Sessions table
-            await conn.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id VARCHAR(128) PRIMARY KEY,
-                owner_id VARCHAR(128) NOT NULL,
-                file_names JSONB NOT NULL DEFAULT '[]'::jsonb,
-                file_paths JSONB NOT NULL DEFAULT '[]'::jsonb,
-                metadata JSONB NOT NULL DEFAULT '[]'::jsonb,
-                insights JSONB NOT NULL DEFAULT '{}'::jsonb,
-                created_at DOUBLE PRECISION NOT NULL,
-                updated_at DOUBLE PRECISION NOT NULL
-            );
-            """)
-
-            # Document chunks with vector and full-text search
-            await conn.execute("""
-            CREATE TABLE IF NOT EXISTS document_chunks (
-                id BIGSERIAL PRIMARY KEY,
-                session_id VARCHAR(128) REFERENCES sessions(id) ON DELETE CASCADE,
-                source_file VARCHAR(255) NOT NULL,
-                page_number INT NOT NULL,
-                chunk_index INT NOT NULL,
-                text TEXT NOT NULL,
-                metadata JSONB DEFAULT '{}'::jsonb,
-                embedding vector(384)
-            );
-            CREATE INDEX IF NOT EXISTS idx_chunks_session ON document_chunks(session_id);
-            CREATE INDEX IF NOT EXISTS idx_chunks_source ON document_chunks(session_id, source_file);
-            CREATE INDEX IF NOT EXISTS idx_chunks_hnsw ON document_chunks USING hnsw (embedding vector_cosine_ops);
-            CREATE INDEX IF NOT EXISTS idx_chunks_fts ON document_chunks USING gin (to_tsvector('english', text));
-            """)
-
-            # Chat history table
-            await conn.execute("""
-            CREATE TABLE IF NOT EXISTS chat_messages (
-                id VARCHAR(128) PRIMARY KEY,
-                session_id VARCHAR(128) REFERENCES sessions(id) ON DELETE CASCADE,
-                role VARCHAR(16) NOT NULL,
-                content TEXT NOT NULL,
-                created_at DOUBLE PRECISION NOT NULL,
-                metadata JSONB DEFAULT '{}'::jsonb
-            );
-            CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id, created_at);
-            """)
-
-        logger.info("Connected to PostgreSQL and verified pgvector schema.")
+        logger.info("Connected to PostgreSQL and verified pgvector schema via Alembic migrations.")
         return True
     except Exception as e:
         logger.error(f"Failed to initialize PostgreSQL database: {e}")
@@ -158,11 +113,6 @@ async def close_db():
         await _pool.close()
         _pool = None
         logger.info("Closed PostgreSQL connection pool.")
-
-
-def get_pool() -> Optional[asyncpg.Pool]:
-    """Get the active database connection pool."""
-    return _pool
 
 
 # Session operations
@@ -508,19 +458,4 @@ async def get_chat_history(session_id: str, limit: int = 50) -> List[Dict]:
     except Exception as e:
         logger.error(f"Error fetching chat history from database: {e}")
         return []
-
-
-async def clear_chat_history(session_id: str) -> bool:
-    """Delete all chat messages for a session."""
-    if _pool is None:
-        return False
-
-    query = "DELETE FROM chat_messages WHERE session_id = $1;"
-    try:
-        async with _pool.acquire() as conn:
-            await conn.execute(query, session_id)
-        return True
-    except Exception as e:
-        logger.error(f"Error clearing chat history from database: {e}")
-        return False
 

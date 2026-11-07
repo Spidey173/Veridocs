@@ -7,7 +7,6 @@ from collections import OrderedDict
 
 from models import ConversationMessage, MessageRole, CitationInfo
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

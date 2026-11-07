@@ -169,7 +169,7 @@ def process_document_job(
                 except RuntimeError:
                     asyncio.run(_save_to_db())
         except Exception as e:
-            logger.debug(f"Could not persist async job session to database: {e}")
+            logger.warning(f"Could not persist async job session to database: {e}")
 
         # Update session cache
         try:

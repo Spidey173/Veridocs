@@ -9,12 +9,12 @@ import time
 import random
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Callable, Union, Generator, Any
+from PIL import Image
 import pypdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import get_settings
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Optional hook for testing or injecting custom multimodal vision transcribers
@@ -41,8 +41,6 @@ def _optimize_image_for_ocr(img_bytes: bytes, max_dim: int = 1800) -> bytes:
     if not img_bytes:
         return img_bytes
     try:
-        from PIL import Image
-
         img = Image.open(io.BytesIO(img_bytes))
         width, height = img.size
 
@@ -305,7 +303,6 @@ def _transcribe_scanned_image_via_vision(img_bytes: bytes, page_num: int) -> Opt
         for attempt in range(max_retries + 1):
             try:
                 import google.generativeai as genai
-                from PIL import Image
 
                 genai.configure(api_key=gemini_key)
                 model = genai.GenerativeModel("gemini-1.5-flash")
@@ -590,7 +587,6 @@ def _ocr_pdf_pages(
         try:
             import pytesseract
             import fitz
-            from PIL import Image
             logger.info("Running Tesseract OCR engine on scanned pages...")
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             tess_pages = []

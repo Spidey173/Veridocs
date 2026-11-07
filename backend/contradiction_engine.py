@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from config import get_settings
 from rate_limiter import get_token_limiter
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

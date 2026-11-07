@@ -182,7 +182,7 @@ alembic downgrade -1
 ## 🧪 Testing Suite
 
 ### 1. Backend Pytest Suite (Unit, Integration, & Security)
-The backend contains 138 automated unit, integration, and security tests covering RRF hybrid search, anti-IDOR authorization, async tasks, and RAG Triad grounding:
+The backend contains 151 automated unit, integration, and security tests covering RRF hybrid search, anti-IDOR authorization, async tasks, and RAG Triad grounding:
 
 ```bash
 # Run all tests with coverage

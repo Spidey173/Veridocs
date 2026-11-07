@@ -3,7 +3,6 @@ import logging
 from typing import List, Dict, Optional, Any
 from difflib import SequenceMatcher
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

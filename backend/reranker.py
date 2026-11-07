@@ -3,7 +3,6 @@ from typing import List, Dict
 
 from config import get_model_registry, get_settings
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

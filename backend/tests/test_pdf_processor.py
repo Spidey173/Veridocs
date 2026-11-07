@@ -2,6 +2,8 @@
 Unit tests for pdf_processor.py text cleaning, section detection, and file extraction.
 """
 
+import io
+from PIL import Image
 import pytest
 
 from pdf_processor import (
@@ -282,9 +284,6 @@ class TestPDFProcessor:
 
     def test_multimodal_vision_fallback_for_scanned_image_pdf(self):
         """Verify that pure scanned PDFs without OCR text trigger the multimodal vision fallback."""
-        import io
-        from PIL import Image
-
         # 1. Create a pure scanned image PDF with zero text characters
         img = Image.new("RGB", (300, 400), color=(255, 255, 255))
         pdf_buf = io.BytesIO()
@@ -320,10 +319,8 @@ class TestPDFProcessor:
 
     def test_multimodal_vision_parallel_batch_processing(self):
         """Verify that multi-page scanned filings process pages concurrently and maintain strict page order."""
-        import io
         import time
         import threading
-        from PIL import Image
 
         # Create 6-page scanned PDF
         images = [Image.new("RGB", (100, 100), color=(i * 35, 120, 150)) for i in range(6)]
@@ -358,9 +355,6 @@ class TestPDFProcessor:
 
     def test_image_optimization_downscales_oversized_scan(self):
         """Verify that oversized scans (>1800px) are downscaled and JPEG-compressed to minimize transmission latency."""
-        import io
-        from PIL import Image
-
         # Create oversized 3000x2400 uncompressed test scan
         oversized = Image.new("RGB", (3000, 2400), color=(240, 240, 240))
         raw_buf = io.BytesIO()
@@ -378,9 +372,6 @@ class TestPDFProcessor:
 
     def test_dedicated_ocr_engine_registration_and_priority(self):
         """Verify that dedicated OCR engines (e.g. DocTR, Surya) can be registered and take precedence over vision."""
-        import io
-        from PIL import Image
-
         img = Image.new("RGB", (200, 200), color=(255, 255, 255))
         buf = io.BytesIO()
         img.save(buf, format="PDF")
@@ -414,8 +405,6 @@ class TestPDFProcessor:
 
     def test_mixed_digital_and_scanned_pdf_interleaving(self):
         """Verify that PDFs with mixed digital text and scanned image pages interleave in exact order."""
-        import io
-        from PIL import Image
         import pypdf
 
         # Minimal valid PDF page with digital text stream
@@ -485,9 +474,6 @@ startxref
 
     def test_vision_worker_partial_failure_resilience(self):
         """Verify that transient failures on one page do not prevent other pages from completing."""
-        import io
-        from PIL import Image
-
         images = [Image.new("RGB", (100, 100), color=(i * 40, 100, 100)) for i in range(3)]
         buf = io.BytesIO()
         images[0].save(buf, format="PDF", save_all=True, append_images=images[1:])

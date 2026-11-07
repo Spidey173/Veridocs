@@ -1152,8 +1152,9 @@ async def get_document_pdf(
     if not file_paths or file_index < 0 or file_index >= len(file_paths):
         raise HTTPException(status_code=404, detail="Document file not found")
 
-    file_path = Path(file_paths[file_index])
-    if not file_path.exists():
+    file_path = Path(file_paths[file_index]).resolve()
+    upload_root = Path(settings.UPLOAD_DIR).resolve()
+    if not file_path.is_relative_to(upload_root) or not file_path.exists():
         raise HTTPException(status_code=404, detail="Document file not found on disk")
 
     return FileResponse(
