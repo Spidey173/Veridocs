@@ -21,24 +21,56 @@ class Settings:
     """Application settings loaded from environment variables."""
 
     def __init__(self):
-        # API Keys
-        self.GOOGLE_API_KEY: str = (os.getenv("GOOGLE_API_KEY", "") or os.getenv("GOOGLE", "") or os.getenv("google", "")).strip()
+        # API Keys & Endpoints for any LLM Provider
+        self.GOOGLE_API_KEY: str = (os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE", "") or os.getenv("google", "")).strip()
         self.GROQ_API_KEY: str = (os.getenv("GROQ_API_KEY", "")).strip()
         self.GROQ_MODEL: str = (os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")).strip()
+        self.OPENAI_API_KEY: str = (os.getenv("OPENAI_API_KEY", "")).strip()
+        self.OPENAI_MODEL: str = (os.getenv("OPENAI_MODEL", "gpt-4o-mini")).strip()
+        self.ANTHROPIC_API_KEY: str = (os.getenv("ANTHROPIC_API_KEY", "")).strip()
+        self.ANTHROPIC_MODEL: str = (os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")).strip()
+        self.DEEPSEEK_API_KEY: str = (os.getenv("DEEPSEEK_API_KEY", "")).strip()
+        self.DEEPSEEK_MODEL: str = (os.getenv("DEEPSEEK_MODEL", "deepseek-chat")).strip()
+        self.MISTRAL_API_KEY: str = (os.getenv("MISTRAL_API_KEY", "")).strip()
+        self.MISTRAL_MODEL: str = (os.getenv("MISTRAL_MODEL", "mistral-small-latest")).strip()
         self.OPENROUTER_API_KEY: str = (os.getenv("OPENROUTER_API_KEY", "")).strip()
+        self.OPENROUTER_MODEL: str = (os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-r1:free")).strip()
         self.GITHUB_TOKEN: str = (os.getenv("GITHUB_TOKEN", "") or os.getenv("GITHUB_API_KEY", "") or os.getenv("GITHUB", "") or os.getenv("github", "")).strip()
+        self.GITHUB_MODEL: str = (os.getenv("GITHUB_MODEL", "gpt-4o-mini")).strip()
+        self.OLLAMA_BASE_URL: str = (os.getenv("OLLAMA_BASE_URL", "") or os.getenv("OLLAMA_HOST", "")).strip()
+        self.OLLAMA_MODEL: str = (os.getenv("OLLAMA_MODEL", "llama3.2")).strip()
+        self.LLM_BASE_URL: str = (os.getenv("LLM_BASE_URL", "") or os.getenv("CUSTOM_LLM_URL", "")).strip()
+        self.LLM_API_KEY: str = (os.getenv("LLM_API_KEY", "")).strip()
+        self.LLM_MODEL: str = (os.getenv("LLM_MODEL", "")).strip()
 
-        # LLM Provider settings
-        _has_groq = bool(self.GROQ_API_KEY)
-        _has_github = bool(self.GITHUB_TOKEN)
-        _has_google = bool(self.GOOGLE_API_KEY)
-        if _has_groq:
-            _default_provider = "groq"
-        elif _has_github and not _has_google:
-            _default_provider = "github"
+        # Dynamic LLM Provider selection (no hardcoded default)
+        env_provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+        if env_provider:
+            self.LLM_PROVIDER: str = env_provider
         else:
-            _default_provider = "google"
-        self.LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", _default_provider).lower()
+            # Auto-detect available provider from active credentials / endpoints
+            if self.OPENAI_API_KEY:
+                self.LLM_PROVIDER = "openai"
+            elif self.ANTHROPIC_API_KEY:
+                self.LLM_PROVIDER = "anthropic"
+            elif self.DEEPSEEK_API_KEY:
+                self.LLM_PROVIDER = "deepseek"
+            elif self.GROQ_API_KEY:
+                self.LLM_PROVIDER = "groq"
+            elif self.GOOGLE_API_KEY:
+                self.LLM_PROVIDER = "google"
+            elif self.MISTRAL_API_KEY:
+                self.LLM_PROVIDER = "mistral"
+            elif self.OPENROUTER_API_KEY:
+                self.LLM_PROVIDER = "openrouter"
+            elif self.GITHUB_TOKEN:
+                self.LLM_PROVIDER = "github"
+            elif self.OLLAMA_BASE_URL:
+                self.LLM_PROVIDER = "ollama"
+            elif self.LLM_BASE_URL:
+                self.LLM_PROVIDER = "custom"
+            else:
+                self.LLM_PROVIDER = "auto"
         self.LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
         self.LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "750"))
 
@@ -123,6 +155,21 @@ class Settings:
         self.RETENTION_HOURS: int = int(os.getenv("RETENTION_HOURS", "24"))
         self.AUTO_CLEANUP_ENABLED: bool = os.getenv("AUTO_CLEANUP_ENABLED", "true").lower() in ("true", "1", "yes")
         self.CLEANUP_INTERVAL_MINUTES: int = int(os.getenv("CLEANUP_INTERVAL_MINUTES", "60"))
+
+    def get_available_llm_providers(self) -> dict:
+        """Return dict of available LLM providers based on configured credentials and endpoints."""
+        return {
+            "openai": bool(self.OPENAI_API_KEY),
+            "anthropic": bool(self.ANTHROPIC_API_KEY),
+            "deepseek": bool(self.DEEPSEEK_API_KEY),
+            "groq": bool(self.GROQ_API_KEY),
+            "google": bool(self.GOOGLE_API_KEY),
+            "mistral": bool(self.MISTRAL_API_KEY),
+            "openrouter": bool(self.OPENROUTER_API_KEY),
+            "github": bool(self.GITHUB_TOKEN),
+            "ollama": bool(self.OLLAMA_BASE_URL),
+            "custom": bool(self.LLM_BASE_URL),
+        }
 
     def validate_production_configuration(self):
         """Validate critical security settings in production."""

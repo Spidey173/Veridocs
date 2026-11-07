@@ -228,3 +228,35 @@ class TestAPIEndpoints:
         assert "executive_summary" in data
         assert "suggested_questions" in data
         assert "key_entities" in data
+
+    def test_list_llm_providers_endpoint(self, test_client: TestClient):
+        """Verify GET /api/llm/providers returns supported and available providers."""
+        resp = test_client.get("/api/llm/providers")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "active_provider" in data
+        assert "available_providers" in data
+        assert "supported_providers" in data
+        assert "openai" in data["supported_providers"]
+        assert "ollama" in data["supported_providers"]
+        assert "groq" in data["supported_providers"]
+        assert "google" in data["supported_providers"]
+
+    def test_query_with_custom_provider_override(self, test_client: TestClient, sample_txt_bytes):
+        """Verify querying with explicit provider and model override fields."""
+        files = [("files", ("finance.txt", sample_txt_bytes, "text/plain"))]
+        upload_resp = test_client.post("/api/upload", files=files).json()
+        session_id = upload_resp["session_id"]
+
+        resp = test_client.post(
+            "/api/query",
+            json={
+                "session_id": session_id,
+                "question": "What is the revenue?",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "sk-dummy-test-key"
+            }
+        )
+        assert resp.status_code == 200
+        assert "answer" in resp.json()

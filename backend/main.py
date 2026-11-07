@@ -762,8 +762,13 @@ async def answer_query(
         else:
             history = conversation.get_history_for_prompt(request.session_id)
 
-        # Generate answer
-        llm = FreeLLMService(provider=settings.LLM_PROVIDER)
+        # Generate answer using requested or auto-detected LLM
+        llm = FreeLLMService(
+            provider=request.provider,
+            model=request.model,
+            api_key=request.api_key,
+            base_url=request.base_url
+        )
         answer = llm.generate_answer(question, relevant_chunks, history=history)
 
         # Check grounding against sources
@@ -941,7 +946,12 @@ async def stream_query(
             else:
                 history = conversation.get_history_for_prompt(request.session_id)
 
-            llm = FreeLLMService(provider=settings.LLM_PROVIDER)
+            llm = FreeLLMService(
+                provider=request.provider,
+                model=request.model,
+                api_key=request.api_key,
+                base_url=request.base_url
+            )
             full_answer = ""
             token_count = 0
             start_time = time.time()
@@ -1290,13 +1300,23 @@ async def health_check():
             "embedding": registry._embedding_model is not None,
             "reranker": registry._reranker_model is not None,
         },
-        providers_available={
-            "google": bool(settings.GOOGLE_API_KEY),
-            "groq": bool(settings.GROQ_API_KEY),
-            "openrouter": bool(settings.OPENROUTER_API_KEY),
-            "github": bool(settings.GITHUB_TOKEN),
-        }
+        providers_available=settings.get_available_llm_providers()
     )
+
+
+@app.get("/api/llm/providers")
+async def list_llm_providers():
+    """Return available LLM providers, active selection, and configuration status."""
+    available = settings.get_available_llm_providers()
+    return {
+        "active_provider": settings.LLM_PROVIDER,
+        "available_providers": available,
+        "supported_providers": [
+            "openai", "anthropic", "deepseek", "groq", "google",
+            "mistral", "openrouter", "github", "ollama", "custom", "offline"
+        ],
+        "default_configured": any(available.values())
+    }
 
 
 @app.get("/api/sessions/{session_id}")

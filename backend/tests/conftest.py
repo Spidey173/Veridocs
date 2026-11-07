@@ -229,7 +229,7 @@ def mock_llm_service(monkeypatch):
         for token in tokens:
             yield token
 
-    def mock_init(self, provider=None, model=None):
+    def mock_init(self, *args, **kwargs):
         self.provider = "mock"
         self.model = "mock-model"
         self.settings = get_settings()

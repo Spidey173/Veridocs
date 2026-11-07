@@ -56,6 +56,10 @@ class QueryRequest(BaseModel):
     question: str
     history: Optional[List[Dict[str, str]]] = None
     active_files: Optional[List[str]] = None
+    provider: Optional[str] = Field(default=None, description="LLM provider: 'openai', 'groq', 'deepseek', 'google', 'ollama', 'anthropic', 'mistral', 'openrouter', 'github', 'custom'")
+    model: Optional[str] = Field(default=None, description="Model identifier override")
+    api_key: Optional[str] = Field(default=None, description="Optional per-request API key")
+    base_url: Optional[str] = Field(default=None, description="Optional custom base URL for Ollama / vLLM")
 
 
 class StreamQueryRequest(BaseModel):
@@ -63,6 +67,10 @@ class StreamQueryRequest(BaseModel):
     question: str
     history: Optional[List[Dict[str, str]]] = None
     active_files: Optional[List[str]] = None
+    provider: Optional[str] = Field(default=None, description="LLM provider: 'openai', 'groq', 'deepseek', 'google', 'ollama', 'anthropic', 'mistral', 'openrouter', 'github', 'custom'")
+    model: Optional[str] = Field(default=None, description="Model identifier override")
+    api_key: Optional[str] = Field(default=None, description="Optional per-request API key")
+    base_url: Optional[str] = Field(default=None, description="Optional custom base URL for Ollama / vLLM")
 
 
 class CrossDocAuditRequest(BaseModel):
