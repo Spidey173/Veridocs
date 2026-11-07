@@ -24,7 +24,7 @@ class Settings:
         # API Keys
         self.GOOGLE_API_KEY: str = (os.getenv("GOOGLE_API_KEY", "") or os.getenv("GOOGLE", "") or os.getenv("google", "")).strip()
         self.GROQ_API_KEY: str = (os.getenv("GROQ_API_KEY", "")).strip()
-        self.GROQ_MODEL: str = (os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")).strip()
+        self.GROQ_MODEL: str = (os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")).strip()
         self.OPENROUTER_API_KEY: str = (os.getenv("OPENROUTER_API_KEY", "")).strip()
         self.GITHUB_TOKEN: str = (os.getenv("GITHUB_TOKEN", "") or os.getenv("GITHUB_API_KEY", "") or os.getenv("GITHUB", "") or os.getenv("github", "")).strip()
 

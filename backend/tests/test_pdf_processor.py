@@ -11,7 +11,6 @@ from pdf_processor import (
     get_document_metadata,
     extract_text_from_file,
     get_pdf_metadata,
-    _is_table_line,
     _extract_blocks,
 )
 

@@ -165,8 +165,8 @@ def process_document_job(
                 "created_at": time.time(),
                 "owner_id": owner_id,
             }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to populate in-process session cache from background task: {e}")
 
         result_summary = {
             "session_id": session_id,

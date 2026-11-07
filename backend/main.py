@@ -21,10 +21,11 @@ import uuid
 import secrets
 import asyncio
 import threading
+import numpy as np
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Union, Any
+from typing import List, Dict, Optional, Union
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Depends, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,7 +54,6 @@ from models import (
     MessageRole,
     UploadResponse,
     HealthResponse,
-    DocumentInsights,
     RagTriadMetrics,
     CrossDocAuditRequest,
     JobStatus,
@@ -600,8 +600,8 @@ async def get_job_status(
     if session_id and session_id not in sessions:
         try:
             await _get_session(session_id, current_user)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Session {session_id} not available yet for job {job_id}: {e}")
 
     prog = job.get("progress", {})
     progress_obj = JobProgress(
@@ -681,8 +681,8 @@ async def delete_or_cancel_job(
     for p in job.get("file_paths", []):
         try:
             Path(p).unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not remove staged file {p}: {e}")
 
     tracker.delete_job(job_id)
     return {"status": "deleted", "job_id": job_id}
@@ -997,7 +997,7 @@ async def chat_stream(
 @app.get("/api/documents/{session_id}/pdf")
 async def get_document_pdf(
     session_id: str,
-    file_index: int = 0,
+    file_index: int = Query(0, ge=0),
     document_name: Optional[str] = None,
     current_user: UserContext = Depends(get_current_user)
 ):
@@ -1012,7 +1012,7 @@ async def get_document_pdf(
         except ValueError:
             raise HTTPException(status_code=404, detail="Document file not found in session")
 
-    if not file_paths or file_index >= len(file_paths):
+    if not file_paths or file_index < 0 or file_index >= len(file_paths):
         raise HTTPException(status_code=404, detail="Document file not found")
 
     file_path = Path(file_paths[file_index])
@@ -1478,10 +1478,17 @@ async def _get_session(session_id: str, current_user: UserContext) -> Dict:
         try:
             db_session = await database.get_session(session_id)
             if db_session:
-                chunks = await database.get_chunks_for_session(session_id)
+                chunks = await database.get_chunks_for_session(session_id, include_embeddings=True)
                 vector_store = VectorStore()
                 if chunks:
-                    vector_store.add_documents(chunks)
+                    has_precomputed = all("embedding" in c and c["embedding"] is not None for c in chunks)
+                    if has_precomputed:
+                        embs = np.array([c.pop("embedding") for c in chunks], dtype=np.float32)
+                        vector_store.add_documents(chunks, embeddings=embs)
+                    else:
+                        for c in chunks:
+                            c.pop("embedding", None)
+                        vector_store.add_documents(chunks)
 
                 restored_session = {
                     "vector_store": vector_store,
@@ -1582,8 +1589,8 @@ def cleanup_expired_sessions(max_age_hours: Optional[int] = None) -> Dict[str, i
                             meta = json.load(f)
                             mtime = meta.get("created_at", mtime)
                             file_paths_to_delete = meta.get("file_paths", [])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to read session metadata {meta_file}: {e}")
                 if mtime < cutoff_time:
                     for fp in file_paths_to_delete:
                         if _safe_delete_file(fp):

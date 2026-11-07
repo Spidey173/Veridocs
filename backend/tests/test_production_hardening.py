@@ -6,17 +6,13 @@ Production hardening test suite for Veridocs:
 - Async streaming token yield
 """
 
-import time
 import threading
 import numpy as np
-import pytest
-from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 
-from main import app, InMemoryRateLimiter
-from vector_store import _get_cached_query_embedding, _set_cached_query_embedding, _QUERY_CACHE
+from main import InMemoryRateLimiter
+from vector_store import _get_cached_query_embedding, _set_cached_query_embedding
 from contradiction_engine import _select_salient_chunks
-from auth import create_access_token
 
 
 class TestProductionHardening:

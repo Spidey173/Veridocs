@@ -3,10 +3,8 @@ Integration tests for FastAPI REST and SSE endpoints in main.py.
 Uses FastAPI TestClient with mocked ML and LLM dependencies for fast, deterministic execution.
 """
 
-import json
 from fastapi.testclient import TestClient
 
-import main
 from config import get_settings
 
 

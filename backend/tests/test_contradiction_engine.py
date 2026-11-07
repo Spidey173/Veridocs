@@ -2,7 +2,6 @@
 Unit and integration tests for the Forensic Contradiction Engine and endpoint.
 """
 
-import pytest
 from fastapi.testclient import TestClient
 from main import app
 from contradiction_engine import (

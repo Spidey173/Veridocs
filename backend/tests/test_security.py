@@ -12,7 +12,7 @@ from pathlib import Path
 
 import main
 from config import get_settings
-from auth import create_access_token, verify_access_token, UserContext
+from auth import create_access_token, verify_access_token
 
 
 class TestSecurityAndAccessControl:

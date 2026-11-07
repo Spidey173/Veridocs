@@ -1,6 +1,6 @@
 # 📑 Veridocs Frontend
 
-Enterprise Next.js 15 client for the **Veridocs** Document Intelligence Platform.
+Enterprise Next.js client for the **Veridocs** Document Intelligence Platform.
 
 ## 🚀 Key Features
 
@@ -12,10 +12,10 @@ Enterprise Next.js 15 client for the **Veridocs** Document Intelligence Platform
 
 ## 🛠️ Tech Stack
 
-- **Framework**: Next.js 15 (App Router, Turbopack)
+- **Framework**: Next.js 16 (App Router, Turbopack)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS, Lucide React
-- **State Management**: Zustand (with local Blob URL caching)
+- **State Management**: Zustand
 - **PDF Rendering**: PDF.js (bundled worker)
 
 ## ⚡ Quick Start
@@ -32,7 +32,9 @@ The application will be accessible at [http://localhost:3000](http://localhost:3
 
 ## 🌐 Backend Configuration
 
-By default, the frontend connects directly to the production Render cloud backend:
-`https://veridocs-backend-xlzk.onrender.com`
+By default, the frontend connects to the backend API at `http://localhost:8000`.
 
-You can customize this in `lib/api.ts` or set `NEXT_PUBLIC_API_URL` in `.env.local` if running a local backend instance.
+You can configure a custom backend endpoint by setting `NEXT_PUBLIC_API_URL` in `.env.local` or environment:
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```

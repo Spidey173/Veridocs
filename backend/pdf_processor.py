@@ -87,17 +87,6 @@ def detect_sections(text: str) -> List[Dict[str, str]]:
     return sections
 
 
-def get_section_for_position(sections: List[Dict], line_index: int) -> Optional[str]:
-    """Find the section name that corresponds to a line index."""
-    current_section = None
-    for section in sections:
-        if section["line_index"] <= line_index:
-            current_section = section["heading"]
-        else:
-            break
-    return current_section
-
-
 def extract_text_from_pdf(
     file_bytes: bytes,
     progress_callback: Optional[Callable[[int, int, str], None]] = None

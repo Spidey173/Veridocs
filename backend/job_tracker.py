@@ -1,4 +1,3 @@
-import os
 import json
 import time
 import logging
@@ -224,10 +223,10 @@ class JobTracker:
                     try:
                         with open(p, "r", encoding="utf-8") as f:
                             all_jobs[jid] = json.load(f)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as e:
+                        logger.debug(f"Failed to read job file {p}: {e}")
+        except Exception as e:
+            logger.debug(f"Error scanning jobs directory: {e}")
 
         jobs_list = list(all_jobs.values())
         if owner_id:
@@ -244,8 +243,8 @@ class JobTracker:
         if self._redis_client:
             try:
                 self._redis_client.delete(f"veridocs:job:{job_id}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error deleting job {job_id} from Redis: {e}")
 
         job_file = self._jobs_dir / f"{job_id}.json"
         if job_file.exists():
@@ -265,10 +264,10 @@ class JobTracker:
             for p in self._jobs_dir.glob("*.json"):
                 try:
                     p.unlink(missing_ok=True)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    logger.debug(f"Failed to unlink job file {p}: {e}")
+        except Exception as e:
+            logger.debug(f"Error during job clear: {e}")
 
 
 @lru_cache()

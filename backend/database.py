@@ -257,22 +257,30 @@ async def save_chunks(session_id: str, chunks: List[Dict], embeddings: np.ndarra
         return False
 
 
-async def get_chunks_for_session(session_id: str, source_file: Optional[str] = None) -> List[Dict]:
-    """Retrieve all chunks for a session from PostgreSQL."""
+async def get_chunks_for_session(
+    session_id: str,
+    source_file: Optional[str] = None,
+    include_embeddings: bool = False
+) -> List[Dict]:
+    """Retrieve all chunks for a session from PostgreSQL, optionally including embeddings."""
     if _pool is None:
         return []
 
+    select_fields = "id, source_file, page_number, chunk_index, text, metadata"
+    if include_embeddings:
+        select_fields += ", embedding"
+
     if source_file:
-        query = """
-        SELECT id, source_file, page_number, chunk_index, text, metadata
+        query = f"""
+        SELECT {select_fields}
         FROM document_chunks
         WHERE session_id = $1 AND source_file = $2
         ORDER BY chunk_index ASC;
         """
         params = [session_id, source_file]
     else:
-        query = """
-        SELECT id, source_file, page_number, chunk_index, text, metadata
+        query = f"""
+        SELECT {select_fields}
         FROM document_chunks
         WHERE session_id = $1
         ORDER BY source_file, chunk_index ASC;
@@ -292,6 +300,8 @@ async def get_chunks_for_session(session_id: str, source_file: Optional[str] = N
                     "source_file": r["source_file"],
                     **meta
                 }
+                if include_embeddings and "embedding" in r and r["embedding"] is not None:
+                    item["embedding"] = r["embedding"]
                 chunks.append(item)
             return chunks
     except Exception as e:

@@ -24,7 +24,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - AUTH_MODE=demo
       - AUTH_SECRET_KEY=veridocs_super_secret_production_key_min_32_chars
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -50,7 +50,7 @@ services:
     restart: unless-stopped
     command: ["celery", "-A", "celery_app.celery_app", "worker", "--loglevel=info", "-c", "4"]
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - AUTH_MODE=demo
       - AUTH_SECRET_KEY=veridocs_super_secret_production_key_min_32_chars
       - CELERY_BROKER_URL=redis://redis:6379/0

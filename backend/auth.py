@@ -1,4 +1,3 @@
-import os
 import time
 import json
 import hmac
@@ -7,9 +6,9 @@ import secrets
 import hashlib
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 from pydantic import BaseModel
-from fastapi import HTTPException, Header, Query, Request
+from fastapi import HTTPException, Header, Request
 
 from config import get_settings
 

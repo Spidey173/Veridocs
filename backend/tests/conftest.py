@@ -20,7 +20,7 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 import main
-from config import get_settings, ModelRegistry, get_model_registry
+from config import get_settings, get_model_registry
 from conversation import get_conversation_manager
 from job_tracker import get_job_tracker
 

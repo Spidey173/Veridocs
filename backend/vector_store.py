@@ -144,7 +144,7 @@ class VectorStore:
         self.bm25 = BM25()
         self._bm25_fitted = False
 
-    def add_documents(self, chunks: List[Dict]):
+    def add_documents(self, chunks: List[Dict], embeddings: Optional[np.ndarray] = None):
         """Index text chunks with both embeddings and BM25."""
         if not chunks:
             logger.warning("No chunks to add")
@@ -152,16 +152,19 @@ class VectorStore:
 
         try:
             texts = [c["text"] for c in chunks]
-            logger.info(f"Generating embeddings for {len(texts)} chunks...")
 
-            # Generate embeddings
-            model = self.registry.embedding_model
-            self.embeddings = model.encode(
-                texts,
-                convert_to_numpy=True,
-                show_progress_bar=False,
-                batch_size=self.settings.EMBEDDING_BATCH_SIZE
-            )
+            # Use precomputed embeddings if supplied, otherwise compute via model
+            if embeddings is not None:
+                self.embeddings = np.array(embeddings, dtype=np.float32)
+            else:
+                logger.info(f"Generating embeddings for {len(texts)} chunks...")
+                model = self.registry.embedding_model
+                self.embeddings = model.encode(
+                    texts,
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                    batch_size=self.settings.EMBEDDING_BATCH_SIZE
+                )
 
             # Build FAISS index
             dimension = self.embeddings.shape[1]
@@ -248,35 +251,6 @@ class VectorStore:
 
         except Exception as e:
             logger.error(f"Error during search: {e}")
-            return []
-
-    def search_dense_only(self, query: str, k: int = 5) -> List[Dict]:
-        """Perform vector search only."""
-        if self.index is None:
-            return []
-
-        try:
-            query_norm = query.strip().lower()
-            cached_emb = _get_cached_query_embedding(query_norm)
-            if cached_emb is not None:
-                query_embedding = cached_emb
-            else:
-                model = self.registry.embedding_model
-                query_embedding = model.encode([query], convert_to_numpy=True)
-                faiss.normalize_L2(query_embedding)
-                _set_cached_query_embedding(query_norm, query_embedding)
-
-            distances, indices = self.index.search(query_embedding, k)
-
-            results = []
-            for idx in indices[0]:
-                if 0 <= idx < len(self.chunks):
-                    results.append(self.chunks[idx])
-
-            return results
-
-        except Exception as e:
-            logger.error(f"Error during dense search: {e}")
             return []
 
     def save_to_disk(self, directory: Path):

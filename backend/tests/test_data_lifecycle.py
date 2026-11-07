@@ -6,7 +6,6 @@ path traversal protection, and retention cleanup policies.
 
 import time
 import json
-import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 

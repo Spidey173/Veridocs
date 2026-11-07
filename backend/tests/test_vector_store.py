@@ -4,6 +4,7 @@ Unit tests for vector_store.py BM25, RRF, and hybrid VectorStore.
 
 
 
+import numpy as np
 from vector_store import BM25, reciprocal_rank_fusion, VectorStore
 
 
@@ -92,3 +93,14 @@ class TestVectorStore:
         store.add_documents([])
         assert store.index is None
         assert len(store.chunks) == 0
+
+    def test_add_documents_with_precomputed_embeddings(self, sample_chunks):
+        """Verify indexing with precomputed embeddings bypasses embedding model."""
+        store = VectorStore()
+        # Mock 384-dimensional normalized embeddings
+        fake_embs = np.random.randn(len(sample_chunks), 384).astype(np.float32)
+        store.add_documents(sample_chunks, embeddings=fake_embs)
+
+        assert store.index is not None
+        assert store.index.ntotal == len(sample_chunks)
+        assert len(store.chunks) == len(sample_chunks)
