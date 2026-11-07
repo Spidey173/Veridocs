@@ -68,6 +68,15 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+if (typeof window !== "undefined") {
+  (window as unknown as { __VERIDOCS_API__?: unknown }).__VERIDOCS_API__ = {
+    isLocalDev,
+    getApiBase,
+    getAuthToken,
+    getOrFetchAuthToken,
+  };
+}
+
 // Types
 
 export interface UploadResponse {

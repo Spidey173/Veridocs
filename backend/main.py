@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Union, Dict, Any, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+import time
+from metrics import metrics
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -117,6 +119,18 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
+
+# Prometheus and OpenMetrics latency & throughput telemetry middleware
+@app.middleware("http")
+async def metrics_telemetry_middleware(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+    path = request.url.path
+    status = str(response.status_code)
+    metrics.inc_counter("veridocs_http_requests_total", {"method": request.method, "endpoint": path, "status": status})
+    metrics.record_latency(path, duration)
+    return response
 
 # Ensure upload directory exists
 Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)

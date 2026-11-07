@@ -98,6 +98,25 @@ async def init_db() -> bool:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             await register_vector(conn)
 
+            # Proactively verify table vector dimension compatibility
+            try:
+                dim_row = await conn.fetchrow("""
+                SELECT atttypmod 
+                FROM pg_attribute 
+                WHERE attrelid = 'document_chunks'::regclass 
+                  AND attname = 'embedding';
+                """)
+                if dim_row and dim_row["atttypmod"] > 0:
+                    col_dim = dim_row["atttypmod"]
+                    expected_dim = settings.EMBEDDING_DIMENSION
+                    if col_dim != expected_dim:
+                        logger.warning(
+                            f"Vector dimension mismatch: PostgreSQL document_chunks.embedding is vector({col_dim}) "
+                            f"whereas EMBEDDING_DIMENSION is {expected_dim}. Align via migration if switching embedding models."
+                        )
+            except Exception as ex:
+                logger.debug(f"Vector column dimension inspection skipped: {ex}")
+
         logger.info("Connected to PostgreSQL and verified pgvector schema via Alembic migrations.")
         return True
     except Exception as e:

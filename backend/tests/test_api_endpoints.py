@@ -287,3 +287,13 @@ class TestAPIEndpoints:
         )
         assert resp.status_code == 200
         assert "answer" in resp.json()
+
+    def test_prometheus_metrics_endpoint(self, test_client: TestClient):
+        """Verify GET /metrics returns standard Prometheus exposition metrics."""
+        resp = test_client.get("/metrics")
+        assert resp.status_code == 200
+        assert "text/plain" in resp.headers.get("content-type", "")
+        text = resp.text
+        assert "veridocs_http_requests_total" in text
+        assert "veridocs_active_sessions" in text
+        assert "veridocs_http_request_duration_seconds" in text

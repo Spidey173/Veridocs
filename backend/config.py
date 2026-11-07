@@ -83,6 +83,21 @@ class Settings:
         self.EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
         self.EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
 
+        # Dynamic embedding dimension detection (supports 384, 768, 1024, 1536, 3072)
+        env_dim = os.getenv("EMBEDDING_DIMENSION", "").strip()
+        if env_dim.isdigit():
+            self.EMBEDDING_DIMENSION: int = int(env_dim)
+        elif "text-embedding-3-large" in self.EMBEDDING_MODEL:
+            self.EMBEDDING_DIMENSION = 3072
+        elif "text-embedding-3-small" in self.EMBEDDING_MODEL or "text-embedding-ada-002" in self.EMBEDDING_MODEL:
+            self.EMBEDDING_DIMENSION = 1536
+        elif "bge-large" in self.EMBEDDING_MODEL:
+            self.EMBEDDING_DIMENSION = 1024
+        elif "bge-base" in self.EMBEDDING_MODEL:
+            self.EMBEDDING_DIMENSION = 768
+        else:
+            self.EMBEDDING_DIMENSION = 384
+
         # Search settings
         self.RETRIEVAL_INITIAL_K: int = int(os.getenv("RETRIEVAL_INITIAL_K", "20"))
         self.RETRIEVAL_FINAL_K: int = int(os.getenv("RETRIEVAL_FINAL_K", "5"))

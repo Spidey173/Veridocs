@@ -54,3 +54,4 @@ async def generate_demo_token(request: Request, x_api_key: Optional[str] = Heade
         mode="demo",
         warning="Local demo token."
     )
+

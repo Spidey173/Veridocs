@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from enum import Enum
 from datetime import datetime
 
@@ -40,6 +40,39 @@ class SourceInfo(BaseModel):
     bm25_score: Optional[float] = None
     dense_score: Optional[float] = None
     rerank_score: Optional[float] = None
+
+
+class DocumentChunk(BaseModel):
+    """Strongly typed document chunk model with vector & sparse retrieval telemetry."""
+    id: Optional[Union[str, int]] = None
+    session_id: Optional[str] = None
+    source_file: str = "Uploaded PDF"
+    page: int = Field(default=1, alias="page_number")
+    chunk_index: int = 0
+    text: str
+    raw_text: Optional[str] = None
+    section: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    relevance_score: Optional[float] = None
+    dense_score: Optional[float] = None
+    sparse_score: Optional[float] = None
+    bm25_score: Optional[float] = None
+    rerank_score: Optional[float] = None
+    is_table: bool = False
+    is_scanned: bool = False
+    ocr_engine: Optional[str] = None
+
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "extra": "allow"
+    }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert chunk model to standard dictionary format for legacy consumers."""
+        d = self.model_dump(by_alias=False)
+        d["page_number"] = self.page
+        return d
 
 
 class CitationInfo(BaseModel):

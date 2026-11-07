@@ -4,13 +4,14 @@ Health checks, LLM provider registry inspection, and administrative maintenance 
 
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Response
 
 from config import get_settings, get_model_registry
 from auth import require_admin_or_maintenance, UserContext
 from models import HealthResponse
 import database
 from session_store import sessions, cleanup_expired_sessions
+from metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +80,15 @@ async def trigger_retention_cleanup(
         "retention_hours": target_max_age,
         **result
     }
+
+
+@router.get("/metrics")
+async def get_prometheus_metrics():
+    """Export Prometheus text exposition format for cluster monitoring and scraping."""
+    metrics.set_gauge("veridocs_active_sessions", len(sessions))
+    content = metrics.export_prometheus()
+    return Response(
+        content=content,
+        media_type="text/plain; version=0.0.4; charset=utf-8"
+    )
+

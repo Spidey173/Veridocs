@@ -275,7 +275,7 @@ export const useAppStore = create<AppState>((set) => ({
         updates.activeVisualHighlight = {
           documentName: citation.source_file || state.activeDocumentName || "",
           page: citation.page,
-          snippet: citation.highlighted_text,
+          snippet: citation.highlighted_text || (citation as any).snippet || "",
           label: `Grounded Source [Page ${citation.page}]`,
           severity: "citation",
           score: citation.confidence,
@@ -371,3 +371,7 @@ export const useAppStore = create<AppState>((set) => ({
   setLeftSidebarWidth: (width) => set({ leftSidebarWidth: width }),
   setRightSidebarWidth: (width) => set({ rightSidebarWidth: width }),
 }));
+
+if (typeof window !== "undefined") {
+  (window as unknown as { __VERIDOCS_STORE__?: typeof useAppStore }).__VERIDOCS_STORE__ = useAppStore;
+}

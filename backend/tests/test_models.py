@@ -195,3 +195,22 @@ class TestModels:
         assert insights.session_id == "sess-insights"
         assert insights.executive_summary.purpose == "Financial review"
         assert len(insights.suggested_questions) == 1
+
+    def test_document_chunk_model(self):
+        """Verify strongly typed DocumentChunk model and dictionary conversion."""
+        from models import DocumentChunk
+
+        chunk = DocumentChunk(
+            source_file="annual_report_2025.pdf",
+            page_number=3,
+            chunk_index=1,
+            text="Operating profit increased by 14.2% YoY.",
+            relevance_score=0.92,
+            is_table=False
+        )
+        assert chunk.source_file == "annual_report_2025.pdf"
+        assert chunk.page == 3
+        assert chunk.relevance_score == 0.92
+        d = chunk.to_dict()
+        assert d["page_number"] == 3
+        assert d["source_file"] == "annual_report_2025.pdf"
