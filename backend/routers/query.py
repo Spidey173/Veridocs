@@ -8,7 +8,6 @@ import uuid
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional, Any
-import numpy as np
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
 
@@ -24,7 +23,7 @@ from models import (
     ClaimVerification,
     MessageRole,
 )
-from vector_store import get_query_embedding
+from vector_store import get_query_embedding, get_vector_store
 from reranker import rerank_chunks
 from llm_service import FreeLLMService
 from verification import (
@@ -78,59 +77,19 @@ async def answer_query(
     conversation = get_conversation_manager()
 
     try:
-        # Retrieve candidates via PostgreSQL pgvector hybrid search
+        # Retrieve candidates via unified VectorStore
         q_emb = get_query_embedding(question)
-        candidates = []
-
-        if database.is_database_configured():
-            if not database.is_database_ready():
-                if settings.ENVIRONMENT == "production":
-                    logger.error("PostgreSQL connection pool is down during query retrieval in production.")
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database connection is unavailable. In-memory fallback is disabled in production to prevent worker state divergence."
-                    )
-                logger.warning("PostgreSQL pool offline; falling back to in-memory cosine similarity for development.")
-            else:
-                candidates = await database.hybrid_search_postgres(
-                    session_id=request.session_id,
-                    query=question,
-                    query_embedding=q_emb,
-                    k=settings.RETRIEVAL_INITIAL_K,
-                    dense_weight=settings.DENSE_WEIGHT,
-                    bm25_weight=settings.BM25_WEIGHT,
-                    active_files=request.active_files or None
-                )
-        elif settings.ENVIRONMENT == "production":
-            raise HTTPException(
-                status_code=503,
-                detail="PostgreSQL database is required for queries in production mode. Ephemeral fallback is disabled."
-            )
-
-        # Fallback for local development / testing when PostgreSQL is not configured
-        if not candidates and not database.is_database_configured():
-            if "chunks" in session_data and session_data["chunks"]:
-                session_chunks = session_data["chunks"]
-                session_embs = session_data.get("embeddings")
-                if session_embs is not None and len(session_embs) == len(session_chunks):
-                    q_norm = np.linalg.norm(q_emb)
-                    q_unit = q_emb / (q_norm if q_norm > 0 else 1.0)
-                    emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
-                    emb_norms[emb_norms == 0] = 1.0
-                    normed_embs = session_embs / emb_norms
-                    scores = np.dot(normed_embs, q_unit)
-                    ranked_indices = np.argsort(scores)[::-1][:settings.RETRIEVAL_INITIAL_K]
-                    for idx in ranked_indices:
-                        chunk_copy = dict(session_chunks[idx])
-                        chunk_copy["relevance_score"] = float(round(scores[idx], 4))
-                        chunk_copy["dense_score"] = float(round(scores[idx], 4))
-                        chunk_copy["bm25_score"] = 0.0
-                        candidates.append(chunk_copy)
-                else:
-                    candidates = list(session_chunks[:settings.RETRIEVAL_INITIAL_K])
-
-        if request.active_files is not None:
-            candidates = [c for c in candidates if c.get("source_file") in request.active_files]
+        store = get_vector_store()
+        candidates = await store.hybrid_search(
+            session_id=request.session_id,
+            query=question,
+            query_embedding=q_emb,
+            k=settings.RETRIEVAL_INITIAL_K,
+            dense_weight=settings.DENSE_WEIGHT,
+            bm25_weight=settings.BM25_WEIGHT,
+            active_files=request.active_files or None,
+            session_data=session_data
+        )
 
         if not candidates:
             return QueryResponse(
@@ -263,55 +222,19 @@ async def stream_query(
         conversation = get_conversation_manager()
 
         try:
-            # Search relevant chunks via PostgreSQL pgvector hybrid search
+            # Search relevant chunks via unified VectorStore
             q_emb = get_query_embedding(question)
-            candidates = []
-
-            if database.is_database_configured():
-                if not database.is_database_ready():
-                    if settings.ENVIRONMENT == "production":
-                        logger.error("PostgreSQL connection pool is down during stream retrieval in production.")
-                        yield _sse_event("error", {"detail": "Database connection is unavailable in production."})
-                        return
-                    logger.warning("PostgreSQL pool offline; falling back to in-memory cosine similarity for development.")
-                else:
-                    candidates = await database.hybrid_search_postgres(
-                        session_id=request.session_id,
-                        query=question,
-                        query_embedding=q_emb,
-                        k=settings.RETRIEVAL_INITIAL_K,
-                        dense_weight=settings.DENSE_WEIGHT,
-                        bm25_weight=settings.BM25_WEIGHT,
-                        active_files=request.active_files or None
-                    )
-            elif settings.ENVIRONMENT == "production":
-                yield _sse_event("error", {"detail": "PostgreSQL database is required in production mode."})
-                return
-
-            # Fallback for local development / testing when PostgreSQL is not configured
-            if not candidates and not database.is_database_configured():
-                if "chunks" in session_data and session_data["chunks"]:
-                    session_chunks = session_data["chunks"]
-                    session_embs = session_data.get("embeddings")
-                    if session_embs is not None and len(session_embs) == len(session_chunks):
-                        q_norm = np.linalg.norm(q_emb)
-                        q_unit = q_emb / (q_norm if q_norm > 0 else 1.0)
-                        emb_norms = np.linalg.norm(session_embs, axis=1, keepdims=True)
-                        emb_norms[emb_norms == 0] = 1.0
-                        normed_embs = session_embs / emb_norms
-                        scores = np.dot(normed_embs, q_unit)
-                        ranked_indices = np.argsort(scores)[::-1][:settings.RETRIEVAL_INITIAL_K]
-                        for idx in ranked_indices:
-                            chunk_copy = dict(session_chunks[idx])
-                            chunk_copy["relevance_score"] = float(round(scores[idx], 4))
-                            chunk_copy["dense_score"] = float(round(scores[idx], 4))
-                            chunk_copy["bm25_score"] = 0.0
-                            candidates.append(chunk_copy)
-                    else:
-                        candidates = list(session_chunks[:settings.RETRIEVAL_INITIAL_K])
-
-            if request.active_files is not None:
-                candidates = [c for c in candidates if c.get("source_file") in request.active_files]
+            store = get_vector_store()
+            candidates = await store.hybrid_search(
+                session_id=request.session_id,
+                query=question,
+                query_embedding=q_emb,
+                k=settings.RETRIEVAL_INITIAL_K,
+                dense_weight=settings.DENSE_WEIGHT,
+                bm25_weight=settings.BM25_WEIGHT,
+                active_files=request.active_files or None,
+                session_data=session_data
+            )
 
             if not candidates:
                 yield _sse_event("token", {

@@ -2,6 +2,7 @@
 Unit tests for vector_store.py: Query caching, embedding normalization, and Reciprocal Rank Fusion.
 """
 
+import pytest
 import numpy as np
 from vector_store import (
     get_query_embedding,
@@ -82,3 +83,85 @@ class TestGetQueryEmbedding:
         vec1 = get_query_embedding("repeatable search string")
         vec2 = get_query_embedding("repeatable search string")
         np.testing.assert_array_equal(vec1, vec2)
+
+
+class TestVectorStoreStrategy:
+    @pytest.mark.asyncio
+    async def test_in_memory_vector_store_hybrid_search(self):
+        """Verify InMemoryVectorStore performs cosine similarity ranking and active_files filtering."""
+        from vector_store import InMemoryVectorStore
+
+        store = InMemoryVectorStore()
+        session_id = "test-store-sess"
+        chunks = [
+            {"text": "Apple reported Q4 revenue", "source_file": "apple.pdf", "page": 1},
+            {"text": "Banana exports increased", "source_file": "banana.pdf", "page": 2},
+        ]
+        # Dummy 2D embeddings
+        embeddings = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ], dtype=np.float32)
+
+        session_data = {"chunks": chunks, "embeddings": embeddings}
+        q_emb = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+
+        # 1. Search without file filter
+        results = await store.hybrid_search(
+            session_id=session_id,
+            query="Apple revenue",
+            query_embedding=q_emb,
+            k=5,
+            session_data=session_data
+        )
+        assert len(results) == 2
+        assert results[0]["source_file"] == "apple.pdf"
+        assert results[0]["relevance_score"] > results[1]["relevance_score"]
+
+        # 2. Search with active_files filtering
+        filtered = await store.hybrid_search(
+            session_id=session_id,
+            query="Apple revenue",
+            query_embedding=q_emb,
+            k=5,
+            active_files=["banana.pdf"],
+            session_data=session_data
+        )
+        assert len(filtered) == 1
+        assert filtered[0]["source_file"] == "banana.pdf"
+
+    @pytest.mark.asyncio
+    async def test_in_memory_vector_store_disallowed_in_production(self, monkeypatch):
+        """Verify InMemoryVectorStore strictly raises 503 in production to prevent worker divergence."""
+        from vector_store import InMemoryVectorStore
+        from config import get_settings
+        from fastapi import HTTPException
+
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+
+        store = InMemoryVectorStore()
+        with pytest.raises(HTTPException) as exc_info:
+            await store.hybrid_search(
+                session_id="prod-sess",
+                query="test",
+                query_embedding=np.zeros(3),
+                session_data={"chunks": []}
+            )
+        assert exc_info.value.status_code == 503
+
+    def test_get_vector_store_factory_production_guardrail(self, monkeypatch):
+        """Verify get_vector_store() aborts with 503 HTTPException if production lacks PostgreSQL."""
+        from vector_store import get_vector_store
+        from config import get_settings
+        from fastapi import HTTPException
+        import database
+
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        monkeypatch.setattr(database, "is_database_configured", lambda: False)
+
+        with pytest.raises(HTTPException) as exc_info:
+            get_vector_store()
+        assert exc_info.value.status_code == 503
+        assert "database is required" in exc_info.value.detail.lower()

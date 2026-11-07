@@ -74,3 +74,4 @@ class MetricsRegistry:
 
 # Global singleton metrics registry
 metrics = MetricsRegistry()
+
