@@ -1,9 +1,11 @@
+import os
 import time
 import json
 import hmac
 import base64
 import secrets
 import hashlib
+import tempfile
 import logging
 from pathlib import Path
 from typing import Optional
@@ -19,19 +21,31 @@ _EPHEMERAL_SECRET: str = secrets.token_hex(32)
 
 
 def _get_dev_secret() -> str:
-    """Get or create a local secret stored on disk for development."""
-    settings = get_settings()
+    """
+    Get or create a local secret stored on disk for development.
+    Stored outside web-accessible and upload directories with restricted (0o600) file permissions.
+    """
     try:
-        secret_file = Path(settings.UPLOAD_DIR) / ".auth_dev_secret"
+        secret_dir = Path.home() / ".veridocs"
+        try:
+            secret_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            secret_file = secret_dir / ".auth_dev_secret"
+        except Exception:
+            secret_file = Path(tempfile.gettempdir()) / ".veridocs_auth_dev_secret"
+
         if secret_file.exists():
             content = secret_file.read_text(encoding="utf-8").strip()
             if len(content) >= 32:
                 return content
+
         new_secret = secrets.token_hex(32)
-        secret_file.parent.mkdir(parents=True, exist_ok=True)
-        secret_file.write_text(new_secret, encoding="utf-8")
+        # Create with restricted permissions (read/write by owner only)
+        fd = os.open(str(secret_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(new_secret)
         return new_secret
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Could not persist dev secret on disk: {e}")
         return _EPHEMERAL_SECRET
 
 

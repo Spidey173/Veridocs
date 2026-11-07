@@ -7,6 +7,7 @@ gateway API key enforcement, and strict user ownership isolation (anti-IDOR).
 import time
 import json
 import pytest
+import tempfile
 from fastapi.testclient import TestClient
 from pathlib import Path
 
@@ -340,3 +341,28 @@ class TestSecurityAndAccessControl:
             json={"session_id": "non_existent_session", "question": "What is this?"}
         )
         assert query_resp.status_code == 401
+
+    def test_dev_secret_stored_outside_upload_dir_with_restricted_permissions(self):
+        """Verify dev secret is saved outside UPLOAD_DIR with 0o600 permissions."""
+        from auth import _get_dev_secret
+        import stat
+
+        settings = get_settings()
+        secret = _get_dev_secret()
+        assert isinstance(secret, str)
+        assert len(secret) >= 32
+
+        # Verify nothing was written to UPLOAD_DIR
+        upload_secret = Path(settings.UPLOAD_DIR) / ".auth_dev_secret"
+        assert not upload_secret.exists()
+
+        # Verify the secret file in ~/.veridocs or tempdir has restricted permissions
+        candidate_paths = [
+            Path.home() / ".veridocs" / ".auth_dev_secret",
+            Path(tempfile.gettempdir()) / ".veridocs_auth_dev_secret",
+        ]
+        existing = [p for p in candidate_paths if p.exists()]
+        if existing:
+            file_mode = stat.S_IMODE(existing[0].stat().st_mode)
+            # Ensure permissions are read/write by user only (0o600)
+            assert file_mode == 0o600
