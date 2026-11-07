@@ -14,6 +14,7 @@ from pdf_processor import (
     _extract_blocks,
     _format_table_block,
     _chunk_table_atomically,
+    _is_table_line,
     register_vision_transcriber,
 )
 
@@ -174,8 +175,6 @@ class TestPDFProcessor:
 
     def test_borderless_financial_balance_sheet_parsing(self):
         """Verify complex borderless financial statement rows are detected and converted to markdown."""
-        from pdf_processor import _format_table_block, _is_table_line
-
         # 1. Test individual financial line detection
         line1 = "Cash and cash equivalents        $ 24,500        $ 19,200"
         line2 = "Total operating expenses         (14,250)        (12,100)"

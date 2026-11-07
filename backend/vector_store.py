@@ -3,7 +3,7 @@ import threading
 from typing import Dict, Optional, List, Tuple
 import numpy as np
 
-from config import get_model_registry, get_settings
+from config import get_model_registry
 
 logger = logging.getLogger(__name__)
 

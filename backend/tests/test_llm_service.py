@@ -9,11 +9,11 @@ Comprehensive unit tests for llm_service.py:
 - Structured JSON summary and suggested questions parsing
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 from llm_service import FreeLLMService
-from config import get_settings, Settings
+from config import get_settings
 
 
 class TestUniversalLLMService:

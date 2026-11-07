@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 import asyncpg
+from alembic.config import Config
 from pgvector.asyncpg import register_vector
 import numpy as np
 
@@ -25,7 +26,6 @@ def is_database_configured() -> bool:
 def run_migrations(dsn: Optional[str] = None) -> bool:
     """Run Alembic database migrations programmatically up to head."""
     try:
-        from alembic.config import Config
         from alembic import command
 
         base_dir = Path(__file__).resolve().parent
@@ -49,7 +49,6 @@ def get_migration_head() -> Optional[str]:
     """Get the latest revision identifier from Alembic scripts."""
     try:
         from alembic.script import ScriptDirectory
-        from alembic.config import Config
 
         base_dir = Path(__file__).resolve().parent
         ini_path = base_dir / "alembic.ini"

@@ -4,7 +4,7 @@ import os
 import base64
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Callable, Union, Generator, Iterable, Any
+from typing import List, Dict, Optional, Tuple, Callable, Union, Generator, Any
 import pypdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 

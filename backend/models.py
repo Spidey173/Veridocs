@@ -80,12 +80,6 @@ class CrossDocAuditRequest(BaseModel):
     focus_topic: Optional[str] = "all"
 
 
-class ClaimStatus(str, Enum):
-    VERIFIED = "verified"
-    INFERRED = "inferred"
-    HALLUCINATED = "hallucinated"
-
-
 class ClaimVerification(BaseModel):
     claim: str
     score: float
@@ -118,16 +112,6 @@ class QueryResponse(BaseModel):
 class StreamEvent(BaseModel):
     event: StreamEventType
     data: Dict[str, Any]
-
-
-class UploadProgress(BaseModel):
-    stage: ProcessingStage
-    progress: float = 0.0
-    message: str = ""
-    file_name: Optional[str] = None
-    pages_processed: Optional[int] = None
-    total_pages: Optional[int] = None
-    chunks_created: Optional[int] = None
 
 
 class UploadResponse(BaseModel):
@@ -177,15 +161,6 @@ class DocumentInsights(BaseModel):
     total_pages: int = 0
     total_chunks: int = 0
     processing_time_ms: Optional[float] = None
-
-
-class DocumentMetadata(BaseModel):
-    filename: str
-    num_pages: int
-    file_size_bytes: int
-    is_scanned: bool = False
-    sections: Optional[List[str]] = None
-    upload_timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class HealthResponse(BaseModel):

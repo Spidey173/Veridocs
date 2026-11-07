@@ -3,7 +3,6 @@ Unit tests for vector_store.py: Query caching, embedding normalization, and Reci
 """
 
 import numpy as np
-from unittest.mock import MagicMock
 from vector_store import (
     get_query_embedding,
     reciprocal_rank_fusion,

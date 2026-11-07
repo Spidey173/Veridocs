@@ -16,14 +16,14 @@ backend/__pycache__/
 
 # Node / Frontend
 node_modules/
+frontend/node_modules/
 .next/
+frontend/.next/
 dist/
 out/
 build/
-.next/
-frontend-next/node_modules/
-frontend-next/.next/
-frontend/node_modules/
+playwright-report/
+test-results/
 
 # Standalone Recruiter Demo (Vercel Showcase)
 demo/

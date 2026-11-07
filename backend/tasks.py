@@ -1,6 +1,5 @@
 import time
 import uuid
-import json
 import logging
 import threading
 from pathlib import Path

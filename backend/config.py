@@ -12,9 +12,14 @@ os.environ["ONNXRUNTIME_INTRA_OP_NUM_THREADS"] = "1"
 from functools import lru_cache
 from typing import Optional
 import threading
+import logging
+import hashlib
+import numpy as np
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class Settings:
@@ -220,8 +225,6 @@ class FastEmbeddingWrapper:
     """Local embedding wrapper using FastEmbed."""
 
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        import logging
-        logger = logging.getLogger(__name__)
         if model_name == "all-MiniLM-L6-v2":
             model_name = "sentence-transformers/all-MiniLM-L6-v2"
         logger.info(f"Loading embedding model: {model_name}")
@@ -233,7 +236,6 @@ class FastEmbeddingWrapper:
 
     def encode(self, texts, batch_size: int = 32, **kwargs):
         """Encode text into float32 numpy vectors."""
-        import numpy as np
         if isinstance(texts, str):
             texts = [texts]
         embeddings = list(self._model.embed(texts, batch_size=batch_size))
@@ -244,8 +246,6 @@ class DeterministicOfflineEmbedding:
     """Zero-dependency offline deterministic embedding generator for air-gapped/offline runtime."""
 
     def encode(self, texts, **kwargs):
-        import numpy as np
-        import hashlib
         if isinstance(texts, str):
             texts = [texts]
         vectors = []
@@ -280,8 +280,6 @@ class ModelRegistry:
         if self._embedding_model is None:
             with self._lock:
                 if self._embedding_model is None:
-                    import logging
-                    logger = logging.getLogger(__name__)
                     settings = get_settings()
                     try:
                         self._embedding_model = FastEmbeddingWrapper(settings.EMBEDDING_MODEL)
@@ -307,16 +305,12 @@ class ModelRegistry:
                             from fastembed.rerank.cross_encoder import TextCrossEncoder
                         except ImportError:
                             from fastembed import TextCrossEncoder
-                        import logging
-                        logger = logging.getLogger(__name__)
                         logger.info(f"Loading reranker model: {settings.RERANKER_MODEL}")
                         try:
                             self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL, threads=1)
                         except TypeError:
                             self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL)
                     except Exception as e:
-                        import logging
-                        logger = logging.getLogger(__name__)
                         logger.warning(f"Reranker unavailable: {e}")
                         return None
         return self._reranker_model
