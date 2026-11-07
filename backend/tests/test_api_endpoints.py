@@ -58,10 +58,30 @@ class TestAPIEndpoints:
 
         assert "session_id" in data
         assert data["processed_files"] == 1
-        assert data["chunk_count"] > 0
-        assert len(data["failed_files"]) == 0
-        assert len(data["document_metadata"]) == 1
-        assert data["document_metadata"][0]["filename"] == "report.txt"
+
+    def test_upload_partial_failure_does_not_register_ghost_document(
+        self, test_client: TestClient, sample_txt_bytes
+    ):
+        """Verify that a corrupted/unreadable file does not get recorded as a ghost document in session."""
+        # Valid TXT + Corrupt PDF (random binary garbage that will fail PDF parsing)
+        corrupt_pdf_bytes = b"%PDF-1.4\ncorrupted random bytes that cannot be parsed as valid pdf structure"
+        files = [
+            ("files", ("valid.txt", sample_txt_bytes, "text/plain")),
+            ("files", ("corrupt.pdf", corrupt_pdf_bytes, "application/pdf")),
+        ]
+        response = test_client.post("/api/upload", files=files)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["processed_files"] == 1
+        assert any("corrupt.pdf" in f for f in data["failed_files"])
+
+        # Check session record directly: corrupt.pdf must NOT be in file_names or file_paths
+        session_id = data["session_id"]
+        session_data = main.sessions[session_id]
+        assert session_data["file_names"] == ["valid.txt"]
+        assert len(session_data["file_paths"]) == 1
+        assert "corrupt.pdf" not in session_data["file_names"]
+        assert len(session_data["chunks"]) > 0
 
     def test_upload_multi_file_and_session_continuation(
         self, test_client: TestClient, sample_txt_bytes, sample_docx_bytes

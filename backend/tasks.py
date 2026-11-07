@@ -35,6 +35,8 @@ def process_document_job(
 
     all_chunks = []
     doc_metadata = []
+    valid_file_paths = []
+    valid_file_names = []
     processed_count = 0
     total_scanned_count = 0
     total_pages_count = 0
@@ -101,10 +103,13 @@ def process_document_job(
                 document_name=filename
             )
 
-            for chunk in chunks:
-                chunk["source_file"] = filename
-            all_chunks.extend(chunks)
-            processed_count += 1
+            if chunks:
+                for chunk in chunks:
+                    chunk["source_file"] = filename
+                all_chunks.extend(chunks)
+                processed_count += 1
+                valid_file_paths.append(str(file_path))
+                valid_file_names.append(filename)
 
         if not all_chunks:
             error_msg = "No readable text could be extracted from uploaded files."
@@ -148,8 +153,8 @@ def process_document_job(
                     await database.save_session(
                         session_id=session_id,
                         owner_id=owner_id,
-                        file_names=file_names,
-                        file_paths=file_paths,
+                        file_names=valid_file_names,
+                        file_paths=valid_file_paths,
                         metadata=doc_metadata,
                         insights={},
                         created_at=time.time()
@@ -172,8 +177,8 @@ def process_document_job(
             import main
             main.sessions[session_id] = {
                 "chunks": all_chunks,
-                "file_paths": file_paths,
-                "file_names": file_names,
+                "file_paths": valid_file_paths,
+                "file_names": valid_file_names,
                 "metadata": doc_metadata,
                 "insights": {},
                 "created_at": time.time(),
@@ -188,7 +193,7 @@ def process_document_job(
             "processed_files": processed_count,
             "total_pages": total_pages_count,
             "scanned_pages": total_scanned_count,
-            "file_names": file_names,
+            "file_names": valid_file_names,
         }
 
         tracker.complete_job(

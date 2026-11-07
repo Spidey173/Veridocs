@@ -348,14 +348,13 @@ async def upload_documents(
             session_file_id = str(uuid.uuid4())
             save_path = Path(settings.UPLOAD_DIR) / f"{session_file_id}{ext}"
             save_path.write_bytes(contents)
-            saved_paths.append(str(save_path))
-            file_names.append(filename)
 
             # Stream extract text from disk to avoid in-memory byte duplication
             pages = extract_text_from_file(save_path, filename=filename)
 
             if not pages:
                 failed_files.append(f"{filename} (no extractable text)")
+                _safe_delete_file(save_path)
                 continue
 
             metadata = {
@@ -381,17 +380,24 @@ async def upload_documents(
                 all_chunks.extend(chunks)
                 processed_files += 1
                 doc_metadata.append(metadata)
+                saved_paths.append(str(save_path))
+                file_names.append(filename)
 
                 logger.info(f"Processed {filename}: {len(chunks)} chunks")
             else:
                 failed_files.append(f"{filename} (chunking failed)")
+                _safe_delete_file(save_path)
 
         except ValueError as e:
             failed_files.append(f"{filename}: {str(e)}")
             logger.warning(f"ValueError processing {filename}: {str(e)}")
+            if 'save_path' in locals() and save_path:
+                _safe_delete_file(save_path)
         except Exception as e:
             failed_files.append(f"{filename}: Unexpected error")
             logger.error(f"Error processing {filename}: {str(e)}", exc_info=True)
+            if 'save_path' in locals() and save_path:
+                _safe_delete_file(save_path)
 
     if not all_chunks:
         error_msg = "No files could be processed. "
