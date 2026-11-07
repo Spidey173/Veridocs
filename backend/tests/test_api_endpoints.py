@@ -5,6 +5,7 @@ Uses FastAPI TestClient with mocked ML and LLM dependencies for fast, determinis
 
 from fastapi.testclient import TestClient
 
+import main
 from config import get_settings
 
 
@@ -88,6 +89,12 @@ class TestAPIEndpoints:
         assert data2["session_id"] == session_id
         assert data2["chunk_count"] > initial_chunks
         assert data2["processed_files"] == 1
+
+        # Verify incremental in-memory embeddings match total chunk count
+        session_record = main.sessions[session_id]
+        assert len(session_record["chunks"]) == data2["chunk_count"]
+        assert session_record["embeddings"] is not None
+        assert session_record["embeddings"].shape[0] == data2["chunk_count"]
 
     def test_get_session_info(self, test_client: TestClient, sample_txt_bytes):
         """Verify session metadata retrieval."""

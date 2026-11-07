@@ -400,24 +400,44 @@ async def upload_documents(
         raise HTTPException(status_code=400, detail=error_msg)
 
     try:
+        # Generate embeddings only for newly uploaded chunks to keep incremental ingestion O(k)
+        new_chunks = list(all_chunks)
+        reg = get_model_registry()
+        new_chunk_texts = [c["text"] for c in new_chunks]
+        new_embeddings = reg.embedding_model.encode(
+            new_chunk_texts,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+            batch_size=settings.EMBEDDING_BATCH_SIZE
+        )
+
         existing_insights = {}
         if session_id:
             existing_session = await _get_session(session_id, current_user)
             saved_paths = existing_session.get("file_paths", []) + saved_paths
             file_names = existing_session.get("file_names", []) + file_names
             doc_metadata = existing_session.get("metadata", []) + doc_metadata
-            all_chunks = existing_session.get("chunks", []) + all_chunks
+            existing_chunks = existing_session.get("chunks", [])
+            existing_embeddings = existing_session.get("embeddings")
             existing_insights = existing_session.get("insights", {})
 
-        # Generate embeddings for chunks
-        reg = get_model_registry()
-        chunk_texts = [c["text"] for c in all_chunks]
-        embeddings = reg.embedding_model.encode(
-            chunk_texts,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-            batch_size=settings.EMBEDDING_BATCH_SIZE
-        )
+            all_chunks = existing_chunks + new_chunks
+            if (
+                isinstance(existing_embeddings, np.ndarray)
+                and len(existing_embeddings) == len(existing_chunks)
+            ):
+                embeddings = np.vstack([existing_embeddings, new_embeddings])
+            else:
+                # Fallback if in-memory embeddings were missing/deserialized
+                embeddings = reg.embedding_model.encode(
+                    [c["text"] for c in all_chunks],
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                    batch_size=settings.EMBEDDING_BATCH_SIZE
+                )
+        else:
+            all_chunks = new_chunks
+            embeddings = new_embeddings
 
         with _sessions_lock:
             if not session_id or session_id not in sessions:
@@ -444,7 +464,7 @@ async def upload_documents(
                 oldest_key = min(sessions, key=lambda k: sessions[k]["created_at"])
                 _cleanup_session(oldest_key)
 
-        # Save session to PostgreSQL if configured
+        # Save session to PostgreSQL if configured (only insert newly added chunks)
         if database.is_database_configured():
             try:
                 await database.save_session(
@@ -456,7 +476,7 @@ async def upload_documents(
                     insights=existing_insights,
                     created_at=time.time()
                 )
-                await database.save_chunks(session_id, all_chunks, embeddings)
+                await database.save_chunks(session_id, new_chunks, new_embeddings)
             except Exception as e:
                 logger.error(f"Failed to persist session {session_id} to PostgreSQL: {e}")
 
