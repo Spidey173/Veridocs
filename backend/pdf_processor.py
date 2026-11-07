@@ -356,18 +356,79 @@ def extract_text_from_file(
             raise ValueError(f"Unsupported file type: {ext}. Supported: .pdf, .docx, .txt")
 
 
+_FINANCIAL_NUM_RE = re.compile(
+    r'^[\$€£¥]?\s*\(?[\d,]+(?:\.\d+)?\)?%?$'
+)
+
+
 def _is_table_line(line: str) -> bool:
-    """Check if a line is part of a markdown or formatted table."""
+    """Check if a line is part of a markdown, tab-separated, or borderless space-aligned table."""
     s = line.strip()
     if not s:
         return False
+
+    # 1. Standard markdown tables (| col | col |)
     if s.startswith("|") and s.endswith("|") and s.count("|") >= 2:
         return True
     if re.match(r'^\|?[\s\-:]+(\|[\s\-:]+)+\|?$', s):
         return True
+
+    # 2. Tab-separated tables
     if "\t" in s and len(s.split("\t")) >= 3:
         return True
+
+    # 3. Accounting & table divider lines (e.g. "-----------------", "=================")
+    if len(s) >= 8 and (s.count("-") >= 6 or s.count("=") >= 6 or s.count("_") >= 6):
+        if re.match(r'^[\s\-=_]+$', s):
+            return True
+
+    # 4. Multi-column space-aligned financial lines (SEC 10-K balance sheets, cash flows, income statements)
+    columns = [col.strip() for col in re.split(r'\s{2,}', s) if col.strip()]
+    if len(columns) >= 3:
+        num_count = sum(1 for c in columns if _FINANCIAL_NUM_RE.match(c))
+        if num_count >= 1 or len(columns) >= 4:
+            return True
+    elif len(columns) == 2:
+        if _FINANCIAL_NUM_RE.match(columns[1]):
+            return True
+
     return False
+
+
+def _format_table_block(block_text: str) -> str:
+    """Ensure table block is formatted with markdown pipes for optimal LLM and embedding comprehension."""
+    lines = block_text.strip().split("\n")
+    if not lines:
+        return block_text
+
+    # If already formatted as a markdown table, return as is
+    if any(line.strip().startswith("|") for line in lines):
+        return block_text
+
+    formatted_rows = []
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        if re.match(r'^[\s\-=_]+$', s):
+            continue  # omit raw divider lines in markdown conversion
+
+        if "\t" in s:
+            cols = [c.strip() for c in s.split("\t") if c.strip()]
+        else:
+            cols = [c.strip() for c in re.split(r'\s{2,}', s) if c.strip()]
+
+        if cols:
+            formatted_rows.append("| " + " | ".join(cols) + " |")
+
+    if len(formatted_rows) >= 2:
+        col_count = formatted_rows[0].count("|") - 1
+        sep = "| " + " | ".join(["---"] * max(col_count, 1)) + " |"
+        return "\n".join([formatted_rows[0], sep] + formatted_rows[1:])
+    elif formatted_rows:
+        return "\n".join(formatted_rows)
+
+    return block_text
 
 
 def _extract_blocks(text: str) -> List[Tuple[str, bool]]:
@@ -377,8 +438,19 @@ def _extract_blocks(text: str) -> List[Tuple[str, bool]]:
     current_lines = []
     in_table = False
 
-    for line in lines:
+    for i, line in enumerate(lines):
         is_tbl = _is_table_line(line)
+
+        # Allow single blank line inside an active table if followed by another table line
+        if not is_tbl and in_table and not line.strip():
+            next_is_tbl = False
+            for j in range(i + 1, min(i + 3, len(lines))):
+                if lines[j].strip():
+                    next_is_tbl = _is_table_line(lines[j])
+                    break
+            if next_is_tbl:
+                is_tbl = True
+
         if is_tbl != in_table:
             if current_lines:
                 blocks.append(("\n".join(current_lines), in_table))
@@ -435,7 +507,8 @@ def chunk_text(
                         continue
 
                     if is_table:
-                        splits = [block_stripped] if len(block_stripped) <= chunk_size * 2 else text_splitter.split_text(block_stripped)
+                        formatted_table = _format_table_block(block_stripped)
+                        splits = [formatted_table] if len(formatted_table) <= chunk_size * 2 else text_splitter.split_text(formatted_table)
                     else:
                         splits = text_splitter.split_text(block_stripped)
 

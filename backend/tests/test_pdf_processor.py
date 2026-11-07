@@ -168,3 +168,40 @@ class TestPDFProcessor:
         pages = extract_text_from_file(sample_file, filename="test_sec_doc.txt")
         assert len(pages) > 0
         assert "revenue" in pages[0]["text"].lower()
+
+    def test_borderless_financial_balance_sheet_parsing(self):
+        """Verify complex borderless financial statement rows are detected and converted to markdown."""
+        from pdf_processor import _format_table_block, _is_table_line
+
+        # 1. Test individual financial line detection
+        line1 = "Cash and cash equivalents        $ 24,500        $ 19,200"
+        line2 = "Total operating expenses         (14,250)        (12,100)"
+        line3 = "Gross margin percentage          38.5%           36.2%"
+        line4 = "This is a regular descriptive paragraph without tabular figures."
+
+        assert _is_table_line(line1) is True
+        assert _is_table_line(line2) is True
+        assert _is_table_line(line3) is True
+        assert _is_table_line(line4) is False
+
+        # 2. Test multi-row borderless table extraction and markdown conversion
+        raw_balance_sheet = (
+            "Consolidated Balance Sheets\n\n"
+            "Line Item                        2024          2023\n"
+            "---------------------------------------------------\n"
+            "Cash and cash equivalents        $ 24,500      $ 19,200\n"
+            "Short-term investments           $ 12,000      $ 10,500\n"
+            "Total Current Assets             $ 36,500      $ 29,700\n\n"
+            "Notes to consolidated financial statements."
+        )
+        blocks = _extract_blocks(raw_balance_sheet)
+        assert len(blocks) == 3
+        assert blocks[0][1] is False  # Header paragraph
+        assert blocks[1][1] is True   # Balance sheet table block
+        assert blocks[2][1] is False  # Notes paragraph
+
+        # 3. Test markdown formatting
+        md_table = _format_table_block(blocks[1][0])
+        assert "| Line Item | 2024 | 2023 |" in md_table
+        assert "| --- |" in md_table
+        assert "| Cash and cash equivalents | $ 24,500 | $ 19,200 |" in md_table
