@@ -5,6 +5,7 @@ multi-tenant anti-IDOR isolation, and job lifecycle management.
 """
 
 import time
+import pytest
 from fastapi.testclient import TestClient
 
 from auth import create_access_token
@@ -15,6 +16,18 @@ from tasks import process_document_job
 
 class TestAsyncJobs:
     """Test suite for asynchronous document job processing and Celery/Redis infrastructure."""
+
+    @pytest.fixture(autouse=True)
+    def setup_celery_eager_execution(self, monkeypatch):
+        """Ensure Celery tasks execute synchronously and in-process during unit testing."""
+        from celery_app import celery_app
+        from config import get_settings
+        monkeypatch.setattr(get_settings(), "CELERY_TASK_ALWAYS_EAGER", True)
+        celery_app.conf.update(
+            task_always_eager=True,
+            task_eager_propagates=True,
+        )
+        yield
 
     def test_submit_async_job_success(self, test_client: TestClient, sample_txt_bytes):
         """Verify successful submission of an async document processing job returning 202."""

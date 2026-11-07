@@ -23,6 +23,7 @@ import main
 from config import get_settings, get_model_registry
 from conversation import get_conversation_manager
 from job_tracker import get_job_tracker
+from celery_app import celery_app
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +34,7 @@ def clean_environment(tmp_path, monkeypatch):
     - In-memory sessions dictionary reset
     - Conversation manager cleared
     - Job tracker cleared
+    - Celery eager synchronous execution
     """
     test_upload_dir = tmp_path / "test_uploads"
     test_upload_dir.mkdir(parents=True, exist_ok=True)
@@ -40,6 +42,12 @@ def clean_environment(tmp_path, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "UPLOAD_DIR", str(test_upload_dir))
     monkeypatch.setattr(settings, "DATABASE_URL", "")
+    monkeypatch.setattr(settings, "CELERY_TASK_ALWAYS_EAGER", True)
+
+    celery_app.conf.update(
+        task_always_eager=True,
+        task_eager_propagates=True,
+    )
     
     # Clear active sessions in main
     main.sessions.clear()
