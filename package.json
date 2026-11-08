@@ -1,0 +1,17 @@
+{
+  "name": "veridocs-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Veridocs - Enterprise Document Intelligence & Verification Engine",
+  "scripts": {
+    "dev": "bash run.sh",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && python -m uvicorn main:app --reload",
+    "build": "cd frontend && npm run build",
+    "lint": "cd frontend && npm run lint",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "cd frontend && npm test",
+    "test:e2e": "cd frontend && npm run test:e2e",
+    "test:backend": "pytest backend/tests"
+  }
+}

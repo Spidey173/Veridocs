@@ -2,7 +2,7 @@
 
 Veridocs is an enterprise-grade AI document intelligence platform that enables multi-file question answering, precise page citations with instant coordinate highlights, cross-document contradiction auditing, and RAG Triad grounding verification.
 
-🌐 **[Live Demo](https://veridocs17.vercel.app/)** | 📦 **[GitHub Repository](https://github.com/Spidey173/Veridocs)**
+🌐 **[GitHub Repository](https://github.com/Spidey173/Veridocs)** | 🚀 **One-Command Setup on Windows, macOS, Linux**
 
 ---
 
@@ -99,18 +99,34 @@ LLM_PROVIDER=groq  # or 'openai', 'anthropic', 'google', 'ollama', etc.
 
 ---
 
-## 🚀 Quickstart
+## 🚀 Quickstart (Clone & Run in 60s)
 
-### Option A: Unified Local Runner
+Veridocs features **zero-config single-command bootstrap**. Fresh clones will automatically set up Python virtual environments, generate `.env` cryptographic secrets, install dependencies, and start both the backend API and Next.js frontend without manual steps.
 
-Run both the FastAPI backend and Next.js frontend with one script:
-
-```bash
-./run.sh
+### 🪟 Windows (Double-Click or Command Prompt)
+Double-click `run.bat` or run:
+```cmd
+run.bat
 ```
 
-- Frontend: `http://localhost:3000`
-- Backend API & Interactive Docs: `http://localhost:8000/docs`
+### 🍎 macOS & 🐧 Linux
+Run in your terminal:
+```bash
+chmod +x run.sh && ./run.sh
+```
+
+### 📦 Or via Root npm (Any OS)
+```bash
+npm run dev
+```
+
+#### Service Endpoints:
+- **Web Client UI**: [http://localhost:3000](http://localhost:3000)
+- **FastAPI Backend**: [http://localhost:8000](http://localhost:8000)
+- **Interactive API Docs & Swagger**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check**: [http://localhost:8000/api/health](http://localhost:8000/api/health)
+
+*Note: Veridocs works 100% out of the box with zero required external API keys (defaults to local extractive reasoning and in-memory vector storage). To enable cloud LLMs (Groq, Gemini, OpenAI, Claude, DeepSeek), simply paste your key into `backend/.env`.*
 
 ---
 
@@ -182,7 +198,7 @@ alembic downgrade -1
 ## 🧪 Testing Suite
 
 ### 1. Backend Pytest Suite (Unit, Integration, & Security)
-The backend contains 157 automated unit, integration, and security tests covering RRF hybrid search, anti-IDOR authorization, async tasks, and RAG Triad grounding:
+The backend contains 159 automated unit, integration, and security tests covering RRF hybrid search, anti-IDOR authorization, async tasks, and RAG Triad grounding:
 
 ```bash
 # Run all tests with coverage
@@ -190,7 +206,7 @@ pytest backend/tests --cov=backend --cov-report=term-missing
 ```
 
 ### 2. Frontend Vitest & Playwright Suites
-The frontend includes Vitest unit tests for Zustand state stores and API clients, plus 16 Playwright end-to-end tests covering real browser rendering, drag-and-drop ingestion, SSE token streaming, contradiction audits, and claim drawers:
+The frontend includes Vitest unit tests for Zustand state stores and API clients, plus 23 Playwright end-to-end tests covering real browser rendering, drag-and-drop ingestion, SSE token streaming, contradiction audits, and claim drawers:
 
 ```bash
 cd frontend

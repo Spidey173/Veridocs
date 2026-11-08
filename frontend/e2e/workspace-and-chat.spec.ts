@@ -75,8 +75,8 @@ test.describe("AI Workspace & Interactive Chat Flow", () => {
 
     // Verify assistant generates answer detailing payment settlement windows
     await expect(page.getByText("Payment Settlement Window")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("30 days")).toBeVisible();
-    await expect(page.getByText("60 calendar days")).toBeVisible();
+    await expect(page.getByText("30 days").first()).toBeVisible();
+    await expect(page.getByText("60 calendar days").first()).toBeVisible();
   });
 
   test("clicking suggested follow-up query automatically populates and triggers question", async ({

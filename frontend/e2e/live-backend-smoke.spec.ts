@@ -57,6 +57,11 @@ Invoices are payable within 45 calendar days of receipt.
       buffer: Buffer.from(sampleDocumentContent),
     });
 
+    const uploadBtn = page.getByRole("button", { name: /Upload & Start Analysis/i });
+    if (await uploadBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await uploadBtn.click();
+    }
+
     // 4. Verify live workspace transitions automatically once backend processes upload
     const newWorkspaceBtn = page.getByRole("button", { name: /New (Workspace|Session)/i });
     await expect(newWorkspaceBtn).toBeVisible({ timeout: 15000 });

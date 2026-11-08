@@ -9,7 +9,12 @@ env/
 backend/venv/
 backend/.env
 backend/uploads/
+backend/sessions/
+sessions/
 uploads/
+*.npy
+*.sqlite
+*.db
 backend/__pycache__/
 .coverage
 .pytest_cache/
