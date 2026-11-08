@@ -4,6 +4,7 @@
  */
 
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type {
   CitationInfo,
   SourceInfo,
@@ -45,7 +46,7 @@ export interface ChatMessage {
   inferred_claims?: number;
   hallucinated_claims?: number;
   isStreaming?: boolean;
-  timestamp: Date;
+  timestamp: Date | string;
 }
 
 export interface UploadedFile {
@@ -133,7 +134,9 @@ interface AppState {
   setRightSidebarWidth: (width: number) => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>()(
+  persist(
+    (set) => ({
   // Initial state
   sessionId: null,
   files: [],
@@ -184,6 +187,12 @@ export const useAppStore = create<AppState>((set) => ({
           ? state.activeDocumentName
           : (files.length > 0 ? files[0].name : null);
 
+      if (typeof window !== "undefined" && sessionId) {
+        try {
+          window.history.replaceState(null, "", `/?session=${encodeURIComponent(sessionId)}`);
+        } catch {}
+      }
+
       return {
         sessionId,
         files,
@@ -207,6 +216,12 @@ export const useAppStore = create<AppState>((set) => ({
           if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
         });
       } catch {}
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.removeItem("veridocs-workspace-storage");
+          window.history.replaceState(null, "", "/");
+        } catch {}
+      }
       return {
         sessionId: null,
         files: [],
@@ -371,7 +386,29 @@ export const useAppStore = create<AppState>((set) => ({
   setRightSidebarCollapsed: (collapsed) => set({ rightSidebarCollapsed: collapsed }),
   setLeftSidebarWidth: (width) => set({ leftSidebarWidth: width }),
   setRightSidebarWidth: (width) => set({ rightSidebarWidth: width }),
-}));
+    }),
+    {
+      name: "veridocs-workspace-storage",
+      partialize: (state) => ({
+        sessionId: state.sessionId,
+        files: state.files,
+        messages: state.messages,
+        insights: state.insights,
+        activeDocumentName: state.activeDocumentName,
+        selectedFileNames: state.selectedFileNames,
+        currentPage: state.currentPage,
+        pdfScale: state.pdfScale,
+        docViewStates: state.docViewStates,
+        activeWorkspaceTab: state.activeWorkspaceTab,
+        activeDiffReport: state.activeDiffReport,
+        leftSidebarCollapsed: state.leftSidebarCollapsed,
+        rightSidebarCollapsed: state.rightSidebarCollapsed,
+        leftSidebarWidth: state.leftSidebarWidth,
+        rightSidebarWidth: state.rightSidebarWidth,
+      }),
+    }
+  )
+);
 
 if (typeof window !== "undefined") {
   (window as unknown as { __VERIDOCS_STORE__?: typeof useAppStore }).__VERIDOCS_STORE__ = useAppStore;

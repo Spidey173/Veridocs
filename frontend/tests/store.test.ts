@@ -98,4 +98,23 @@ describe("useAppStore Unit Test Suite (Headless Vitest)", () => {
     expect(s.activeVisualHighlight?.snippet).toBe("User data is encrypted at rest.");
     expect(s.activeVisualHighlight?.severity).toBe("citation");
   });
+
+  it("persists active workspace session to localStorage and clears it on clearSession", () => {
+    useAppStore.getState().setSession("sess_persist", [
+      { name: "contract.pdf", size: 1024, type: "application/pdf" },
+    ]);
+
+    const storedRaw = localStorage.getItem("veridocs-workspace-storage");
+    expect(storedRaw).toBeTruthy();
+    const stored = JSON.parse(storedRaw!);
+    expect(stored.state.sessionId).toBe("sess_persist");
+    expect(stored.state.files[0].name).toBe("contract.pdf");
+
+    useAppStore.getState().clearSession();
+    const clearedRaw = localStorage.getItem("veridocs-workspace-storage");
+    expect(clearedRaw).toBeTruthy();
+    const cleared = JSON.parse(clearedRaw!);
+    expect(cleared.state.sessionId).toBeNull();
+    expect(cleared.state.files).toEqual([]);
+  });
 });

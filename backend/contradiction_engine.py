@@ -96,29 +96,32 @@ Candidate conflict excerpts identified across the filings:
 
 TASK:
 For each candidate conflict:
-1. Verify whether this represents a true material contradiction or numerical discrepancy between Document A and Document B.
-2. Confirm or adjust the severity ("critical" for liability caps, indemnification, pricing, or payment terms; "warning" for notice periods, SLAs, or minor terms).
-3. Provide a clear, factual explanation of the discrepancy and a concise risk analysis.
-4. Calculate an overall alignment score (0.0 to 1.0) and write a 1-2 sentence executive summary.
+1. Verify whether this represents a true material contradiction, numerical discrepancy, altered term, or significant revision between Document A and Document B.
+2. Confirm or adjust the severity:
+   - "critical": conflicting obligations, altered liability caps, pricing, payment terms, or contradictory dates/tenure.
+   - "warning": modified metrics, altered descriptions, added/removed tools/certifications, or updated wording.
+3. Classify the conflict_type: "contradiction", "modification", or "numeric_mismatch".
+4. Provide a clear, factual explanation of how Document A and Document B differ, and a concise risk analysis.
+5. Calculate an overall alignment score (0.0 to 1.0) and write a 1-2 sentence executive summary of the verified differences and modifications.
 
 Return your audit as a valid JSON object matching this schema:
 {{
-  "alignment_score": 0.70,
-  "summary": "Brief 1-2 sentence executive summary of the verified conflicts.",
+  "alignment_score": 0.85,
+  "summary": "Brief 1-2 sentence executive summary of the verified differences and modifications.",
   "conflicts": [
     {{
       "topic": "Topic Name",
       "severity": "critical",
       "conflict_type": "contradiction",
-      "explanation": "Exact description of how Doc A and Doc B contradict each other.",
-      "risk_analysis": "Impact of this discrepancy.",
+      "explanation": "Exact description of how Document A and Document B differ.",
+      "risk_analysis": "Impact or significance of this discrepancy.",
       "doc_a": {{
         "page": 1,
         "snippet": "Exact quote from Document A",
         "section": "Section name"
       }},
       "doc_b": {{
-        "page": 2,
+        "page": 1,
         "snippet": "Exact quote from Document B",
         "section": "Section name"
       }}
@@ -127,8 +130,8 @@ Return your audit as a valid JSON object matching this schema:
 }}
 
 INSTRUCTIONS:
-1. If a candidate is not a genuine conflict, omit it from the "conflicts" list.
-2. If all candidates are resolved or non-conflicting, return an empty "conflicts" list and alignment_score 1.0.
+1. Distinguish between true contradictions and legitimate revisions/modifications. Include modified metrics and updated qualifications as "warning" modifications.
+2. Only omit a candidate if Document A and Document B say the exact same thing with no differences.
 3. Provide exact verbatim quotes in `snippet`.
 4. Return ONLY valid JSON.
 """
@@ -225,6 +228,7 @@ class ContradictionAuditCache:
     def compute_cache_key(doc_a_name: str, doc_b_name: str, doc_a_chunks: List[Dict], doc_b_chunks: List[Dict]) -> str:
         """Compute deterministic fingerprint of chunk contents and metadata."""
         hasher = hashlib.sha256()
+        hasher.update(b"v2.1||")
         hasher.update(doc_a_name.encode("utf-8"))
         hasher.update(doc_b_name.encode("utf-8"))
         for c in doc_a_chunks:
@@ -314,64 +318,76 @@ def _execute_llm_audit_prompt(llm_service: Any, prompt: str) -> str:
 
 
 def _deterministic_diff(doc_a_chunks: List[Dict], doc_b_chunks: List[Dict], doc_a_name: str, doc_b_name: str) -> AuditDiffReport:
-    """Compare numbers, dates, and common keywords between document chunks."""
+    """Compare numbers, dates, and common keywords between document chunks with high precision."""
     conflicts: List[AuditDiffItem] = []
     
-    # Match numbers, currencies, dates, years, grades, and metrics
+    # Match numbers, currencies, dates, years, grades, and metrics - strictly avoiding phone numbers
     num_pattern = re.compile(
         r'(\$\s?[\d,]+(?:\.\d+)?|\b\d+\s?%|\b\d+\s+(?:days?|months?|business days|years?)|'
         r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|'
-        r'\b\d{4}\s*[-–—]\s*\d{4}|\b(?:CGPA|GPA):?\s*[\d.]+|\b\d+(?:k|\+)?\s*(?:rows/s|tests|users|queries|qps)?)',
+        r'\b\d{4}\s*[-–—]\s*\d{4}|\b(?:CGPA|GPA):?\s*[\d.]+|\b\d+(?:\.\d+)?(?:k|m|\+)?\s*(?:rows/s|tests|users|queries|qps|records)?\b)',
         re.IGNORECASE
     )
-    
+
+    def _clean_num(n: str) -> str:
+        s = n.strip().lower()
+        if re.match(r'^(?:\+?91[\s-]?)?\d{10}$', s) or s in ('91', '+91'):
+            return ""
+        return s
+
     topics = [
-        ("Payment & Invoicing", ["payment", "invoice", "net", "payable", "fee", "penalty"]),
-        ("Limitation of Liability", ["liability", "indemnif", "damages", "cap", "aggregate"]),
-        ("Termination & Notice", ["termination", "notice", "cure", "terminate", "expire"]),
-        ("Confidentiality & Term", ["confidential", "non-disclosure", "term", "duration"]),
-        ("Warranty & SLA", ["warranty", "uptime", "sla", "service level", "guarantee"]),
-        ("Experience & Tenure", ["intern", "engineer", "developer", "experience", "lead", "manager", "role"]),
-        ("Education & Credentials", ["education", "degree", "university", "college", "cgpa", "gpa", "bachelor", "master"]),
-        ("System Metrics & Scale", ["throughput", "rows/s", "queries", "tests", "records", "benchmarks"])
+        ("Payment & Invoicing", [r"\bpayment\b", r"\binvoice\b", r"\bnet\s+\d+\b", r"\bpayable\b", r"\bfee\b", r"\bpenalty\b"]),
+        ("Limitation of Liability", [r"\bliability\b", r"\bindemnif\w*\b", r"\bdamages\b", r"\baggregate\s+liability\b", r"\bliability\s+cap\b"]),
+        ("Termination & Notice", [r"\btermination\b", r"\bnotice\s+period\b", r"\bcure\s+period\b", r"\bterminate\b", r"\bexpiration\b"]),
+        ("Confidentiality & Term", [r"\bconfidential\w*\b", r"\bnon-disclosure\b", r"\bduration\b"]),
+        ("Warranty & SLA", [r"\bwarranty\b", r"\buptime\b", r"\bsla\b", r"\bservice\s+level\b", r"\bguarantee\b"]),
+        ("Experience & Tenure", [r"\bintern\w*\b", r"\bengineer\b", r"\bdeveloper\b", r"\bexperience\b", r"\btenure\b"]),
+        ("Education & Credentials", [r"\beducation\b", r"\bdegree\b", r"\buniversity\b", r"\bcollege\b", r"\bcgpa\b", r"\bgpa\b", r"\bbachelor\b", r"\bmaster\b", r"\bcertificat\w*\b"]),
+        ("System Metrics & Scale", [r"\bthroughput\b", r"\brows/s\b", r"\bqueries\b", r"\btests\b", r"\brecords\b", r"\bbenchmarks\b", r"\bstreaming\b", r"\bdata\s+pipeline\b"])
     ]
     
     conflict_idx = 1
     
-    for topic_name, keywords in topics:
-        matched_a = []
-        matched_b = []
+    for topic_name, patterns in topics:
+        kw_regex = re.compile("|".join(patterns), re.IGNORECASE)
+        matched_a = [c for c in doc_a_chunks if kw_regex.search(c.get("text", ""))]
+        matched_b = [c for c in doc_b_chunks if kw_regex.search(c.get("text", ""))]
         
-        for c in doc_a_chunks:
-            text = c.get("text", "")
-            if any(k in text.lower() for k in keywords):
-                nums = num_pattern.findall(text)
-                matched_a.append((c, nums))
-                
-        for c in doc_b_chunks:
-            text = c.get("text", "")
-            if any(k in text.lower() for k in keywords):
-                nums = num_pattern.findall(text)
-                matched_b.append((c, nums))
-                
         if matched_a and matched_b:
-            chunk_a, nums_a = matched_a[0]
-            chunk_b, nums_b = matched_b[0]
-            
-            set_a = set(n.lower().strip() for n in nums_a)
-            set_b = set(n.lower().strip() for n in nums_b)
-            
-            if set_a != set_b and (set_a or set_b):
-                snippet_a = chunk_a.get("raw_text", chunk_a.get("text", ""))[:220].strip()
-                snippet_b = chunk_b.get("raw_text", chunk_b.get("text", ""))[:220].strip()
+            nums_a_all = set(filter(None, [_clean_num(n) for c in matched_a for n in num_pattern.findall(c.get("text", ""))]))
+            nums_b_all = set(filter(None, [_clean_num(n) for c in matched_b for n in num_pattern.findall(c.get("text", ""))]))
+
+            diff_numbers = nums_a_all ^ nums_b_all
+            if diff_numbers:
+                chunk_a = next(
+                    (c for c in matched_a if any(_clean_num(n) in diff_numbers for n in num_pattern.findall(c.get("text", "")))),
+                    matched_a[0]
+                )
+                chunk_b = next(
+                    (c for c in matched_b if any(_clean_num(n) in diff_numbers for n in num_pattern.findall(c.get("text", "")))),
+                    matched_b[0]
+                )
+
+                snippet_a = chunk_a.get("raw_text", chunk_a.get("text", ""))[:240].strip()
+                snippet_b = chunk_b.get("raw_text", chunk_b.get("text", ""))[:240].strip()
+
+                is_critical = any(k in topic_name.lower() for k in ("liability", "payment", "termination"))
                 
+                only_a = sorted(list(nums_a_all - nums_b_all))
+                only_b = sorted(list(nums_b_all - nums_a_all))
+
+                explanation = (
+                    f"Discrepancy detected in {topic_name}: {doc_a_name} specifies [{', '.join(only_a[:3]) or 'standard terms'}] "
+                    f"whereas {doc_b_name} specifies [{', '.join(only_b[:3]) or 'altered terms'}]."
+                )
+
                 conflicts.append(AuditDiffItem(
                     id=f"diff-{conflict_idx}",
                     topic=topic_name,
-                    severity="critical" if "liability" in topic_name.lower() or "payment" in topic_name.lower() else "warning",
-                    conflict_type="numeric_mismatch" if (set_a and set_b) else "modification",
-                    explanation=f"Discrepancy detected in {topic_name}: {doc_a_name} specifies {', '.join(set_a) or 'standard terms'} whereas {doc_b_name} specifies {', '.join(set_b) or 'altered terms'}.",
-                    risk_analysis=f"Alters commitments between parties for {topic_name.lower()}.",
+                    severity="critical" if is_critical else "warning",
+                    conflict_type="numeric_mismatch" if (only_a and only_b) else "modification",
+                    explanation=explanation,
+                    risk_analysis=f"Alters parameters or stated commitments between documents for {topic_name.lower()}.",
                     doc_a=ConflictSnippet(
                         filename=doc_a_name,
                         page=chunk_a.get("page", 1),
@@ -611,14 +627,30 @@ def run_cross_document_audit(
                     )
                 ))
 
-            crit_count = sum(1 for c in conflicts if c.severity == "critical")
-            warn_count = sum(1 for c in conflicts if c.severity != "critical")
+            # If the LLM returned 0 conflicts but deterministic diff found legitimate
+            # numerical or metric discrepancies, preserve the deterministic findings
+            # so the audit never falsely reports 0 differences when documents diverge.
+            if not conflicts and deterministic_report.conflicts:
+                logger.info(f"LLM returned 0 conflicts; preserving {len(deterministic_report.conflicts)} deterministic discrepancies.")
+                conflicts = deterministic_report.conflicts
+                crit_count = deterministic_report.critical_count
+                warn_count = deterministic_report.warning_count
+                alignment_score = deterministic_report.alignment_score
+                summary = (
+                    f"Comparative forensic analysis identified {len(conflicts)} metric and clause discrepancies "
+                    f"between {doc_a_name} and {doc_b_name}."
+                )
+            else:
+                crit_count = sum(1 for c in conflicts if c.severity == "critical")
+                warn_count = sum(1 for c in conflicts if c.severity != "critical")
+                alignment_score = float(parsed.get("alignment_score", 0.75 if conflicts else 1.0))
+                summary = parsed.get("summary", f"Identified {len(conflicts)} discrepancies between documents." if conflicts else f"No material discrepancies identified between {doc_a_name} and {doc_b_name}.")
 
             final_report = AuditDiffReport(
                 doc_a_name=doc_a_name,
                 doc_b_name=doc_b_name,
-                alignment_score=float(parsed.get("alignment_score", 0.75)),
-                summary=parsed.get("summary", f"Identified {len(conflicts)} discrepancies between documents."),
+                alignment_score=alignment_score,
+                summary=summary,
                 critical_count=crit_count,
                 warning_count=warn_count,
                 conflicts=conflicts

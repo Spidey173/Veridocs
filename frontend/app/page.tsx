@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -9,11 +10,65 @@ import {
   Zap,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
+import { getSessionInfo } from "@/lib/api";
 import DropZone from "@/components/upload/DropZone";
 import WorkspaceLayout from "@/components/workspace/WorkspaceLayout";
 
 export default function Home() {
-  const { sessionId } = useAppStore();
+  const { sessionId, setSession, clearSession } = useAppStore();
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  useEffect(() => {
+    setHasHydrated(true);
+
+    const params = new URLSearchParams(window.location.search);
+    const urlSession = params.get("session");
+
+    if (!sessionId && urlSession) {
+      if (urlSession === "demo-session") {
+        setSession("demo-session", [
+          { name: "SaaS_Agreement_Executed.pdf", size: 1024 * 1024, type: "application/pdf" },
+          { name: "SaaS_Agreement_Amended.pdf", size: 1024 * 1024, type: "application/pdf" },
+        ]);
+      } else {
+        getSessionInfo(urlSession)
+          .then((info) => {
+            const restoredFiles = (info.file_names || []).map((name) => ({
+              name,
+              size: 0,
+              type: "application/pdf",
+            }));
+            setSession(urlSession, restoredFiles);
+          })
+          .catch((err) => {
+            console.warn("Session in URL not found on server:", err);
+            clearSession();
+          });
+      }
+    } else if (sessionId) {
+      if (params.get("session") !== sessionId) {
+        window.history.replaceState(null, "", `/?session=${encodeURIComponent(sessionId)}`);
+      }
+      if (sessionId !== "demo-session") {
+        getSessionInfo(sessionId).catch((err) => {
+          if (err?.message?.includes("404") || err?.message?.includes("Failed to fetch session")) {
+            console.warn("Persisted session expired on server:", sessionId);
+            clearSession();
+          }
+        });
+      }
+    }
+  }, [sessionId, setSession, clearSession]);
+
+  if (!hasHydrated) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-midnight-950">
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-accent-primary to-accent-secondary flex items-center justify-center shadow-xl shadow-accent-primary/20 animate-pulse">
+          <Sparkles className="w-5 h-5 text-white" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <AnimatePresence mode="wait">
