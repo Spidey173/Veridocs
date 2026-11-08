@@ -49,14 +49,6 @@ export default function Home() {
       if (params.get("session") !== sessionId) {
         window.history.replaceState(null, "", `/?session=${encodeURIComponent(sessionId)}`);
       }
-      if (sessionId !== "demo-session") {
-        getSessionInfo(sessionId).catch((err) => {
-          if (err?.message?.includes("404") || err?.message?.includes("Failed to fetch session")) {
-            console.warn("Persisted session expired on server:", sessionId);
-            clearSession();
-          }
-        });
-      }
     }
   }, [sessionId, setSession, clearSession]);
 

@@ -3,8 +3,33 @@ import { test, expect } from "@playwright/test";
 test.describe("AI Workspace & Interactive Chat Flow", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    // Navigate into the demo workspace
-    await page.getByRole("button", { name: /Launch Interactive Demo Workspace/i }).click();
+    await page.waitForFunction(() => (window as any).__VERIDOCS_STORE__ !== undefined);
+
+    await page.evaluate(() => {
+      const store = (window as any).__VERIDOCS_STORE__;
+      store.getState().setSession("test-workspace-chat", [
+        { name: "SaaS_Agreement_2024_v1.pdf", size: 2150000, type: "application/pdf" },
+        { name: "SaaS_Agreement_2025_Amended.pdf", size: 2280000, type: "application/pdf" },
+        { name: "Veridocs_Technical_Architecture.pdf", size: 2450000, type: "application/pdf" },
+      ]);
+      store.getState().addMessage({
+        id: "initial-assistant-msg",
+        role: "assistant",
+        content: "Welcome to Veridocs Forensic Intelligence Studio",
+        citations: [
+          {
+            citation_id: 1,
+            page: 1,
+            source_file: "SaaS_Agreement_2024_v1.pdf",
+            highlighted_text: "Invoices are payable within 30 days of receipt.",
+            confidence: 0.98,
+          },
+        ],
+        confidence_score: 0.96,
+        timestamp: new Date(),
+      });
+    });
+
     await expect(page.getByRole("button", { name: /New (Workspace|Session)/i })).toBeVisible();
   });
 
@@ -23,6 +48,19 @@ test.describe("AI Workspace & Interactive Chat Flow", () => {
   });
 
   test("submits user query and receives grounded AI answer", async ({ page }) => {
+    // Intercept SSE streaming query to provide deterministic grounded response
+    await page.route("**/api/query/stream", async (route) => {
+      const sseBody = [
+        "event: token\ndata: {\"text\":\"Payment Settlement Window:\\n- 2024: Invoices payable within 30 days.\\n- 2025: Extended to 60 calendar days.\"}\n\n",
+        "event: done\ndata: {}\n\n",
+      ].join("");
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: sseBody,
+      });
+    });
+
     const chatInput = page.locator("#chat-input");
     const sendButton = page.locator("#send-button");
 

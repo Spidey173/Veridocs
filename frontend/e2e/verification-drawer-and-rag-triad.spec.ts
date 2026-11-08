@@ -3,7 +3,49 @@ import { test, expect } from "@playwright/test";
 test.describe("Verification Drawer & RAG Triad Telemetry", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: /Launch Interactive Demo Workspace/i }).click();
+    await page.waitForFunction(() => (window as any).__VERIDOCS_STORE__ !== undefined);
+
+    await page.evaluate(() => {
+      const store = (window as any).__VERIDOCS_STORE__;
+      store.getState().setSession("test-verification-session", [
+        { name: "SaaS_Agreement_2024_v1.pdf", size: 2150000, type: "application/pdf" },
+      ]);
+      store.getState().addMessage({
+        id: "msg-with-rag-triad",
+        role: "assistant",
+        content: "Here is the verified contractual analysis with grounding.",
+        confidence_score: 0.95,
+        rag_triad: {
+          context_relevance: 0.95,
+          groundedness: 0.97,
+          answer_relevance: 0.96,
+          numeric_accuracy: 1.0,
+          latency_ms: 185.0,
+          retrieval_pipeline: "Hybrid Full-Text + pgvector HNSW + Cross-Encoder RRF",
+        },
+        citations: [
+          {
+            citation_id: 1,
+            page: 1,
+            source_file: "SaaS_Agreement_2024_v1.pdf",
+            highlighted_text: "Invoices are payable within 30 days of receipt.",
+            confidence: 0.98,
+          },
+        ],
+        claim_verifications: [
+          {
+            claim: "Payment is required within 30 days.",
+            score: 0.98,
+            status: "verified",
+            is_supported: true,
+            numeric_grounded: true,
+            best_source_page: 1,
+            source_file: "SaaS_Agreement_2024_v1.pdf",
+          },
+        ],
+        timestamp: new Date(),
+      });
+    });
   });
 
   test("expands verification drawer on assistant message", async ({ page }) => {

@@ -32,23 +32,27 @@ test.describe("Landing Screen & Navigation", () => {
     await expect(fileInput).toBeAttached();
   });
 
-  test("transitions into workspace on demo launch and resets on new session", async ({ page }) => {
-    // 1. Click 'Launch Interactive Demo Workspace'
-    const demoButton = page.getByRole("button", { name: /Launch Interactive Demo Workspace/i });
-    await expect(demoButton).toBeVisible();
-    await demoButton.click();
+  test("transitions into workspace on session activation and resets on new workspace", async ({ page }) => {
+    await page.waitForFunction(() => (window as any).__VERIDOCS_STORE__ !== undefined);
 
-    // 2. Verify workspace loads
+    await page.evaluate(() => {
+      const store = (window as any).__VERIDOCS_STORE__;
+      store.getState().setSession("test-workspace-session", [
+        { name: "test_agreement.pdf", size: 1024, type: "application/pdf" },
+      ]);
+    });
+
+    // Verify workspace loads
     const newWorkspaceBtn = page.getByRole("button", { name: /New (Workspace|Session)/i });
     await expect(newWorkspaceBtn).toBeVisible();
     await expect(page.getByRole("button", { name: /Chat & Evidence/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Contradiction Matrix/i })).toBeVisible();
 
-    // 3. Click 'New Workspace' to return to landing view
+    // Click 'New Workspace' to return to landing view
     await newWorkspaceBtn.click();
 
-    // 4. Verify landing screen is restored
+    // Verify landing screen is restored
     await expect(page.getByText("Document Intelligence")).toBeVisible();
-    await expect(demoButton).toBeVisible();
+    await expect(page.getByText("Drop documents or click to browse")).toBeVisible();
   });
 });
