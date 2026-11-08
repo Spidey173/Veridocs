@@ -317,20 +317,38 @@ export default function PDFViewer() {
       const page = await pdfDoc.getPage(currentPage);
       const viewport = page.getViewport({ scale: pdfScale * 1.5 });
       const canvas = canvasRef.current;
-      const context = canvas.getContext("2d");
+      const context = canvas.getContext("2d", { alpha: false });
 
       if (!context) return;
 
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
+      // High-DPI / Retina super-sampling (renders at physical pixel grid for razor-sharp clarity)
+      const outputScale =
+        typeof window !== "undefined"
+          ? Math.min(Math.max(window.devicePixelRatio || 1, 2), 3)
+          : 2;
+
+      const displayWidth = Math.floor(viewport.width);
+      const displayHeight = Math.floor(viewport.height);
+
+      canvas.width = Math.floor(viewport.width * outputScale);
+      canvas.height = Math.floor(viewport.height * outputScale);
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
+
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
 
       currentPageObjRef.current = page;
       currentViewportRef.current = viewport;
 
+      const transform =
+        outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
+
       const renderTask = page.render({
         canvasContext: context,
-        viewport,
         canvas,
+        viewport,
+        transform,
       });
       renderTaskRef.current = renderTask;
 
@@ -361,6 +379,19 @@ export default function PDFViewer() {
   useEffect(() => {
     renderPage();
   }, [pdfDoc, currentPage, pdfScale, renderPage]);
+
+  // Re-render when devicePixelRatio changes (e.g. moving window between Retina & external display)
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    const handleDprChange = () => {
+      renderPage();
+    };
+    mq.addEventListener?.("change", handleDprChange);
+    return () => {
+      mq.removeEventListener?.("change", handleDprChange);
+    };
+  }, [renderPage]);
 
   // Trigger bounding box recomputation when active highlight changes
   useEffect(() => {
@@ -497,8 +528,11 @@ export default function PDFViewer() {
             <>
               <canvas
                 ref={canvasRef}
-                className="shadow-2xl rounded-sm"
-                style={{ background: "white" }}
+                className="shadow-2xl rounded-sm block"
+                style={{
+                  background: "white",
+                  imageRendering: "auto",
+                }}
               />
 
               {/* Pixel-Level Bounding Box Highlights & Floating Badge */}
@@ -594,8 +628,8 @@ export default function PDFViewer() {
           ) : isLoadingDoc && sessionId !== "demo-session" ? (
             <div
               style={{
-                width: `${560 * pdfScale}px`,
-                minHeight: `${780 * pdfScale}px`,
+                width: `${Math.floor(612 * pdfScale * 1.5)}px`,
+                minHeight: `${Math.floor(792 * pdfScale * 1.5)}px`,
               }}
               className="bg-midnight-900/60 border border-white/10 rounded-2xl flex flex-col items-center justify-center p-8 backdrop-blur-xl shadow-2xl select-none"
             >
@@ -614,9 +648,9 @@ export default function PDFViewer() {
             /* Interactive Demo Document with Pixel-Level Bounding Box Simulation */
             <div
               style={{
-                width: `${580 * pdfScale}px`,
-                minHeight: `${800 * pdfScale}px`,
-                fontSize: `${13 * pdfScale}px`,
+                width: `${Math.floor(612 * pdfScale * 1.5)}px`,
+                minHeight: `${Math.floor(792 * pdfScale * 1.5)}px`,
+                fontSize: `${13 * pdfScale * 1.5}px`,
               }}
               className="bg-white text-gray-900 shadow-2xl rounded-md p-8 sm:p-12 transition-all border border-gray-200 relative select-text"
             >
