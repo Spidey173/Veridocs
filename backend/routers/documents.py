@@ -249,8 +249,8 @@ async def upload_documents(
             file_names=file_names,
             doc_metadata=doc_metadata,
             owner_id=current_user.user_id,
-            chunks=new_chunks,
-            embeddings=new_embeddings,
+            chunks=all_chunks,
+            embeddings=embeddings,
             insights=existing_insights,
         )
 

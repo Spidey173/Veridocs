@@ -152,7 +152,8 @@ def persist_session_snapshot(
         session_dir = Path(settings.UPLOAD_DIR) / "sessions" / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         session_meta_file = session_dir / "session.json"
-        with open(session_meta_file, "w", encoding="utf-8") as f:
+        tmp_meta_file = session_dir / f"session_{uuid.uuid4().hex[:8]}.tmp"
+        with open(tmp_meta_file, "w", encoding="utf-8") as f:
             json.dump({
                 "session_id": session_id,
                 "owner_id": owner_id,
@@ -162,17 +163,24 @@ def persist_session_snapshot(
                 "insights": insights or {},
                 "created_at": time.time(),
             }, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_meta_file, session_meta_file)
 
         if chunks is not None:
             chunks_file = session_dir / "chunks.json"
+            tmp_chunks_file = session_dir / f"chunks_{uuid.uuid4().hex[:8]}.tmp"
             clean_chunks = []
             for c in chunks:
                 chk = dict(c)
                 if "embedding" in chk:
                     chk.pop("embedding")
                 clean_chunks.append(chk)
-            with open(chunks_file, "w", encoding="utf-8") as f:
+            with open(tmp_chunks_file, "w", encoding="utf-8") as f:
                 json.dump(clean_chunks, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_chunks_file, chunks_file)
 
         if embeddings is not None:
             embeddings_file = session_dir / "embeddings.npy"
@@ -220,8 +228,12 @@ async def _get_session(session_id: str, current_user: UserContext) -> Dict[str, 
             embeddings_file = session_dir / "embeddings.npy"
 
             if session_dir.exists() and session_meta_file.exists():
-                with open(session_meta_file, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
+                try:
+                    with open(session_meta_file, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                except Exception as me:
+                    logger.warning(f"Error reading {session_meta_file}: {me}")
+                    meta = {}
 
                 chunks = []
                 if chunks_file.exists():

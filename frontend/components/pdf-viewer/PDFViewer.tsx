@@ -411,9 +411,20 @@ export default function PDFViewer() {
     }
   };
 
-  const zoomIn = () => setPdfScale(Math.min(pdfScale + 0.1, 1.5));
-  const zoomOut = () => setPdfScale(Math.max(pdfScale - 0.1, 0.3));
-  const fitWidth = () => setPdfScale(0.6);
+  const zoomIn = () => setPdfScale(Number(Math.min(pdfScale + 0.1, 2.0).toFixed(2)));
+  const zoomOut = () => setPdfScale(Number(Math.max(pdfScale - 0.1, 0.3).toFixed(2)));
+  const fitWidth = () => {
+    if (containerRef.current && currentViewportRef.current && pdfScale > 0) {
+      const containerWidth = containerRef.current.clientWidth - 48;
+      const unscaledWidth = currentViewportRef.current.width / (pdfScale * 1.5);
+      if (unscaledWidth > 0) {
+        const idealScale = Math.max(0.4, Math.min(1.5, containerWidth / (unscaledWidth * 1.5)));
+        setPdfScale(Number(idealScale.toFixed(2)));
+        return;
+      }
+    }
+    setPdfScale(0.85);
+  };
 
   if (!sessionId) return null;
 

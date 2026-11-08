@@ -317,15 +317,23 @@ def _deterministic_diff(doc_a_chunks: List[Dict], doc_b_chunks: List[Dict], doc_
     """Compare numbers, dates, and common keywords between document chunks."""
     conflicts: List[AuditDiffItem] = []
     
-    # Match numbers, currencies, and dates
-    num_pattern = re.compile(r'(\$\s?[\d,]+(?:\.\d+)?|\b\d+\s?%|\b\d+\s+(?:days?|months?|business days|years?))', re.IGNORECASE)
+    # Match numbers, currencies, dates, years, grades, and metrics
+    num_pattern = re.compile(
+        r'(\$\s?[\d,]+(?:\.\d+)?|\b\d+\s?%|\b\d+\s+(?:days?|months?|business days|years?)|'
+        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|'
+        r'\b\d{4}\s*[-–—]\s*\d{4}|\b(?:CGPA|GPA):?\s*[\d.]+|\b\d+(?:k|\+)?\s*(?:rows/s|tests|users|queries|qps)?)',
+        re.IGNORECASE
+    )
     
     topics = [
         ("Payment & Invoicing", ["payment", "invoice", "net", "payable", "fee", "penalty"]),
         ("Limitation of Liability", ["liability", "indemnif", "damages", "cap", "aggregate"]),
         ("Termination & Notice", ["termination", "notice", "cure", "terminate", "expire"]),
         ("Confidentiality & Term", ["confidential", "non-disclosure", "term", "duration"]),
-        ("Warranty & SLA", ["warranty", "uptime", "sla", "service level", "guarantee"])
+        ("Warranty & SLA", ["warranty", "uptime", "sla", "service level", "guarantee"]),
+        ("Experience & Tenure", ["intern", "engineer", "developer", "experience", "lead", "manager", "role"]),
+        ("Education & Credentials", ["education", "degree", "university", "college", "cgpa", "gpa", "bachelor", "master"]),
+        ("System Metrics & Scale", ["throughput", "rows/s", "queries", "tests", "records", "benchmarks"])
     ]
     
     conflict_idx = 1
@@ -493,12 +501,15 @@ def run_cross_document_audit(
     # 3. Phase 1: High-precision deterministic conflict candidate extraction
     deterministic_report = _deterministic_diff(doc_a_chunks, doc_b_chunks, doc_a_name, doc_b_name)
 
-    # If hybrid mode and zero candidate conflicts detected, short-circuit (100% token savings!)
+    # If hybrid mode and zero candidate conflicts detected, short-circuit if documents are identical
     if audit_mode == "hybrid" and len(deterministic_report.conflicts) == 0:
-        logger.info(f"Phase 1 deterministic audit found 0 conflicts between {doc_a_name} and {doc_b_name}. Short-circuiting LLM call (0 tokens consumed).")
-        if cache_enabled:
-            _audit_cache.set(cache_key, deterministic_report)
-        return deterministic_report
+        text_a = " ".join(c.get("text", "") for c in doc_a_chunks).strip()
+        text_b = " ".join(c.get("text", "") for c in doc_b_chunks).strip()
+        if text_a == text_b:
+            logger.info(f"Phase 1 deterministic audit found identical content between {doc_a_name} and {doc_b_name}. Short-circuiting LLM call (0 tokens consumed).")
+            if cache_enabled:
+                _audit_cache.set(cache_key, deterministic_report)
+            return deterministic_report
 
     # 4. Phase 2: Targeted LLM verification (drastically slashes token consumption by 85-90%)
     if audit_mode == "hybrid" and deterministic_report.conflicts:

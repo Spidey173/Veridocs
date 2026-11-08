@@ -41,7 +41,7 @@ fi
 
 # Start Backend (exclude uploads/ and sessions/ from hot-reloader to avoid choking event loop)
 echo "Starting FastAPI backend on http://localhost:8000..."
-(cd "$ROOT_DIR/backend" && "$VENV_PYTHON" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude "uploads/*" --reload-exclude "*.npy" --reload-exclude "*.json") &
+(cd "$ROOT_DIR/backend" && "$VENV_PYTHON" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude "uploads" --reload-exclude "uploads/*" --reload-exclude "uploads/**" --reload-exclude "*.npy" --reload-exclude "*.json") &
 BACKEND_PID=$!
 
 # Start Frontend with Turbopack for instant builds and sub-millisecond route transitions
