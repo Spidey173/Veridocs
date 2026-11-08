@@ -269,8 +269,9 @@ class FastEmbeddingWrapper:
             model_name = "sentence-transformers/all-MiniLM-L6-v2"
         logger.info(f"Loading embedding model: {model_name}")
         from fastembed import TextEmbedding
+        threads = min(4, max(1, os.cpu_count() or 1))
         try:
-            self._model = TextEmbedding(model_name=model_name, threads=1)
+            self._model = TextEmbedding(model_name=model_name, threads=threads)
         except TypeError:
             self._model = TextEmbedding(model_name=model_name)
 
@@ -346,8 +347,9 @@ class ModelRegistry:
                         except ImportError:
                             from fastembed import TextCrossEncoder
                         logger.info(f"Loading reranker model: {settings.RERANKER_MODEL}")
+                        threads = min(4, max(1, os.cpu_count() or 1))
                         try:
-                            self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL, threads=1)
+                            self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL, threads=threads)
                         except TypeError:
                             self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL)
                     except Exception as e:

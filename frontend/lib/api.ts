@@ -240,7 +240,8 @@ export async function uploadDocuments(
       }
     };
 
-    xhr.ontimeout = () => reject(new Error("Upload request timed out"));
+    xhr.timeout = 180000; // 3-minute timeout for large documents / multi-page filings
+    xhr.ontimeout = () => reject(new Error("Upload request timed out after 3 minutes"));
     xhr.onerror = () => reject(new Error("Network error during upload (is backend running?)"));
     xhr.open("POST", `${apiBase}/api/upload`);
     if (token) {
