@@ -349,7 +349,10 @@ async def get_document_insights(
 
     try:
         chunks = [c for c in session_data.get("chunks", []) if c.get("source_file") == document_name]
-        llm = FreeLLMService(provider=settings.LLM_PROVIDER)
+        try:
+            llm = FreeLLMService(provider=settings.LLM_PROVIDER)
+        except Exception:
+            llm = None
         matching_meta = next((m for m in session_data.get("metadata", []) if m.get("filename") == document_name), {})
         total_pages = matching_meta.get("num_pages", 0)
 
@@ -364,7 +367,14 @@ async def get_document_insights(
         return insights.model_dump() if hasattr(insights, 'model_dump') else insights.dict()
     except Exception as e:
         logger.error(f"Insights generation failed for {document_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate insights for {document_name}")
+        # Always return a valid fallback DocumentInsights structure rather than crashing with 500
+        fallback = generate_document_insights(
+            session_id=session_id,
+            chunks=[c for c in session_data.get("chunks", []) if c.get("source_file") == document_name],
+            llm_service=None,
+            total_pages=0
+        )
+        return fallback.model_dump() if hasattr(fallback, 'model_dump') else fallback.dict()
 
 
 @router.get("/api/sessions/{session_id}")
