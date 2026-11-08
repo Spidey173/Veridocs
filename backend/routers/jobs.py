@@ -10,7 +10,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, Form, Query, BackgroundTasks
 
 from config import get_settings
-from auth import get_current_user, UserContext
+from auth import get_current_user, UserContext, assert_resource_ownership
 from models import JobResponse, JobDetailResponse, JobListResponse, JobProgress, JobStatus
 from job_tracker import get_job_tracker
 from tasks import dispatch_document_job
@@ -133,8 +133,12 @@ async def get_job_status(
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
 
-    if job.get("owner_id") != current_user.user_id and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Access denied: You do not have permission to view this job.")
+    assert_resource_ownership(
+        resource_owner_id=job.get("owner_id"),
+        current_user=current_user,
+        resource_type="job",
+        action="view"
+    )
 
     session_id = job.get("session_id")
     if session_id and session_id not in sessions:
@@ -199,8 +203,12 @@ async def delete_or_cancel_job(
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
 
-    if job.get("owner_id") != current_user.user_id and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Access denied: Cannot delete jobs owned by other users.")
+    assert_resource_ownership(
+        resource_owner_id=job.get("owner_id"),
+        current_user=current_user,
+        resource_type="job",
+        action="delete"
+    )
 
     for p in job.get("file_paths", []):
         try:

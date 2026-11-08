@@ -642,6 +642,7 @@ To get real AI-powered answers, hybrid vector search, and citations for **${docN
   }, [
     input,
     sessionId,
+    files,
     isQuerying,
     messages,
     selectedFileNames,

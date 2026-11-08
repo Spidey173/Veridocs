@@ -274,3 +274,37 @@ async def require_admin_or_maintenance(
             detail="Access denied: Administrator privileges required."
         )
     return user
+
+
+def assert_resource_ownership(
+    resource_owner_id: Optional[str],
+    current_user: UserContext,
+    resource_type: str = "resource",
+    action: str = "access"
+) -> None:
+    """
+    Centralized Anti-IDOR Authorization Gate.
+    Verifies that the resource owner matches the authenticated user, or that the user is an admin.
+    In development/demo mode, permits matching demo user tokens.
+    """
+    if not resource_owner_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access denied: {resource_type.capitalize()} ownership is missing or unverified."
+        )
+
+    settings = get_settings()
+    is_demo_match = (
+        settings.ENVIRONMENT != "production"
+        and settings.AUTH_MODE != "gateway"
+        and str(resource_owner_id).startswith("demo_usr")
+        and str(current_user.user_id).startswith("demo_usr")
+    )
+
+    if resource_owner_id != current_user.user_id and current_user.role != "admin" and not is_demo_match:
+        if action == "delete":
+            detail = f"Access denied: Cannot delete {resource_type}s owned by other users."
+        else:
+            detail = f"Access denied: You do not have permission to {action} this {resource_type}."
+        raise HTTPException(status_code=403, detail=detail)
+

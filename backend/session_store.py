@@ -9,14 +9,13 @@ import shutil
 import asyncio
 import logging
 import threading
-import concurrent.futures
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple
 import numpy as np
 from fastapi import HTTPException
 
 from config import get_settings
-from auth import UserContext
+from auth import UserContext, assert_resource_ownership
 import database
 from llm_service import FreeLLMService
 from insights_engine import generate_document_insights
@@ -259,25 +258,12 @@ async def _get_session(session_id: str, current_user: UserContext) -> Dict[str, 
             detail="Session not found or expired. Please upload documents again."
         )
 
-    owner_id = session_data.get("owner_id")
-    if not owner_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Access denied: Session ownership is missing or unverified."
-        )
-
-    # In development mode, allow access if both are demo users; otherwise require exact user match or admin
-    is_demo_match = (
-        settings.ENVIRONMENT != "production"
-        and settings.AUTH_MODE != "gateway"
-        and str(owner_id).startswith("demo_usr")
-        and str(current_user.user_id).startswith("demo_usr")
+    assert_resource_ownership(
+        resource_owner_id=session_data.get("owner_id"),
+        current_user=current_user,
+        resource_type="session",
+        action="access"
     )
-    if owner_id != current_user.user_id and current_user.role != "admin" and not is_demo_match:
-        raise HTTPException(
-            status_code=403,
-            detail="Access denied: You do not have permission to access this session."
-        )
 
     return session_data
 

@@ -29,7 +29,6 @@ from session_store import (
     _get_session,
     _safe_delete_file,
     _cleanup_session,
-    _persist_session_background,
     persist_session_snapshot,
 )
 
