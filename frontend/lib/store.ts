@@ -155,7 +155,7 @@ export const useAppStore = create<AppState>((set) => ({
   activeDiffReport: null,
   isAuditingDiff: false,
   activeWorkspaceTab: "chat",
-  pdfScale: 1.0,
+  pdfScale: 0.6,
   localFileUrls: {},
 
   // Workspace Context Defaults
@@ -219,6 +219,7 @@ export const useAppStore = create<AppState>((set) => ({
         selectedFileNames: [],
         docViewStates: {},
         localFileUrls: {},
+        pdfScale: 0.6,
       };
     }),
 
@@ -342,7 +343,7 @@ export const useAppStore = create<AppState>((set) => ({
   setPdfScale: (scale) =>
     set((state) => {
       if (state.activeDocumentName) {
-        const currentViewState = state.docViewStates[state.activeDocumentName] || { page: state.currentPage, scale: 1.0 };
+        const currentViewState = state.docViewStates[state.activeDocumentName] || { page: state.currentPage, scale: 0.6 };
         return {
           pdfScale: scale,
           docViewStates: {
@@ -358,7 +359,7 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveDocument: (fileName) =>
     set((state) => {
       if (!fileName) return { activeDocumentName: null };
-      const docState = state.docViewStates[fileName] || { page: 1, scale: 1.0 };
+      const docState = state.docViewStates[fileName] || { page: 1, scale: 0.6 };
       return {
         activeDocumentName: fileName,
         currentPage: docState.page,

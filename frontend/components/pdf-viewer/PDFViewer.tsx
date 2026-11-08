@@ -106,7 +106,7 @@ export default function PDFViewer() {
       if (e.ctrlKey) {
         e.preventDefault();
         const delta = -e.deltaY * 0.005;
-        const nextScale = Math.min(Math.max(scaleRef.current + delta, 0.5), 1.5);
+        const nextScale = Math.min(Math.max(scaleRef.current + delta, 0.3), 1.5);
         setPdfScale(nextScale);
       }
     };
@@ -381,8 +381,8 @@ export default function PDFViewer() {
   };
 
   const zoomIn = () => setPdfScale(Math.min(pdfScale + 0.1, 1.5));
-  const zoomOut = () => setPdfScale(Math.max(pdfScale - 0.1, 0.5));
-  const fitWidth = () => setPdfScale(1.0);
+  const zoomOut = () => setPdfScale(Math.max(pdfScale - 0.1, 0.3));
+  const fitWidth = () => setPdfScale(0.6);
 
   if (!sessionId) return null;
 

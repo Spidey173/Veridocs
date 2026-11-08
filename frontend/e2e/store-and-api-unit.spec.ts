@@ -27,7 +27,7 @@ test.describe("Frontend State Store & API Unit Specifications", () => {
     expect(initialState.filesCount).toBe(0);
     expect(initialState.messagesCount).toBe(0);
     expect(initialState.currentPage).toBe(1);
-    expect(initialState.pdfScale).toBe(1.0);
+    expect(initialState.pdfScale).toBe(0.6);
     expect(initialState.activeDoc).toBeNull();
     expect(initialState.leftSidebarCollapsed).toBe(false);
     expect(initialState.activeTab).toBe("chat");

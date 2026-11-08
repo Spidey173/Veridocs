@@ -16,7 +16,7 @@ describe("useAppStore Unit Test Suite (Headless Vitest)", () => {
     expect(s.files).toEqual([]);
     expect(s.messages).toEqual([]);
     expect(s.currentPage).toBe(1);
-    expect(s.pdfScale).toBe(1.0);
+    expect(s.pdfScale).toBe(0.6);
     expect(s.activeDocumentName).toBeNull();
   });
 
