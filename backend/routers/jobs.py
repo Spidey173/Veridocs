@@ -15,7 +15,7 @@ from models import JobResponse, JobDetailResponse, JobListResponse, JobProgress,
 from job_tracker import get_job_tracker
 from tasks import dispatch_document_job
 from rate_limiter import enforce_rate_limit
-from session_store import sessions, _get_session, _safe_delete_file
+from session_store import sessions, _get_session, _safe_delete_file, save_upload_file_stream
 
 logger = logging.getLogger(__name__)
 
@@ -56,20 +56,12 @@ async def submit_async_document_job(
             # Stream directly to disk in 1MB chunks to avoid memory spikes
             max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
             session_file_id = str(uuid.uuid4())
-            save_path = Path(settings.UPLOAD_DIR) / f"{session_file_id}{ext}"
-            total_read = 0
-            file_too_large = False
-
-            with open(save_path, "wb") as out_f:
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    total_read += len(chunk)
-                    if total_read > max_bytes:
-                        file_too_large = True
-                        break
-                    out_f.write(chunk)
+            save_path, total_read, file_too_large = await save_upload_file_stream(
+                file=file,
+                max_bytes=max_bytes,
+                session_file_id=session_file_id,
+                ext=ext,
+            )
 
             if file_too_large:
                 failed_files.append(f"{filename} (exceeds {settings.MAX_FILE_SIZE_MB}MB limit)")

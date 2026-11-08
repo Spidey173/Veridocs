@@ -9,10 +9,11 @@ import shutil
 import asyncio
 import logging
 import threading
+import concurrent.futures
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Tuple
 import numpy as np
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
 from config import get_settings
 from auth import UserContext, assert_resource_ownership
@@ -47,6 +48,35 @@ def _safe_delete_file(file_path: Union[str, Path]) -> bool:
     except Exception as e:
         logger.warning(f"Error during safe deletion of {file_path}: {e}")
     return False
+
+
+async def save_upload_file_stream(
+    file: UploadFile,
+    max_bytes: int,
+    session_file_id: str,
+    ext: str,
+) -> Tuple[Path, int, bool]:
+    """
+    Stream-writes an UploadFile directly to disk in 1MB chunks to ensure O(1) memory usage.
+    Returns: (save_path, total_bytes_read, file_too_large)
+    """
+    settings = get_settings()
+    save_path = Path(settings.UPLOAD_DIR) / f"{session_file_id}{ext}"
+    total_read = 0
+    file_too_large = False
+
+    with open(save_path, "wb") as out_f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total_read += len(chunk)
+            if total_read > max_bytes:
+                file_too_large = True
+                break
+            out_f.write(chunk)
+
+    return save_path, total_read, file_too_large
 
 
 def _generate_insights_background(

@@ -46,6 +46,27 @@ from routers.query import _generate_followups, _sse_event
 # Aliases for existing test fixtures
 _rate_limiter = _http_rate_limiter
 
+__all__ = [
+    "app",
+    "sessions",
+    "_sessions_lock",
+    "_get_session",
+    "_safe_delete_file",
+    "_persist_session_background",
+    "_generate_insights_background",
+    "_cleanup_session",
+    "cleanup_expired_sessions",
+    "_retention_cleanup_loop",
+    "_validate_question",
+    "_http_rate_limiter",
+    "_rate_limiter",
+    "InMemoryRateLimiter",
+    "HttpRateLimiter",
+    "enforce_rate_limit",
+    "_generate_followups",
+    "_sse_event",
+]
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
