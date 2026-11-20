@@ -12,8 +12,8 @@ import {
   HelpCircle,
   Activity,
   Gauge,
+  AlertOctagon,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import type { CitationInfo, ClaimVerificationItem, RagTriadMetrics } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
 
@@ -34,7 +34,11 @@ export default function VerificationDrawer({
   const [activeTab, setActiveTab] = useState<"claims" | "triad" | "citations">("claims");
   const { highlightCitation, setCurrentPage } = useAppStore();
 
-  if ((!citations || citations.length === 0) && (!claimVerifications || claimVerifications.length === 0) && !ragTriad) {
+  if (
+    (!citations || citations.length === 0) &&
+    (!claimVerifications || claimVerifications.length === 0) &&
+    !ragTriad
+  ) {
     return null;
   }
 
@@ -43,46 +47,45 @@ export default function VerificationDrawer({
   const hallucinatedCount = claimVerifications.filter((c) => c.status === "hallucinated").length;
 
   return (
-    <div className="mt-3 border border-white/10 rounded-xl bg-white/[0.02] overflow-hidden select-none backdrop-blur-sm shadow-sm">
+    <div className="mt-2.5 border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-surface)] overflow-hidden select-none">
       {/* Header Summary Trigger */}
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-3 hover:bg-white/[0.04] transition-colors"
+        className="w-full flex items-center justify-between p-2.5 hover:bg-[var(--bg-surface-raised)] transition-colors text-left"
       >
         <div className="flex items-center gap-2 flex-wrap">
           <ShieldCheck
-            className={`w-4 h-4 ${
+            className={`w-3.5 h-3.5 shrink-0 ${
               confidenceScore && confidenceScore >= 0.8
-                ? "text-emerald-400"
+                ? "text-[var(--color-success)]"
                 : confidenceScore && confidenceScore >= 0.5
-                ? "text-amber-400"
-                : "text-rose-400"
+                ? "text-[var(--color-warning)]"
+                : "text-[var(--color-danger)]"
             }`}
           />
-          <span className="text-xs font-semibold text-text-secondary">
+          <span className="text-xs font-semibold text-[var(--text-primary)]">
             Grounding & Verification
           </span>
 
           {confidenceScore !== undefined && (
-            <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full text-white font-mono font-medium">
+            <span className="text-[10px] font-mono-data px-1.5 py-0.2 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-medium">
               {Math.round(confidenceScore * 100)}% verified
             </span>
           )}
 
           {claimVerifications.length > 0 && (
-            <div className="flex items-center gap-1.5 text-[10px] ml-1">
+            <div className="flex items-center gap-1.5 text-[10.5px] font-mono-data text-[var(--text-muted)]">
               {verifiedCount > 0 && (
-                <span className="text-emerald-400 font-medium">
+                <span className="text-[var(--color-success)] font-medium">
                   {verifiedCount} verified
                 </span>
               )}
               {inferredCount > 0 && (
-                <span className="text-amber-400 font-medium">
-                  • {inferredCount} inferred
-                </span>
+                <span>• {inferredCount} inferred</span>
               )}
               {hallucinatedCount > 0 && (
-                <span className="text-rose-400 font-medium">
+                <span className="text-[var(--color-danger)] font-medium">
                   • {hallucinatedCount} flagged
                 </span>
               )}
@@ -90,234 +93,281 @@ export default function VerificationDrawer({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 ml-2">
-          <span className="text-[10px] text-text-muted">
-            {citations.length} source{citations.length !== 1 ? "s" : ""}
+        <div className="flex items-center gap-1.5 ml-2 text-[10.5px] text-[var(--text-muted)] font-mono-data">
+          <span>
+            {citations.length} {citations.length === 1 ? "source" : "sources"}
           </span>
           {expanded ? (
-            <ChevronUp className="w-3.5 h-3.5 text-text-muted" />
+            <ChevronUp className="w-3.5 h-3.5" />
           ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-text-muted" />
+            <ChevronDown className="w-3.5 h-3.5" />
           )}
         </div>
       </button>
 
-      {/* Expanded Claims & Citations List */}
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="border-t border-white/10 bg-black/25 px-3 py-3 space-y-3"
-          >
-            {/* Tab selector */}
-            <div className="flex items-center gap-1.5 pb-1 border-b border-white/5 flex-wrap">
-              {claimVerifications.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("claims")}
-                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors ${
-                    activeTab === "claims"
-                      ? "bg-white/15 text-white"
-                      : "text-text-muted hover:text-white"
-                  }`}
-                >
-                  Claims Audit ({claimVerifications.length})
-                </button>
-              )}
-              {ragTriad && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("triad")}
-                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors flex items-center gap-1 ${
-                    activeTab === "triad"
-                      ? "bg-accent-primary/20 text-accent-primary border border-accent-primary/30"
-                      : "text-text-muted hover:text-white"
-                  }`}
-                >
-                  <Gauge className="w-3 h-3 text-accent-primary" />
-                  RAG Triad Evals
-                </button>
-              )}
-              {citations.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("citations")}
-                  className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors ${
-                    activeTab === "citations"
-                      ? "bg-white/15 text-white"
-                      : "text-text-muted hover:text-white"
-                  }`}
-                >
-                  Source Citations ({citations.length})
-                </button>
+      {/* Expanded Claims & Citations Breakdown */}
+      {expanded && (
+        <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3 space-y-3">
+          {/* Tab Selector */}
+          <div className="flex items-center gap-1 pb-2 border-b border-[var(--border-subtle)]">
+            {claimVerifications.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("claims")}
+                className={`text-[11px] font-medium px-2.5 py-1 rounded transition-colors ${
+                  activeTab === "claims"
+                    ? "bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-default)] font-semibold"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                Claims Audit ({claimVerifications.length})
+              </button>
+            )}
+            {ragTriad && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("triad")}
+                className={`text-[11px] font-medium px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "triad"
+                    ? "bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-default)] font-semibold"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                <Gauge className="w-3 h-3 text-[var(--color-accent)]" />
+                <span>RAG Triad Evals</span>
+              </button>
+            )}
+            {citations.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("citations")}
+                className={`text-[11px] font-medium px-2.5 py-1 rounded transition-colors ${
+                  activeTab === "citations"
+                    ? "bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-default)] font-semibold"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                Source Citations ({citations.length})
+              </button>
+            )}
+          </div>
+
+          {/* Tab 1: Compact, Honest RAG Triad Telemetry Table & Bars */}
+          {activeTab === "triad" && ragTriad && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)] font-mono-data">
+                <span className="font-semibold text-[var(--text-primary)] uppercase">
+                  Production RAG Triad Telemetry
+                </span>
+                {ragTriad.latency_ms && (
+                  <span>Latency: {Math.round(ragTriad.latency_ms)}ms</span>
+                )}
+              </div>
+
+              {/* Real Table of Evaluation Dimensions */}
+              <div className="border border-[var(--border-subtle)] rounded-lg overflow-hidden bg-[var(--bg-surface)]">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface-raised)] text-[10.5px] font-mono-data text-[var(--text-muted)] uppercase">
+                      <th className="py-2 px-3 font-semibold">Evaluation Dimension</th>
+                      <th className="py-2 px-3 font-semibold text-right w-20">Score</th>
+                      <th className="py-2 px-3 font-semibold w-28">Fidelity Bar</th>
+                      <th className="py-2 px-3 font-semibold hidden sm:table-cell">Meaning</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-subtle)] text-[12px]">
+                    {/* Groundedness */}
+                    <tr>
+                      <td className="py-2 px-3 font-medium text-[var(--text-primary)]">
+                        Groundedness
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono-data font-semibold text-[var(--text-primary)]">
+                        {Math.round(ragTriad.groundedness * 100)}%
+                      </td>
+                      <td className="py-2 px-3">
+                        <div className="h-1.5 w-full bg-[var(--bg-subtle)] rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[var(--color-accent)] rounded-full"
+                            style={{ width: `${Math.round(ragTriad.groundedness * 100)}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="py-2 px-3 text-[11px] text-[var(--text-muted)] hidden sm:table-cell">
+                        Directly supported by retrieved text; zero speculative claims.
+                      </td>
+                    </tr>
+
+                    {/* Context Relevance */}
+                    <tr>
+                      <td className="py-2 px-3 font-medium text-[var(--text-primary)]">
+                        Context Relevance
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono-data font-semibold text-[var(--text-primary)]">
+                        {Math.round(ragTriad.context_relevance * 100)}%
+                      </td>
+                      <td className="py-2 px-3">
+                        <div className="h-1.5 w-full bg-[var(--bg-subtle)] rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[var(--color-accent)] rounded-full"
+                            style={{ width: `${Math.round(ragTriad.context_relevance * 100)}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="py-2 px-3 text-[11px] text-[var(--text-muted)] hidden sm:table-cell">
+                        Retrieved passages contain exact clauses queried without noise.
+                      </td>
+                    </tr>
+
+                    {/* Answer Relevance */}
+                    <tr>
+                      <td className="py-2 px-3 font-medium text-[var(--text-primary)]">
+                        Answer Relevance
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono-data font-semibold text-[var(--text-primary)]">
+                        {Math.round(ragTriad.answer_relevance * 100)}%
+                      </td>
+                      <td className="py-2 px-3">
+                        <div className="h-1.5 w-full bg-[var(--bg-subtle)] rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[var(--color-accent)] rounded-full"
+                            style={{ width: `${Math.round(ragTriad.answer_relevance * 100)}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="py-2 px-3 text-[11px] text-[var(--text-muted)] hidden sm:table-cell">
+                        Addresses query requirements directly without generic digression.
+                      </td>
+                    </tr>
+
+                    {/* Numeric Token Fidelity */}
+                    <tr>
+                      <td className="py-2 px-3 font-medium text-[var(--text-primary)]">
+                        Numeric Token Fidelity
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono-data font-semibold text-[var(--text-primary)]">
+                        {Math.round((ragTriad.numeric_accuracy ?? 1.0) * 100)}%
+                      </td>
+                      <td className="py-2 px-3">
+                        <div className="h-1.5 w-full bg-[var(--bg-subtle)] rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[var(--color-accent)] rounded-full"
+                            style={{ width: `${Math.round((ragTriad.numeric_accuracy ?? 1.0) * 100)}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="py-2 px-3 text-[11px] text-[var(--text-muted)] hidden sm:table-cell">
+                        Exact numeric values (dates, dollars, percentages) verified against source.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Low Score Warning Flag (if any metric < 70%) */}
+              {(ragTriad.groundedness < 0.7 ||
+                ragTriad.context_relevance < 0.7 ||
+                ragTriad.answer_relevance < 0.7) && (
+                <div className="p-2 rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-[11px] flex items-center gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Auditor notice: One or more evaluation dimensions fell below 70%. Inspect source citations manually.
+                  </span>
+                </div>
               )}
             </div>
+          )}
 
-            {/* View 0: RAG Triad Metrics */}
-            {activeTab === "triad" && ragTriad && (
-              <div className="p-3 rounded-xl border border-white/10 bg-white/[0.02] space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5 text-accent-primary" />
-                    <span className="text-xs font-semibold text-text-primary">Production RAG Triad Telemetry</span>
-                  </div>
-                  {ragTriad.latency_ms && (
-                    <span className="text-[10px] text-text-muted font-mono bg-white/5 px-2 py-0.5 rounded">
-                      {Math.round(ragTriad.latency_ms)}ms latency
-                    </span>
-                  )}
-                </div>
+          {/* Tab 2: Claims Audit */}
+          {activeTab === "claims" && claimVerifications.length > 0 && (
+            <div className="space-y-1.5">
+              {claimVerifications.map((item, idx) => {
+                const isVerified = item.status === "verified";
+                const isInferred = item.status === "inferred";
+                const isHallucinated = item.status === "hallucinated";
 
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="p-2 rounded-lg bg-black/40 border border-white/5">
-                    <div className="text-[10px] text-text-muted mb-0.5">Context Relevance</div>
-                    <div className="text-sm font-bold font-mono text-emerald-400">
-                      {Math.round(ragTriad.context_relevance * 100)}%
-                    </div>
-                    <div className="w-full h-1 bg-white/10 rounded-full mt-1.5 overflow-hidden">
-                      <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${Math.round(ragTriad.context_relevance * 100)}%` }} />
-                    </div>
-                  </div>
-
-                  <div className="p-2 rounded-lg bg-black/40 border border-white/5">
-                    <div className="text-[10px] text-text-muted mb-0.5">Groundedness</div>
-                    <div className="text-sm font-bold font-mono text-cyan-400">
-                      {Math.round(ragTriad.groundedness * 100)}%
-                    </div>
-                    <div className="w-full h-1 bg-white/10 rounded-full mt-1.5 overflow-hidden">
-                      <div className="h-full bg-cyan-400 rounded-full" style={{ width: `${Math.round(ragTriad.groundedness * 100)}%` }} />
-                    </div>
-                  </div>
-
-                  <div className="p-2 rounded-lg bg-black/40 border border-white/5">
-                    <div className="text-[10px] text-text-muted mb-0.5">Answer Relevance</div>
-                    <div className="text-sm font-bold font-mono text-amber-400">
-                      {Math.round(ragTriad.answer_relevance * 100)}%
-                    </div>
-                    <div className="w-full h-1 bg-white/10 rounded-full mt-1.5 overflow-hidden">
-                      <div className="h-full bg-amber-400 rounded-full" style={{ width: `${Math.round(ragTriad.answer_relevance * 100)}%` }} />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-[10px] text-text-muted pt-1 border-t border-white/5">
-                  <span>Numeric Token Fidelity: <strong className="text-white font-mono">{Math.round(ragTriad.numeric_accuracy * 100)}%</strong></span>
-                  <span className="text-[9px] text-text-muted italic">{ragTriad.retrieval_pipeline || "Hybrid Search"}</span>
-                </div>
-              </div>
-            )}
-
-            {/* View 1: Sentence-by-Sentence Claim Audit */}
-            {activeTab === "claims" && claimVerifications.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-[10px] text-text-muted bg-white/[0.02] border border-white/5 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
-                  <span>Method: Lexical token & numeric overlap heuristic</span>
-                  <span className="text-[9px] text-amber-400/80">Surface check, does not prove semantic truth</span>
-                </div>
-                {claimVerifications.map((item, idx) => {
-                  const isVerified = item.status === "verified";
-                  const isInferred = item.status === "inferred";
-                  const isHallucinated = item.status === "hallucinated";
-
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => {
-                        if (item.best_source_page) {
-                          setCurrentPage(item.best_source_page);
-                        }
-                      }}
-                      className={`p-2.5 rounded-lg border text-xs transition-all ${
-                        isVerified
-                          ? "bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40"
-                          : isInferred
-                          ? "bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40"
-                          : "bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40"
-                      } ${item.best_source_page ? "cursor-pointer" : ""}`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-1.5 font-semibold text-[10px] uppercase tracking-wider">
-                          {isVerified && (
-                            <span className="flex items-center gap-1 text-emerald-400">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Verified Claim</span>
-                            </span>
-                          )}
-                          {isInferred && (
-                            <span className="flex items-center gap-1 text-amber-400">
-                              <HelpCircle className="w-3 h-3" />
-                              <span>Inferred Reasoning</span>
-                            </span>
-                          )}
-                          {isHallucinated && (
-                            <span className="flex items-center gap-1 text-rose-400">
-                              <AlertTriangle className="w-3 h-3" />
-                              <span>Potential Hallucination</span>
-                            </span>
-                          )}
-                        </div>
-
-                        {item.best_source_page && (
-                          <div className="flex items-center gap-1 text-[10px] text-text-muted hover:text-white font-mono">
-                            <span>Jump to Page {item.best_source_page}</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </div>
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      if (item.best_source_page) {
+                        setCurrentPage(item.best_source_page);
+                      }
+                    }}
+                    className={`p-2 rounded border text-xs transition-colors ${
+                      isVerified
+                        ? "border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-raised)]"
+                        : isInferred
+                        ? "border-[var(--color-warning-border)] bg-[var(--color-warning-bg)]"
+                        : "border-[var(--color-danger-border)] bg-[var(--color-danger-bg)]"
+                    } ${item.best_source_page ? "cursor-pointer" : ""}`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono-data uppercase font-semibold">
+                        {isVerified && (
+                          <span className="text-[var(--color-success)] flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Verified Claim
+                          </span>
+                        )}
+                        {isInferred && (
+                          <span className="text-[var(--color-warning)] flex items-center gap-1">
+                            <HelpCircle className="w-3 h-3" />
+                            Inferred Claim
+                          </span>
+                        )}
+                        {isHallucinated && (
+                          <span className="text-[var(--color-danger)] flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            Unverified Assertion
+                          </span>
                         )}
                       </div>
 
-                      <p className="text-text-secondary leading-relaxed font-sans">
-                        {item.claim}
-                      </p>
-
-                      {item.numeric_grounded === false && (
-                        <p className="mt-1.5 text-[10px] text-rose-400/90 font-medium">
-                          ⚠️ Numbers/metrics in this claim could not be matched in source text.
-                        </p>
+                      {item.best_source_page && (
+                        <div className="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] font-mono-data">
+                          <span>Page {item.best_source_page}</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </div>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
 
-            {/* View 2: Source Citations */}
-            {(activeTab === "citations" || claimVerifications.length === 0) && (
-              <div className="space-y-2">
-                {citations.map((citation, idx) => (
-                  <div
-                    key={citation.citation_id || idx}
-                    onClick={() => highlightCitation(citation)}
-                    className="group flex flex-col p-2.5 rounded-lg border border-white/5 bg-white/[0.01] hover:bg-accent-soft/20 hover:border-accent-primary/20 cursor-pointer transition-all"
-                  >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-1.5 text-[10px] font-semibold text-text-muted group-hover:text-accent-primary uppercase tracking-wider">
-                        <FileText className="w-3 h-3 text-accent-primary" />
-                        <span>{citation.source_file}</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-[10px] text-text-muted group-hover:text-text-secondary font-mono">
-                        <span>Page {citation.page}</span>
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-text-secondary leading-relaxed line-clamp-2 italic">
-                      &quot;{citation.highlighted_text}&quot;
+                    <p className="text-[var(--text-secondary)] text-[12px] leading-relaxed">
+                      {item.claim}
                     </p>
-
-                    <div className="flex items-center gap-1 mt-2 text-[9px] font-semibold text-emerald-400 uppercase tracking-wider">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Verified Grounding Evidence</span>
-                    </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Tab 3: Source Citations */}
+          {(activeTab === "citations" || claimVerifications.length === 0) && (
+            <div className="space-y-1.5">
+              {citations.map((citation, idx) => (
+                <div
+                  key={citation.citation_id || idx}
+                  onClick={() => highlightCitation(citation)}
+                  className="flex flex-col p-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--color-accent-border)] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5 text-[10.5px] font-mono-data text-[var(--text-primary)] font-medium truncate max-w-[240px]">
+                      <FileText className="w-3 h-3 text-[var(--color-accent)] shrink-0" />
+                      <span className="truncate">{citation.source_file}</span>
+                    </div>
+                    <span className="text-[10px] font-mono-data px-1 rounded bg-[var(--bg-subtle)] text-[var(--text-muted)] border border-[var(--border-subtle)] shrink-0">
+                      Page {citation.page}
+                    </span>
+                  </div>
+
+                  <p className="text-[11.5px] text-[var(--text-secondary)] leading-relaxed italic line-clamp-2">
+                    &quot;{citation.highlighted_text}&quot;
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

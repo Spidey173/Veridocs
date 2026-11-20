@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
-  Sparkles,
+  FileText,
   Search,
-  Layers,
-  Shield,
-  Zap,
+  Scale,
+  ShieldCheck,
+  ChevronRight,
+  ArrowRight,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { getSessionInfo } from "@/lib/api";
@@ -27,8 +27,9 @@ export default function Home() {
     if (!sessionId && urlSession) {
       if (urlSession === "demo-session") {
         setSession("demo-session", [
-          { name: "SaaS_Agreement_Executed.pdf", size: 1024 * 1024, type: "application/pdf" },
-          { name: "SaaS_Agreement_Amended.pdf", size: 1024 * 1024, type: "application/pdf" },
+          { name: "SaaS_Agreement_2024_v1.pdf", size: 2150000, type: "application/pdf" },
+          { name: "SaaS_Agreement_2025_Amended.pdf", size: 2280000, type: "application/pdf" },
+          { name: "Veridocs_Technical_Architecture.pdf", size: 2450000, type: "application/pdf" },
         ]);
       } else {
         getSessionInfo(urlSession)
@@ -54,124 +55,145 @@ export default function Home() {
 
   if (!hasHydrated) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-midnight-950">
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-accent-primary to-accent-secondary flex items-center justify-center shadow-xl shadow-accent-primary/20 animate-pulse">
-          <Sparkles className="w-5 h-5 text-white" />
+      <div className="h-screen w-screen flex items-center justify-center bg-[var(--bg-canvas)]">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] font-mono-data">
+          <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
+          <span>Initializing workspace...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <AnimatePresence mode="wait">
+    <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       {!sessionId ? (
-        <div key="landing-layout" className="h-screen flex flex-col overflow-hidden bg-midnight-950 text-text-primary">
-          <Header />
-          <div className="flex-1 overflow-hidden">
-            <LandingScreen />
+        <div className="h-screen flex flex-col overflow-hidden">
+          <IntakeHeader />
+          <div className="flex-1 overflow-y-auto">
+            <DocumentIntakeScreen />
           </div>
         </div>
       ) : (
-        <div key="workspace-layout" className="h-screen flex flex-col overflow-hidden bg-midnight-950 text-text-primary">
+        <div className="h-screen flex flex-col overflow-hidden">
           <WorkspaceLayout />
         </div>
       )}
-    </AnimatePresence>
+    </div>
   );
 }
 
-function Header() {
+function IntakeHeader() {
   const { sessionId, clearSession } = useAppStore();
 
   return (
-    <header className="h-14 px-6 flex items-center justify-between border-b border-white/6 bg-surface-primary/60 backdrop-blur-xl z-50">
+    <header className="h-12 px-6 flex items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] shrink-0 z-30">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-accent-primary to-accent-secondary flex items-center justify-center shadow-lg shadow-accent-primary/20">
-            <Sparkles className="w-4 h-4 text-white" />
+          <div className="w-5 h-5 rounded bg-[var(--color-accent)] flex items-center justify-center text-white font-bold text-[11px] font-mono-data">
+            V
           </div>
-          <h1 className="text-base font-bold tracking-tight">
-            <span className="text-gradient">Veridocs</span>
+          <h1 className="text-sm font-serif-doc font-semibold tracking-tight text-[var(--text-primary)]">
+            Veridocs
           </h1>
+          <span className="text-[10px] font-mono-data uppercase tracking-wider text-[var(--text-muted)] border-l border-[var(--border-default)] pl-2 ml-1">
+            Document Review
+          </span>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         {sessionId && (
           <button
             onClick={clearSession}
-            className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-secondary hover:bg-white/5 transition-all"
+            className="px-2.5 py-1 rounded text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
           >
             New Session
           </button>
         )}
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-accent-primary/30 to-accent-secondary/30 border border-white/10" />
       </div>
     </header>
   );
 }
 
-function LandingScreen() {
+function DocumentIntakeScreen() {
+  const { setSession } = useAppStore();
+
+  const loadSampleContractPair = () => {
+    setSession("demo-session", [
+      { name: "SaaS_Agreement_2024_v1.pdf", size: 2150000, type: "application/pdf" },
+      { name: "SaaS_Agreement_2025_Amended.pdf", size: 2280000, type: "application/pdf" },
+      { name: "Veridocs_Technical_Architecture.pdf", size: 2450000, type: "application/pdf" },
+    ]);
+  };
+
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="h-full flex flex-col items-center justify-center px-6"
-    >
-      <div className="w-full max-w-2xl mx-auto text-center">
-        {/* Hero */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-accent-primary to-accent-secondary flex items-center justify-center mx-auto mb-5 shadow-xl shadow-accent-primary/20">
-            <Sparkles className="w-7 h-7 text-white" />
+    <div className="min-h-full flex flex-col justify-between py-10 px-6">
+      <div className="w-full max-w-xl mx-auto my-auto space-y-6">
+        {/* Title & Concise Copy */}
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono-data font-semibold text-[var(--color-accent)] bg-[var(--color-accent-subtle)] border border-[var(--color-accent-border)]">
+              WORKSPACE INTAKE
+            </span>
           </div>
 
-          <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-3">
-            <span className="text-gradient">Document Intelligence</span>
-            <br />
-            <span className="text-text-primary">Engineered for Accuracy</span>
+          <h2 className="text-2xl font-serif-doc font-semibold text-[var(--text-primary)] tracking-tight mb-2">
+            Document Intelligence <span className="text-[var(--text-muted)] font-sans font-normal text-base block sm:inline sm:ml-2">Engineered for Accuracy</span>
           </h2>
-          <p className="text-sm sm:text-base text-text-muted max-w-md mx-auto mb-8 font-normal leading-relaxed">
-            Upload PDFs or reports to chat with source citations, claim verification, and real-time RAG audit telemetry.
+          <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+            Review contracts, cross-examine clauses with pixel-level coordinate citations, and verify discrepancies in a unified legal/finance workspace.
           </p>
-        </motion.div>
+        </div>
 
-        {/* Upload Zone */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15, duration: 0.4 }}
-        >
-          <DropZone />
-        </motion.div>
+        {/* Central Dropzone */}
+        <DropZone />
 
-        {/* Feature Pills */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          className="flex flex-wrap items-center justify-center gap-2.5 mt-8"
-        >
-          {[
-            { icon: <Search className="w-3.5 h-3.5 text-accent-primary" />, text: "Hybrid Search (FTS + pgvector HNSW)" },
-            { icon: <Layers className="w-3.5 h-3.5 text-accent-primary" />, text: "Neural Re-Ranking" },
-            { icon: <Shield className="w-3.5 h-3.5 text-emerald-400" />, text: "Lexical & Numeric Grounding" },
-            { icon: <Zap className="w-3.5 h-3.5 text-accent-secondary" />, text: "RAG Triad Telemetry" },
-          ].map((feature, i) => (
-            <span
-              key={i}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs text-text-muted border border-white/6 bg-white/[0.02]"
-            >
-              {feature.icon}
-              {feature.text}
+        {/* Recent / Preset Document Workspaces */}
+        <div className="border-t border-[var(--border-subtle)] pt-4 space-y-2">
+          <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+            <span className="font-medium uppercase tracking-wider font-mono-data text-[10px]">
+              Sample Document Pair
             </span>
-          ))}
-        </motion.div>
+            <span>Pre-indexed test contracts</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadSampleContractPair}
+            className="w-full flex items-center justify-between p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-raised)] hover:border-[var(--border-strong)] transition-all text-left group"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <FileText className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--color-accent)] shrink-0 transition-colors" />
+              <div className="truncate">
+                <p className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                  SaaS Master Services Agreement (2024 Baseline vs. 2025 Revision)
+                </p>
+                <p className="text-[11px] text-[var(--text-muted)] truncate font-mono-data">
+                  2 contracts • Payment term variance (Net 30 → Net 60) • Liability cap discrepancy
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-xs font-medium text-[var(--color-accent)] shrink-0 pl-2">
+              <span>Open</span>
+              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </button>
+        </div>
       </div>
-    </motion.div>
+
+      {/* Quiet Engine Capabilities Spec Footer (replaces floating landing pill grid) */}
+      <footer className="w-full max-w-2xl mx-auto pt-8 border-t border-[var(--border-subtle)] text-center">
+        <div className="text-[11px] font-mono-data text-[var(--text-muted)] flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+          <span className="font-semibold text-[var(--text-secondary)] uppercase">Engine:</span>
+          <span>Hybrid Search (FTS + pgvector HNSW)</span>
+          <span className="opacity-40">•</span>
+          <span>Neural Re-Ranking</span>
+          <span className="opacity-40">•</span>
+          <span>Lexical & Numeric Grounding</span>
+          <span className="opacity-40">•</span>
+          <span>RAG Triad Telemetry</span>
+        </div>
+      </footer>
+    </div>
   );
 }

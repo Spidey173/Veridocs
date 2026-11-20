@@ -2,13 +2,13 @@
 
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload,
   FileText,
   X,
   AlertCircle,
   Loader2,
+  CheckCircle2,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { uploadDocuments, getInsights } from "@/lib/api";
@@ -46,23 +46,25 @@ export default function DropZone() {
       if (filesToUpload.length === 0) return;
 
       setUploading(true);
-      setUploadProgress(25, "Extracting text chunks & generating embeddings...");
+      setUploadProgress(15, "1/4 Parsing document structure & text streams...");
       setError(null);
 
-      // Progress indicator
-      let currentPct = 25;
+      // Realistic pipeline progress ticks
+      let currentPct = 15;
       const progressTicker = setInterval(() => {
         if (currentPct < 90) {
-          currentPct += 25;
-          let stage = "Extracting text chunks & coordinates...";
-          if (currentPct >= 50 && currentPct < 80) {
-            stage = "Generating FastEmbed vectors & neural embeddings...";
+          currentPct += 20;
+          let stage = "1/4 Parsing document structure & text streams...";
+          if (currentPct >= 35 && currentPct < 60) {
+            stage = "2/4 Extracting page coordinates & bounding boxes...";
+          } else if (currentPct >= 60 && currentPct < 80) {
+            stage = "3/4 Generating semantic embeddings & dense index...";
           } else if (currentPct >= 80) {
-            stage = "Finalizing hybrid FTS + pgvector HNSW structures...";
+            stage = "4/4 Indexing BM25 full-text & pgvector HNSW structures...";
           }
           setUploadProgress(Math.min(currentPct, 95), stage);
         }
-      }, 25);
+      }, 30);
 
       try {
         const blobUrls: Record<string, string> = {};
@@ -74,7 +76,7 @@ export default function DropZone() {
         const result = await uploadDocuments(filesToUpload);
 
         clearInterval(progressTicker);
-        setUploadProgress(100, "Workspace ready!");
+        setUploadProgress(100, "Workspace ready");
 
         const files: UploadedFile[] = filesToUpload.map((f) => ({
           name: f.name,
@@ -82,12 +84,11 @@ export default function DropZone() {
           type: f.type,
         }));
 
-        // Update session state
         setSession(result.session_id, files);
         setUploading(false);
         setSelectedFiles([]);
 
-        // Fetch document insights in the background
+        // Fetch insights in the background
         setLoadingInsights(true);
         getInsights(result.session_id)
           .then((insights) => {
@@ -132,7 +133,6 @@ export default function DropZone() {
         return;
       }
       setSelectedFiles(valid);
-      // Start upload when files are dropped
       executeUpload(valid);
     },
     [executeUpload]
@@ -150,149 +150,125 @@ export default function DropZone() {
   });
 
   return (
-    <div className="w-full max-w-xl mx-auto">
-      {/* Drop Zone */}
+    <div className="w-full">
+      {/* Drop Zone: Dense, Professional, High-Contrast */}
       <div
         {...getRootProps()}
         className={`
-          relative cursor-pointer rounded-2xl border-2 border-dashed p-10
-          transition-all duration-300 group
+          relative cursor-pointer rounded-lg border border-dashed p-7
+          transition-colors duration-150 group text-center
           ${
             isDragActive
-              ? "border-accent-primary bg-accent-primary/5"
-              : "border-white/10 hover:border-white/20 hover:bg-white/[0.02]"
+              ? "border-[var(--color-accent)] bg-[var(--color-accent-subtle)]"
+              : "border-[var(--border-default)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-raised)]"
           }
         `}
       >
         <input {...getInputProps()} id="file-upload-input" />
 
-        <div className="flex flex-col items-center gap-3.5 text-center">
-          <motion.div
-            animate={isDragActive ? { scale: 1.05 } : { scale: 1 }}
-            className={`
-              p-3.5 rounded-2xl transition-colors
-              ${isDragActive ? "bg-accent-primary/15 text-accent-primary" : "bg-white/5 text-text-muted group-hover:text-text-secondary group-hover:bg-white/8"}
-            `}
-          >
-            <Upload className="w-7 h-7" />
-          </motion.div>
+        <div className="flex flex-col items-center gap-2.5">
+          <Upload className="w-5 h-5 text-[var(--text-muted)] group-hover:text-[var(--text-primary)] transition-colors" />
 
           <div>
-            <p className="text-base font-semibold text-text-primary mb-1">
-              {isDragActive ? "Drop documents here" : "Drop documents or click to browse"}
+            <p className="text-xs font-semibold text-[var(--text-primary)] mb-0.5">
+              {isDragActive ? "Drop documents here to stage" : "Drop documents or click to browse"}
             </p>
-            <p className="text-xs text-text-muted">
+            <p className="text-[11px] text-[var(--text-muted)] font-mono-data">
               Supports PDF, DOCX, TXT • Page-level citations & verification
             </p>
           </div>
         </div>
       </div>
 
-      {/* Selected Files */}
-      <AnimatePresence>
-    {selectedFiles.length > 0 && (
-      <motion.div
-        initial={{ opacity: 0, height: 0 }}
-        animate={{ opacity: 1, height: "auto" }}
-        exit={{ opacity: 0, height: 0 }}
-        className="mt-4 space-y-2 overflow-hidden"
-      >
-        <div className="flex justify-between items-center text-xs text-text-muted px-1">
-          <span>{selectedFiles.length} file{selectedFiles.length > 1 ? "s" : ""} selected</span>
-          <span>{formatFileSize(selectedFiles.reduce((acc, f) => acc + f.size, 0))}</span>
-        </div>
+      {/* Selected Staged Files */}
+      {selectedFiles.length > 0 && (
+        <div className="mt-3 space-y-1.5 border border-[var(--border-subtle)] rounded-lg p-2.5 bg-[var(--bg-surface)]">
+          <div className="flex justify-between items-center text-[11px] text-[var(--text-muted)] px-1 font-mono-data">
+            <span>{selectedFiles.length} file{selectedFiles.length > 1 ? "s" : ""} staged</span>
+            <span>{formatFileSize(selectedFiles.reduce((acc, f) => acc + f.size, 0))}</span>
+          </div>
 
-        <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-          {selectedFiles.map((file, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/5 text-xs"
-            >
-              <div className="flex items-center gap-2 truncate">
-                <FileText className="w-3.5 h-3.5 text-accent-primary shrink-0" />
-                <span className="truncate text-text-secondary">{file.name}</span>
-                <span className="text-[10px] text-text-muted shrink-0">
-                  ({formatFileSize(file.size)})
-                </span>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeFile(i);
-                }}
-                className="p-1 rounded-lg hover:bg-white/10 text-text-muted hover:text-white transition-colors"
+          <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+            {selectedFiles.map((file, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between p-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface-raised)] text-xs"
               >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
+                <div className="flex items-center gap-2 truncate">
+                  <FileText className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                  <span className="truncate text-[var(--text-primary)] font-medium">{file.name}</span>
+                  <span className="text-[10px] text-[var(--text-muted)] shrink-0 font-mono-data">
+                    ({formatFileSize(file.size)})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeFile(i);
+                  }}
+                  className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
 
-        <button
-          onClick={() => executeUpload()}
-          disabled={isUploading}
-          className="w-full mt-3 py-2.5 px-4 rounded-xl font-semibold text-xs text-midnight-950
-                bg-gradient-to-r from-accent-primary to-accent-secondary hover:opacity-95 transition-all
-                shadow-lg shadow-accent-primary/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-          {isUploading ? (
-            <>
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>{uploadStage || "Processing..."} ({uploadProgress}%)</span>
-            </>
-          ) : (
-            <span>Upload & Start Analysis</span>
-          )}
-        </button>
-      </motion.div>
-    )}
-  </AnimatePresence>
-
-  {/* Progress */ }
-  <AnimatePresence>
-    {isUploading && (
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0 }}
-        className="mt-4"
-      >
-        <div className="flex justify-between text-xs text-text-muted mb-2">
-          <span>{uploadStage}</span>
-          <span>{uploadProgress}%</span>
-        </div>
-        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-          <motion.div
-            className="h-full bg-gradient-to-r from-accent-primary to-accent-secondary rounded-full"
-            initial={{ width: 0 }}
-            animate={{ width: `${uploadProgress}%` }}
-            transition={{ duration: 0.3 }}
-          />
-        </div>
-      </motion.div>
-    )}
-  </AnimatePresence>
-
-      {/* Error */}
-      <AnimatePresence>
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="mt-4 flex items-center gap-3 p-3.5 rounded-xl bg-danger/10 border border-danger/20 text-danger text-xs"
+          <button
+            type="button"
+            onClick={() => executeUpload()}
+            disabled={isUploading}
+            className="w-full mt-2 py-2 px-3 rounded text-xs font-semibold text-white bg-[var(--color-accent)] hover:opacity-95 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <p className="flex-1">{error}</p>
-            <button
-              onClick={() => setError(null)}
-              className="p-1 rounded-lg hover:bg-danger/20 transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {isUploading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span className="font-mono-data">{uploadStage || "Processing..."} ({uploadProgress}%)</span>
+              </>
+            ) : (
+              <span>Upload & Start Analysis</span>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Uploading Progress with Honest Pipeline Steps */}
+      {isUploading && (
+        <div className="mt-3 p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+          <div className="flex justify-between items-center text-[11px] mb-1.5">
+            <span className="text-[var(--text-primary)] font-medium flex items-center gap-1.5">
+              <Loader2 className="w-3 h-3 animate-spin text-[var(--color-accent)]" />
+              {uploadStage}
+            </span>
+            <span className="text-[var(--text-muted)] font-mono-data">{uploadProgress}%</span>
+          </div>
+          <div className="h-1 bg-[var(--bg-subtle)] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[var(--color-accent)] transition-all duration-200"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Error Banner with Plain Feedback */}
+      {error && (
+        <div className="mt-3 flex items-start gap-2.5 p-3 rounded-lg border border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)] text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold mb-0.5">Document ingestion failed</p>
+            <p className="opacity-90">{error}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="p-1 rounded hover:bg-black/10 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

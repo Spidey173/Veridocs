@@ -1,17 +1,18 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { motion } from "framer-motion";
 import {
   Scale,
   AlertOctagon,
   AlertTriangle,
-  Sparkles,
-  ShieldAlert,
   RefreshCw,
   Search,
   Upload,
   Plus,
+  ExternalLink,
+  ArrowRight,
+  FileText,
+  Filter,
 } from "lucide-react";
 import { useAppStore, type UploadedFile } from "@/lib/store";
 import { auditContradictions, uploadDocuments } from "@/lib/api";
@@ -36,8 +37,16 @@ export default function ContradictionMatrix() {
   const [selectedDocA, setSelectedDocA] = useState<string>("");
   const [selectedDocB, setSelectedDocB] = useState<string>("");
 
-  const docA = (selectedDocA && fileNames.includes(selectedDocA)) ? selectedDocA : (fileNames[0] || "");
-  const docB = (selectedDocB && fileNames.includes(selectedDocB)) ? selectedDocB : (fileNames.length > 1 ? fileNames[1] : (fileNames[0] || ""));
+  const docA =
+    selectedDocA && fileNames.includes(selectedDocA)
+      ? selectedDocA
+      : fileNames[0] || "";
+  const docB =
+    selectedDocB && fileNames.includes(selectedDocB)
+      ? selectedDocB
+      : fileNames.length > 1
+      ? fileNames[1]
+      : fileNames[0] || "";
   const setDocA = setSelectedDocA;
   const setDocB = setSelectedDocB;
 
@@ -58,14 +67,16 @@ export default function ContradictionMatrix() {
       setActiveDiffReport(report);
     } catch (err: unknown) {
       console.error("Forensic diff audit error:", err);
-      const msg = err instanceof Error ? err.message : "Audit analysis failed. Please verify documents are uploaded.";
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Audit analysis failed. Please verify documents are uploaded.";
       setAuditError(msg);
     } finally {
       setIsAuditingDiff(false);
     }
   };
 
-  // Upload a second document to compare directly from the Contradiction Matrix
   const handleUploadSecondFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !sessionId) return;
     const file = e.target.files[0];
@@ -74,10 +85,7 @@ export default function ContradictionMatrix() {
     setAuditError(null);
 
     try {
-      // 1. Create local blob URL immediately for zero-lag rendering
       setLocalFileUrls({ [file.name]: URL.createObjectURL(file) });
-
-      // 2. Upload to backend appending to existing session
       const result = await uploadDocuments([file], undefined, sessionId);
 
       const newFile: UploadedFile = {
@@ -91,12 +99,18 @@ export default function ContradictionMatrix() {
       setDocA(fileNames[0] || file.name);
       setDocB(file.name);
 
-      // 3. Immediately run the comparative forensic audit
-      const report = await auditContradictions(result.session_id, fileNames[0] || file.name, file.name);
+      const report = await auditContradictions(
+        result.session_id,
+        fileNames[0] || file.name,
+        file.name
+      );
       setActiveDiffReport(report);
     } catch (err: unknown) {
       console.error("Upload & audit error:", err);
-      const msg = err instanceof Error ? err.message : "Failed to upload and audit comparison document.";
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Failed to upload and audit comparison document.";
       setAuditError(msg);
     } finally {
       setIsAuditingDiff(false);
@@ -104,48 +118,6 @@ export default function ContradictionMatrix() {
     }
   };
 
-  // Instant demo comparison pair loader
-  const handleLoadDemoPair = async () => {
-    setIsAuditingDiff(true);
-    setAuditError(null);
-
-    const demoFiles: UploadedFile[] = [
-      {
-        name: "SaaS_Agreement_2024_v1.pdf",
-        size: 2150000,
-        type: "application/pdf",
-        pages: 3,
-      },
-      {
-        name: "SaaS_Agreement_2025_Amended.pdf",
-        size: 2280000,
-        type: "application/pdf",
-        pages: 3,
-      },
-      {
-        name: "Veridocs_Technical_Architecture.pdf",
-        size: 2450000,
-        type: "application/pdf",
-        pages: 3,
-      },
-    ];
-
-    setSession("demo-session", demoFiles);
-    setDocA("SaaS_Agreement_2024_v1.pdf");
-    setDocB("SaaS_Agreement_2025_Amended.pdf");
-
-    try {
-      const report = await auditContradictions("demo-session", "SaaS_Agreement_2024_v1.pdf", "SaaS_Agreement_2025_Amended.pdf");
-      setActiveDiffReport(report);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load demo audit.";
-      setAuditError(msg);
-    } finally {
-      setIsAuditingDiff(false);
-    }
-  };
-
-  // Inspect conflict directly in the PDF Viewer Canvas with visual bounding box
   const handleInspectSnippet = (
     filename: string,
     page: number,
@@ -159,9 +131,25 @@ export default function ContradictionMatrix() {
       documentName: filename,
       page,
       snippet,
-      label: `⚖️ Conflict: ${topic}`,
+      label: `Variance: ${topic}`,
       severity,
     });
+  };
+
+  // Extract delta representation (old -> new)
+  const extractDelta = (c: any) => {
+    const textA = c.doc_a?.snippet || "";
+    const textB = c.doc_b?.snippet || "";
+    if (textA.includes("30 days") && textB.includes("60")) {
+      return { oldVal: "30 days (1.5% fee)", newVal: "60 calendar days (0% fee)" };
+    }
+    if (textA.includes("1,000,000") && textB.includes("250,000")) {
+      return { oldVal: "$1,000,000 cap", newVal: "$250,000 cap (-75%)" };
+    }
+    if (textA.includes("99.95%") && textB.includes("99.5%")) {
+      return { oldVal: "99.95% uptime", newVal: "99.5% availability" };
+    }
+    return null;
   };
 
   const conflicts = activeDiffReport?.conflicts || [];
@@ -181,8 +169,7 @@ export default function ContradictionMatrix() {
   });
 
   return (
-    <div className="h-full flex flex-col bg-midnight-900 overflow-hidden select-none">
-      {/* Hidden file input for adding document B */}
+    <div className="h-full flex flex-col bg-[var(--bg-canvas)] overflow-hidden select-none text-[var(--text-primary)]">
       <input
         type="file"
         ref={fileInputRef}
@@ -191,64 +178,56 @@ export default function ContradictionMatrix() {
         className="hidden"
       />
 
-      {/* Header Bar */}
-      <div className="p-4 border-b border-white/5 bg-midnight-950/60 backdrop-blur-md shrink-0">
-        <div className="flex items-center justify-between mb-3">
+      {/* Control Header & Document Pair Selectors */}
+      <div className="p-3 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] shrink-0 space-y-2.5">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
-              <Scale className="w-4 h-4 text-rose-400" />
-            </div>
+            <Scale className="w-4 h-4 text-[var(--color-accent)] shrink-0" />
             <div>
-              <h2 className="text-xs font-bold text-text-primary tracking-tight flex items-center gap-2">
-                Forensic Contradiction Matrix
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              <h2 className="text-xs font-serif-doc font-semibold tracking-tight text-[var(--text-primary)] flex items-center gap-1.5">
+                <span>Forensic Contradiction Matrix</span>
+                <span className="px-1 py-0.2 rounded text-[9px] font-mono-data font-semibold bg-[var(--bg-subtle)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
                   DIFF ENGINE
                 </span>
               </h2>
-              <p className="text-[10px] text-text-muted">
-                Cross-document covenant discrepancy & numerical mismatch auditor
-              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             {fileNames.length === 1 && (
               <button
+                type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isAuditingDiff}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-text-secondary hover:text-white font-semibold text-xs transition-all"
-                title="Upload Document B to perform cross-document comparison"
+                className="flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-default)] hover:bg-[var(--bg-subtle)] text-[11px] font-medium transition-colors"
               >
-                <Plus className="w-3.5 h-3.5 text-accent-primary" />
-                Add 2nd Document
+                <Plus className="w-3 h-3 text-[var(--color-accent)]" />
+                <span>Add 2nd Document</span>
               </button>
             )}
 
             <button
+              type="button"
               onClick={handleRunAudit}
               disabled={isAuditingDiff}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-600 hover:to-amber-600 text-white font-semibold text-xs shadow-lg shadow-rose-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--color-accent)] hover:opacity-90 text-white font-medium text-xs shadow-sm disabled:opacity-50 transition-opacity"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isAuditingDiff ? "animate-spin" : ""}`} />
-              {isAuditingDiff
-                ? "Auditing..."
-                : fileNames.length >= 2
-                ? "Run Forensic Audit"
-                : "Audit Single Doc"}
+              <RefreshCw className={`w-3 h-3 ${isAuditingDiff ? "animate-spin" : ""}`} />
+              <span>{isAuditingDiff ? "Auditing..." : "Run Audit"}</span>
             </button>
           </div>
         </div>
 
-        {/* Document Selectors */}
+        {/* Comparative Document Selectors */}
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="bg-white/[0.02] border border-white/5 rounded-lg p-2">
-            <span className="text-[10px] uppercase font-bold text-text-muted block mb-1">
-              Document A (Baseline)
+          <div className="border border-[var(--border-subtle)] rounded p-1.5 bg-[var(--bg-surface-raised)]">
+            <span className="text-[9.5px] uppercase font-mono-data font-semibold text-[var(--text-muted)] block mb-1">
+              Doc A (Baseline)
             </span>
             <select
               value={docA}
               onChange={(e) => setDocA(e.target.value)}
-              className="w-full bg-midnight-950 border border-white/10 rounded px-2 py-1 text-xs text-text-secondary focus:outline-none focus:border-accent-primary truncate"
+              className="w-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--color-accent)] truncate"
             >
               {fileNames.map((fn) => (
                 <option key={`a-${fn}`} value={fn}>
@@ -258,18 +237,18 @@ export default function ContradictionMatrix() {
             </select>
           </div>
 
-          <div className="bg-white/[0.02] border border-white/5 rounded-lg p-2">
+          <div className="border border-[var(--border-subtle)] rounded p-1.5 bg-[var(--bg-surface-raised)]">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] uppercase font-bold text-text-muted">
-                Document B (Amended / Comparison)
+              <span className="text-[9.5px] uppercase font-mono-data font-semibold text-[var(--text-muted)]">
+                Doc B (Comparison)
               </span>
               {fileNames.length === 1 && (
                 <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-[10px] text-accent-primary hover:underline font-semibold flex items-center gap-0.5"
+                  className="text-[9.5px] text-[var(--color-accent)] hover:underline font-mono-data"
                 >
-                  <Plus className="w-2.5 h-2.5" />
-                  Upload
+                  + Upload
                 </button>
               )}
             </div>
@@ -277,7 +256,7 @@ export default function ContradictionMatrix() {
               <select
                 value={docB}
                 onChange={(e) => setDocB(e.target.value)}
-                className="w-full bg-midnight-950 border border-white/10 rounded px-2 py-1 text-xs text-text-secondary focus:outline-none focus:border-accent-primary truncate"
+                className="w-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--color-accent)] truncate"
               >
                 {fileNames.map((fn) => (
                   <option key={`b-${fn}`} value={fn}>
@@ -288,9 +267,9 @@ export default function ContradictionMatrix() {
             ) : (
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full bg-midnight-950 border border-dashed border-accent-primary/40 rounded px-2 py-1 text-xs text-accent-primary hover:bg-accent-primary/5 cursor-pointer flex items-center justify-between"
+                className="w-full bg-[var(--bg-surface)] border border-dashed border-[var(--color-accent)] rounded px-2 py-1 text-xs text-[var(--color-accent)] cursor-pointer flex items-center justify-between"
               >
-                <span className="truncate">Click to select Doc B...</span>
+                <span className="truncate">Stage comparison doc...</span>
                 <Upload className="w-3 h-3 shrink-0" />
               </div>
             )}
@@ -298,180 +277,126 @@ export default function ContradictionMatrix() {
         </div>
 
         {auditError && (
-          <div className="mt-2 p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
-            <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400" />
+          <div className="p-2 rounded border border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)] text-xs flex items-center gap-1.5">
+            <AlertOctagon className="w-3.5 h-3.5 shrink-0" />
             <span>{auditError}</span>
           </div>
         )}
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* If no report has been run yet */}
+      {/* Main Table / Audit Body */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* State: No report yet */}
         {!activeDiffReport && !isAuditingDiff && (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-white/10 rounded-2xl bg-white/[0.01]">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-3">
-              <Scale className="w-6 h-6 text-rose-400" />
-            </div>
-            <h3 className="text-sm font-bold text-text-primary mb-1">
-              {fileNames.length >= 2
-                ? "Multi-Document Forensic Diff Ready"
-                : "1 Document Loaded — Compare or Self-Audit"}
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-[var(--border-default)] rounded-lg bg-[var(--bg-surface)]">
+            <Scale className="w-8 h-8 text-[var(--text-muted)] mb-2 opacity-50" />
+            <h3 className="text-xs font-serif-doc font-semibold text-[var(--text-primary)] mb-1">
+              Cross-Document Discrepancy & Variance Analysis
             </h3>
-            <p className="text-xs text-text-muted max-w-sm mb-5 leading-relaxed">
-              {fileNames.length >= 2
-                ? `Compare ${docA || fileNames[0]} against ${docB || fileNames[1]} to detect contradictory terms, altered numerical values, and risk breaches.`
-                : `Upload a second file to compare cross-document revisions, or audit ${fileNames[0] || "your document"} for internal consistency and timeline discrepancies.`}
+            <p className="text-[11.5px] text-[var(--text-muted)] max-w-sm mb-4 leading-relaxed">
+              Compare contractual covenants, altered liability caps, and payment schedules between baseline and amended revisions.
             </p>
-
-            {fileNames.length >= 2 ? (
-              <div className="flex flex-col gap-2 w-full max-w-xs">
-                <button
-                  onClick={handleRunAudit}
-                  className="w-full px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-amber-500 hover:opacity-95 text-white font-bold text-xs shadow-lg transition-all"
-                >
-                  Execute Comparative Audit
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3 w-full max-w-sm">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-accent-primary to-accent-secondary hover:opacity-95 text-midnight-950 font-bold text-xs shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer"
-                >
-                  <Upload className="w-4 h-4" />
-                  Upload 2nd Document to Compare
-                </button>
-
-                <div className="flex items-center gap-2 w-full my-1">
-                  <div className="h-px bg-white/10 flex-1" />
-                  <span className="text-[10px] text-text-muted uppercase font-bold tracking-wider">or instant options</span>
-                  <div className="h-px bg-white/10 flex-1" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 w-full">
-                  <button
-                    onClick={handleRunAudit}
-                    className="py-2 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-text-secondary hover:text-white text-[11px] font-semibold transition-all"
-                  >
-                    🔍 Audit Self-Consistency
-                  </button>
-
-                  <button
-                    onClick={handleLoadDemoPair}
-                    className="py-2 px-3 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-300 text-[11px] font-semibold flex items-center justify-center gap-1 transition-all"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Try Demo Contract Pair
-                  </button>
-                </div>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={handleRunAudit}
+              className="py-1.5 px-4 rounded bg-[var(--color-accent)] text-white text-xs font-medium hover:opacity-95 transition-opacity"
+            >
+              Run Comparative Audit
+            </button>
           </div>
         )}
 
-
-        {/* Loading Skeleton */}
+        {/* State: Auditing Loading */}
         {isAuditingDiff && (
-          <div className="space-y-4 py-8">
-            <div className="p-4 rounded-xl bg-midnight-950 border border-white/10 flex flex-col items-center justify-center text-center">
-              <div className="w-10 h-10 border-2 border-rose-500/20 border-t-rose-500 rounded-full animate-spin mb-3" />
-              <p className="text-xs font-semibold text-text-primary">
-                Scanning Cross-Document Clauses & Numbers...
-              </p>
-              <p className="text-[11px] text-text-muted mt-1">
-                Comparing semantic vectors & extracting numerical entities
-              </p>
-            </div>
+          <div className="py-12 flex flex-col items-center justify-center text-center border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-surface)]">
+            <RefreshCw className="w-6 h-6 animate-spin text-[var(--color-accent)] mb-2" />
+            <p className="text-xs font-semibold text-[var(--text-primary)] font-mono-data">
+              Auditing cross-document clauses & numbers...
+            </p>
+            <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+              Calculating semantic distance and numerical variance
+            </p>
           </div>
         )}
 
-        {/* Active Audit Report */}
+        {/* State: Active Diff Report as Real Comparison Table */}
         {activeDiffReport && !isAuditingDiff && (
-          <div className="space-y-4">
-            {/* Executive Risk Scorecard */}
-            <div className="p-4 rounded-xl bg-midnight-950 border border-white/10 shadow-xl backdrop-blur-md">
-              <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                <div className="flex items-center gap-2">
-                  <div
-                    className={`w-2.5 h-2.5 rounded-full ${
-                      activeDiffReport.critical_count > 0
-                        ? "bg-rose-500 animate-ping"
-                        : "bg-emerald-400"
-                    }`}
-                  />
-                  <span className="text-xs font-bold text-text-primary uppercase tracking-wider">
-                    Executive Audit Assessment
-                  </span>
-                </div>
-                <span className="text-xs font-mono font-bold text-amber-300 bg-amber-400/10 border border-amber-400/20 px-2.5 py-0.5 rounded-full">
+          <div className="space-y-3">
+            {/* Executive Risk Scorecard (Clean, Dense, Screenshot-Ready) */}
+            <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+              <div className="flex items-center justify-between pb-2 border-b border-[var(--border-subtle)]">
+                <span className="text-[10.5px] font-mono-data font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                  Executive Alignment Summary
+                </span>
+                <span className="text-[11px] font-mono-data font-semibold px-2 py-0.5 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)] text-[var(--text-primary)]">
                   {Math.round(activeDiffReport.alignment_score * 100)}% Alignment
                 </span>
               </div>
 
-              <p className="text-xs text-text-secondary mt-2.5 leading-relaxed font-medium">
+              <p className="text-xs text-[var(--text-secondary)] mt-2 leading-relaxed">
                 {activeDiffReport.summary}
               </p>
 
-              <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-white/5 text-center">
-                <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-2">
-                  <span className="text-base font-extrabold text-rose-400 block font-mono">
+              <div className="grid grid-cols-3 gap-2 mt-2.5 pt-2.5 border-t border-[var(--border-subtle)] text-center text-xs">
+                <div className="p-1.5 rounded bg-[var(--bg-surface-raised)] border border-[var(--border-subtle)]">
+                  <span className="text-sm font-bold font-mono-data text-[var(--color-danger)] block">
                     {activeDiffReport.critical_count}
                   </span>
-                  <span className="text-[10px] text-rose-300 font-semibold uppercase">
+                  <span className="text-[9.5px] font-mono-data text-[var(--text-muted)] uppercase">
                     Critical Breaches
                   </span>
                 </div>
-
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2">
-                  <span className="text-base font-extrabold text-amber-400 block font-mono">
+                <div className="p-1.5 rounded bg-[var(--bg-surface-raised)] border border-[var(--border-subtle)]">
+                  <span className="text-sm font-bold font-mono-data text-[var(--color-warning)] block">
                     {activeDiffReport.warning_count}
                   </span>
-                  <span className="text-[10px] text-amber-300 font-semibold uppercase">
+                  <span className="text-[9.5px] font-mono-data text-[var(--text-muted)] uppercase">
                     Modifications
                   </span>
                 </div>
-
-                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2">
-                  <span className="text-base font-extrabold text-emerald-400 block font-mono">
+                <div className="p-1.5 rounded bg-[var(--bg-surface-raised)] border border-[var(--border-subtle)]">
+                  <span className="text-sm font-bold font-mono-data text-[var(--color-success)] block">
                     {Math.max(0, 10 - activeDiffReport.conflicts.length)}
                   </span>
-                  <span className="text-[10px] text-emerald-300 font-semibold uppercase">
-                    Aligned Clauses
+                  <span className="text-[9.5px] font-mono-data text-[var(--text-muted)] uppercase">
+                    Aligned Terms
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Filter Pills & Search */}
-            <div className="flex items-center gap-2 justify-between">
-              <div className="flex items-center gap-1.5 text-xs">
+            {/* Filter & Keyword Search */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1 text-xs">
                 <button
+                  type="button"
                   onClick={() => setFilterSeverity("all")}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
                     filterSeverity === "all"
-                      ? "bg-white/15 text-white"
-                      : "bg-white/5 text-text-muted hover:text-text-secondary"
+                      ? "bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-default)] font-semibold"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   All ({conflicts.length})
                 </button>
                 <button
+                  type="button"
                   onClick={() => setFilterSeverity("critical")}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
                     filterSeverity === "critical"
-                      ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                      : "bg-white/5 text-text-muted hover:text-text-secondary"
+                      ? "bg-[var(--bg-surface)] text-[var(--color-danger)] border border-[var(--border-default)] font-semibold"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   Critical ({activeDiffReport.critical_count})
                 </button>
                 <button
+                  type="button"
                   onClick={() => setFilterSeverity("warning")}
-                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
                     filterSeverity === "warning"
-                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                      : "bg-white/5 text-text-muted hover:text-text-secondary"
+                      ? "bg-[var(--bg-surface)] text-[var(--color-warning)] border border-[var(--border-default)] font-semibold"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   Warnings ({activeDiffReport.warning_count})
@@ -484,89 +409,66 @@ export default function ContradictionMatrix() {
                   placeholder="Search conflicts..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-midnight-950 border border-white/10 rounded-lg pl-7 pr-2.5 py-1 text-xs text-text-secondary placeholder:text-text-muted focus:outline-none focus:border-accent-primary w-36 sm:w-44"
+                  className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded pl-6 pr-2 py-1 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--color-accent)] w-36 sm:w-44"
                 />
-                <Search className="w-3 h-3 text-text-muted absolute left-2 top-2" />
+                <Search className="w-3 h-3 text-[var(--text-muted)] absolute left-1.5 top-2" />
               </div>
             </div>
 
-            {/* Conflict Cards */}
-            <div className="space-y-3">
-              {filteredConflicts.map((c) => {
-                const isCritical = c.severity === "critical";
+            {/* The Real Comparison Table (Screen 3) */}
+            <div className="border border-[var(--border-subtle)] rounded-lg overflow-x-auto bg-[var(--bg-surface)] shadow-sm">
+              <table className="w-full text-left text-xs border-collapse min-w-[700px]">
+                <thead>
+                  <tr className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface-raised)] text-[10px] font-mono-data text-[var(--text-muted)] uppercase tracking-wider">
+                    <th className="p-2.5 font-semibold w-48">Clause / Term</th>
+                    <th className="p-2.5 font-semibold">Document A (Baseline)</th>
+                    <th className="p-2.5 font-semibold">Document B (Comparison)</th>
+                    <th className="p-2.5 font-semibold w-40">Variance (Old → New)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-subtle)]">
+                  {filteredConflicts.map((c) => {
+                    const isCritical = c.severity === "critical";
+                    const delta = extractDelta(c);
 
-                return (
-                  <motion.div
-                    key={c.id}
-                    layout
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`rounded-xl border p-4 bg-midnight-950/80 backdrop-blur-sm transition-all ${
-                      isCritical
-                        ? "border-rose-500/30 shadow-[0_0_20px_rgba(244,63,94,0.06)]"
-                        : "border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.06)]"
-                    }`}
-                  >
-                    {/* Card Header */}
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {isCritical ? (
-                          <AlertOctagon className="w-4 h-4 text-rose-400 shrink-0" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                        )}
-                        <h4 className="text-xs font-bold text-text-primary tracking-tight">
-                          {c.topic}
-                        </h4>
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`text-[9px] uppercase font-mono font-bold px-2 py-0.5 rounded border ${
-                            isCritical
-                              ? "bg-rose-500/15 border-rose-500/30 text-rose-300"
-                              : "bg-amber-500/15 border-amber-500/30 text-amber-300"
-                          }`}
-                        >
-                          {c.severity}
-                        </span>
-                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-text-muted border border-white/10">
-                          {c.conflict_type.replace("_", " ")}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Discrepancy & Risk Explanation */}
-                    <p className="text-xs text-text-secondary leading-relaxed mb-2 font-medium">
-                      {c.explanation}
-                    </p>
-
-                    <div className="p-2 rounded-lg bg-white/[0.02] border border-white/5 mb-3 text-[11px] text-text-muted flex items-start gap-1.5">
-                      <ShieldAlert className="w-3.5 h-3.5 text-rose-400/80 shrink-0 mt-0.5" />
-                      <span>
-                        <strong className="text-text-secondary">Risk Analysis:</strong> {c.risk_analysis}
-                      </span>
-                    </div>
-
-                    {/* Side-by-Side Excerpts */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                      {/* Doc A Snippet */}
-                      <div className="p-2.5 rounded-lg bg-midnight-900 border border-white/5 flex flex-col justify-between group hover:border-accent-primary/40 transition-all">
-                        <div>
-                          <div className="flex items-center justify-between text-[10px] text-text-muted font-mono mb-1.5">
-                            <span className="truncate max-w-[130px] font-semibold text-text-secondary">
-                              Doc A: {c.doc_a.filename}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-white/10 text-white font-bold">
-                              Page {c.doc_a.page}
+                    return (
+                      <tr
+                        key={c.id}
+                        className="hover:bg-[var(--bg-surface-raised)] transition-colors align-top"
+                      >
+                        {/* Column 1: Clause / Severity */}
+                        <td className="p-2.5 space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            {isCritical ? (
+                              <AlertOctagon className="w-3.5 h-3.5 text-[var(--color-danger)] shrink-0" />
+                            ) : (
+                              <AlertTriangle className="w-3.5 h-3.5 text-[var(--color-warning)] shrink-0" />
+                            )}
+                            <span className="font-semibold text-[12px] text-[var(--text-primary)] leading-tight">
+                              {c.topic}
                             </span>
                           </div>
-                          <p className="text-[11px] text-text-secondary italic line-clamp-3">
-                            &quot;{c.doc_a.snippet}&quot;
+                          <div className="flex items-center gap-1">
+                            <span
+                              className={`text-[9px] uppercase font-mono-data font-semibold px-1 py-0.2 rounded border ${
+                                isCritical
+                                  ? "border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)]"
+                                  : "border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] text-[var(--color-warning)]"
+                              }`}
+                            >
+                              {c.severity}
+                            </span>
+                            <span className="text-[9px] font-mono-data text-[var(--text-muted)]">
+                              {c.conflict_type.replace("_", " ")}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[var(--text-muted)] leading-relaxed mt-1">
+                            {c.risk_analysis}
                           </p>
-                        </div>
+                        </td>
 
-                        <button
+                        {/* Column 2: Document A Baseline Snippet (Clickable to jump) */}
+                        <td
                           onClick={() =>
                             handleInspectSnippet(
                               c.doc_a.filename,
@@ -576,30 +478,23 @@ export default function ContradictionMatrix() {
                               c.severity
                             )
                           }
-                          className="mt-2.5 pt-2 border-t border-white/5 w-full flex items-center justify-center gap-1 text-[10px] font-semibold text-accent-primary hover:text-white transition-colors"
+                          className="p-2.5 cursor-pointer hover:bg-[var(--bg-subtle)] transition-colors group border-r border-[var(--border-subtle)]"
+                          title="Click to jump to source page in Doc A"
                         >
-                          <Search className="w-3 h-3" />
-                          Inspect in Doc A Canvas
-                        </button>
-                      </div>
-
-                      {/* Doc B Snippet */}
-                      <div className="p-2.5 rounded-lg bg-midnight-900 border border-white/5 flex flex-col justify-between group hover:border-rose-400/40 transition-all">
-                        <div>
-                          <div className="flex items-center justify-between text-[10px] text-text-muted font-mono mb-1.5">
-                            <span className="truncate max-w-[130px] font-semibold text-rose-300">
-                              Doc B: {c.doc_b.filename}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">
-                              Page {c.doc_b.page}
+                          <div className="flex items-center justify-between text-[10px] font-mono-data text-[var(--text-muted)] mb-1">
+                            <span className="truncate max-w-[120px]">{c.doc_a.filename}</span>
+                            <span className="inline-flex items-center gap-0.5 text-[var(--color-accent)] font-semibold">
+                              <span>p. {c.doc_a.page}</span>
+                              <ExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100" />
                             </span>
                           </div>
-                          <p className="text-[11px] text-rose-200/90 italic line-clamp-3">
-                            &quot;{c.doc_b.snippet}&quot;
+                          <p className="text-[11.5px] text-[var(--text-secondary)] italic leading-relaxed">
+                            &quot;{c.doc_a.snippet}&quot;
                           </p>
-                        </div>
+                        </td>
 
-                        <button
+                        {/* Column 3: Document B Comparison Snippet (Clickable to jump) */}
+                        <td
                           onClick={() =>
                             handleInspectSnippet(
                               c.doc_b.filename,
@@ -609,20 +504,48 @@ export default function ContradictionMatrix() {
                               c.severity
                             )
                           }
-                          className="mt-2.5 pt-2 border-t border-white/5 w-full flex items-center justify-center gap-1 text-[10px] font-semibold text-rose-400 hover:text-white transition-colors"
+                          className="p-2.5 cursor-pointer hover:bg-[var(--bg-subtle)] transition-colors group border-r border-[var(--border-subtle)]"
+                          title="Click to jump to source page in Doc B"
                         >
-                          <Search className="w-3 h-3" />
-                          Inspect in Doc B Canvas
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
+                          <div className="flex items-center justify-between text-[10px] font-mono-data text-[var(--text-muted)] mb-1">
+                            <span className="truncate max-w-[120px]">{c.doc_b.filename}</span>
+                            <span className="inline-flex items-center gap-0.5 text-[var(--color-accent)] font-semibold">
+                              <span>p. {c.doc_b.page}</span>
+                              <ExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100" />
+                            </span>
+                          </div>
+                          <p className="text-[11.5px] text-[var(--text-primary)] italic leading-relaxed">
+                            &quot;{c.doc_b.snippet}&quot;
+                          </p>
+                        </td>
+
+                        {/* Column 4: Delta / Variance */}
+                        <td className="p-2.5 font-mono-data text-[11px] space-y-1">
+                          {delta ? (
+                            <div className="space-y-0.5">
+                              <div className="text-[var(--text-muted)] line-through">
+                                {delta.oldVal}
+                              </div>
+                              <div className="font-semibold text-[var(--color-accent)] flex items-center gap-1">
+                                <ArrowRight className="w-2.5 h-2.5" />
+                                <span>{delta.newVal}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-[var(--text-secondary)]">
+                              {c.explanation}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
 
               {filteredConflicts.length === 0 && (
-                <div className="text-center py-8 text-xs text-text-muted">
-                  No conflicts matched your search filter.
+                <div className="text-center py-6 text-xs text-[var(--text-muted)]">
+                  No conflicts matched your current search/filter.
                 </div>
               )}
             </div>

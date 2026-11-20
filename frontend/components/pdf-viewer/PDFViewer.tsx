@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   ZoomIn,
   ZoomOut,
@@ -91,7 +90,6 @@ export default function PDFViewer() {
     e.preventDefault();
   };
 
-  // Keep track of scale in ref for high-performance event listeners
   const scaleRef = useRef(pdfScale);
   useEffect(() => {
     scaleRef.current = pdfScale;
@@ -117,7 +115,7 @@ export default function PDFViewer() {
     };
   }, [setPdfScale]);
 
-  // Load PDF.js library eagerly
+  // Load PDF.js library
   useEffect(() => {
     async function loadPdfJs() {
       const pdfjsLib = await import("pdfjs-dist");
@@ -188,7 +186,6 @@ export default function PDFViewer() {
 
         const cleanSnippet = snippet.replace(/\s+/g, " ").trim().toLowerCase();
 
-        // Build full page string with item ranges
         let fullPageText = "";
         const itemRanges: Array<{
           start: number;
@@ -207,14 +204,12 @@ export default function PDFViewer() {
 
         const pageLower = fullPageText.toLowerCase();
 
-        // 1. Direct or partial phrase search
         let matchStart = pageLower.indexOf(cleanSnippet);
         let matchEnd = -1;
 
         if (matchStart !== -1) {
           matchEnd = matchStart + cleanSnippet.length;
         } else {
-          // Fallback to first 4-6 key words
           const words = cleanSnippet.split(" ").filter((w) => w.length > 3);
           if (words.length >= 3) {
             const prefix = words.slice(0, 4).join(" ");
@@ -254,7 +249,6 @@ export default function PDFViewer() {
             }
           }
         } else {
-          // Token fuzzy fallback (numbers and major keywords)
           const keywords = cleanSnippet.split(" ").filter((w) => w.length >= 4);
           for (const range of itemRanges) {
             const it = range.item;
@@ -321,7 +315,6 @@ export default function PDFViewer() {
 
       if (!context) return;
 
-      // High-DPI / Retina super-sampling (renders at physical pixel grid for razor-sharp clarity)
       const outputScale =
         typeof window !== "undefined"
           ? Math.min(Math.max(window.devicePixelRatio || 1, 2), 3)
@@ -354,7 +347,6 @@ export default function PDFViewer() {
 
       await renderTask.promise;
 
-      // Re-calculate visual bounding boxes after rendering
       const targetSnippet =
         activeVisualHighlight?.snippet || highlightedCitation?.highlighted_text || "";
       const targetPage =
@@ -380,19 +372,6 @@ export default function PDFViewer() {
     renderPage();
   }, [pdfDoc, currentPage, pdfScale, renderPage]);
 
-  // Re-render when devicePixelRatio changes (e.g. moving window between Retina & external display)
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
-    const handleDprChange = () => {
-      renderPage();
-    };
-    mq.addEventListener?.("change", handleDprChange);
-    return () => {
-      mq.removeEventListener?.("change", handleDprChange);
-    };
-  }, [renderPage]);
-
   // Trigger bounding box recomputation when active highlight changes
   useEffect(() => {
     const targetSnippet =
@@ -400,7 +379,12 @@ export default function PDFViewer() {
     const targetPage =
       activeVisualHighlight?.page || highlightedCitation?.page;
 
-    if (targetSnippet && targetPage === currentPage && currentPageObjRef.current && currentViewportRef.current) {
+    if (
+      targetSnippet &&
+      targetPage === currentPage &&
+      currentPageObjRef.current &&
+      currentViewportRef.current
+    ) {
       computeBoundingBoxes(currentPageObjRef.current, currentViewportRef.current, targetSnippet);
     }
   }, [activeVisualHighlight, highlightedCitation, currentPage, computeBoundingBoxes]);
@@ -430,16 +414,15 @@ export default function PDFViewer() {
 
   if (!activeDocumentName) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-midnight-950">
-        <FileText className="w-10 h-10 text-text-muted mb-3 opacity-40 animate-pulse" />
-        <p className="text-sm text-text-muted font-medium">
-          Select a document from the Left Sidebar to begin reading
+      <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-[var(--bg-canvas)]">
+        <FileText className="w-8 h-8 text-[var(--text-muted)] mb-2 opacity-50" />
+        <p className="text-xs text-[var(--text-muted)] font-mono-data">
+          Select a document from the corpus sidebar to inspect
         </p>
       </div>
     );
   }
 
-  // Active target highlight details
   const activeSnippet =
     activeVisualHighlight?.snippet || highlightedCitation?.highlighted_text || "";
   const activeSeverity = activeVisualHighlight?.severity || "citation";
@@ -448,34 +431,36 @@ export default function PDFViewer() {
     (highlightedCitation ? `Cited Source [Page ${highlightedCitation.page}]` : "");
 
   return (
-    <div className="flex flex-col h-full bg-midnight-950 select-none">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/6 bg-surface-primary/80 backdrop-blur-sm">
-        <div className="flex items-center gap-1">
+    <div className="flex flex-col h-full bg-[var(--bg-canvas)] select-none text-[var(--text-primary)]">
+      {/* Viewer Toolbar: Dense, Crisp, Professional */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] shrink-0">
+        <div className="flex items-center gap-1 text-xs">
           <button
+            type="button"
             onClick={() => goToPage(currentPage - 1)}
             disabled={currentPage <= 1}
-            className="p-1.5 rounded-lg hover:bg-white/8 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
 
-          <div className="flex items-center gap-1.5 px-2">
+          <div className="flex items-center gap-1 px-1 font-mono-data text-xs">
             <input
               type="number"
               value={currentPage}
               onChange={(e) => goToPage(parseInt(e.target.value) || 1)}
-              className="w-10 text-center text-xs bg-white/5 border border-white/10 rounded px-1 py-0.5 focus:outline-none focus:border-accent-primary"
+              className="w-8 text-center text-xs bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded py-0.5 focus:outline-none focus:border-[var(--color-accent)]"
               min={1}
               max={totalPages}
             />
-            <span className="text-xs text-text-muted">/ {totalPages}</span>
+            <span className="text-[var(--text-muted)]">/ {totalPages}</span>
           </div>
 
           <button
+            type="button"
             onClick={() => goToPage(currentPage + 1)}
             disabled={currentPage >= totalPages}
-            className="p-1.5 rounded-lg hover:bg-white/8 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -483,48 +468,49 @@ export default function PDFViewer() {
 
         {/* Visual Grounding Status Pill */}
         {activeSnippet && (
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-xs">
-            <Target className="w-3.5 h-3.5 text-accent-primary animate-pulse" />
-            <span className="text-[11px] font-semibold text-text-secondary">
-              Pixel Grounding Active
-            </span>
+          <div className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] text-[10.5px] font-mono-data font-semibold text-[var(--color-accent)]">
+            <Target className="w-3 h-3" />
+            <span>Pixel Grounding Active</span>
           </div>
         )}
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 text-xs">
           <button
+            type="button"
             onClick={zoomOut}
-            className="p-1.5 rounded-lg hover:bg-white/8 transition-colors"
+            className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
             title="Zoom out"
           >
-            <ZoomOut className="w-4 h-4" />
+            <ZoomOut className="w-3.5 h-3.5" />
           </button>
 
-          <span className="text-xs text-text-muted px-1 min-w-[3rem] text-center">
+          <span className="text-[11px] font-mono-data text-[var(--text-muted)] px-1 min-w-[2.5rem] text-center">
             {Math.round(pdfScale * 100)}%
           </span>
 
           <button
+            type="button"
             onClick={zoomIn}
-            className="p-1.5 rounded-lg hover:bg-white/8 transition-colors"
+            className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
             title="Zoom in"
           >
-            <ZoomIn className="w-4 h-4" />
+            <ZoomIn className="w-3.5 h-3.5" />
           </button>
 
-          <div className="w-px h-4 bg-white/10 mx-1" />
+          <div className="w-px h-3.5 bg-[var(--border-subtle)] mx-1" />
 
           <button
+            type="button"
             onClick={fitWidth}
-            className="p-1.5 rounded-lg hover:bg-white/8 transition-colors"
+            className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
             title="Fit width"
           >
-            <Maximize2 className="w-4 h-4" />
+            <Maximize2 className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* PDF Canvas or Interactive Demo Document */}
+      {/* PDF Canvas Stage */}
       <div
         ref={containerRef}
         onMouseDown={handleMouseDown}
@@ -532,107 +518,61 @@ export default function PDFViewer() {
         onMouseUp={handleMouseUpOrLeave}
         onMouseLeave={handleMouseUpOrLeave}
         onContextMenu={handleContextMenu}
-        className="flex-1 overflow-auto flex p-4 cursor-grab active:cursor-grabbing select-none"
+        className="flex-1 overflow-auto flex p-4 cursor-grab active:cursor-grabbing select-none bg-[var(--bg-canvas)]"
       >
         <div className="relative m-auto">
           {pdfDoc ? (
             <>
               <canvas
                 ref={canvasRef}
-                className="shadow-2xl rounded-sm block"
+                className="shadow-sm border border-[var(--border-default)] rounded block"
                 style={{
                   background: "white",
                   imageRendering: "auto",
                 }}
               />
 
-              {/* Pixel-Level Bounding Box Highlights & Floating Badge */}
-              <AnimatePresence>
-                {activeSnippet && (
-                  <>
-                    {/* Anchored Floating Header Badge */}
-                    {highlightAnchor && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0 }}
-                        style={{
-                          position: "absolute",
-                          top: `${Math.max(8, highlightAnchor.top - 46)}px`,
-                          left: `${Math.max(8, highlightAnchor.left)}px`,
-                          zIndex: 40,
-                        }}
-                        className={`pointer-events-none flex items-center gap-2 px-3 py-1.5 rounded-lg border shadow-2xl backdrop-blur-md text-xs font-semibold ${
-                          activeSeverity === "critical"
-                            ? "bg-midnight-950/95 border-rose-500/70 text-rose-200 shadow-rose-500/20"
-                            : activeSeverity === "warning"
-                            ? "bg-midnight-950/95 border-amber-500/70 text-amber-200 shadow-amber-500/20"
-                            : "bg-midnight-950/95 border-amber-400/70 text-amber-300 shadow-amber-400/20"
-                        }`}
-                      >
-                        <span
-                          className={`w-2 h-2 rounded-full animate-ping ${
-                            activeSeverity === "critical"
-                              ? "bg-rose-500"
-                              : activeSeverity === "warning"
-                              ? "bg-amber-400"
-                              : "bg-amber-400"
-                          }`}
-                        />
-                        <span className="font-bold">{activeLabel}:</span>
-                        <span className="italic truncate max-w-[260px] opacity-90">
-                          &quot;{activeSnippet}&quot;
-                        </span>
-                      </motion.div>
-                    )}
+              {/* Exact Bounding Box Highlights & Anchored Badge */}
+              {activeSnippet && (
+                <>
+                  {highlightAnchor && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: `${Math.max(6, highlightAnchor.top - 36)}px`,
+                        left: `${Math.max(6, highlightAnchor.left)}px`,
+                        zIndex: 40,
+                      }}
+                      className="pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded border border-[var(--border-strong)] bg-[var(--bg-surface-raised)] text-[var(--text-primary)] text-[11px] font-mono-data font-semibold shadow-md"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)]" />
+                      <span>{activeLabel}:</span>
+                      <span className="italic truncate max-w-[220px] text-[var(--text-secondary)]">
+                        &quot;{activeSnippet}&quot;
+                      </span>
+                    </div>
+                  )}
 
-                    {/* Exact Bounding Boxes for Each Line/Word */}
-                    {boundingBoxes.map((box, i) => (
-                      <motion.div
-                        key={`bbox-${i}`}
-                        initial={{ opacity: 0, scale: 0.97 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0 }}
-                        style={{
-                          position: "absolute",
-                          left: `${box.x}px`,
-                          top: `${box.y}px`,
-                          width: `${box.width}px`,
-                          height: `${box.height}px`,
-                          zIndex: 35,
-                        }}
-                        className={`pointer-events-none rounded transition-all ${
-                          activeSeverity === "critical"
-                            ? "bg-rose-500/25 border-2 border-rose-500/90 shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-pulse"
-                            : activeSeverity === "warning"
-                            ? "bg-amber-400/25 border-2 border-amber-400/90 shadow-[0_0_15px_rgba(251,191,36,0.4)] animate-pulse"
-                            : "bg-amber-400/25 border-2 border-amber-400/90 shadow-[0_0_15px_rgba(251,191,36,0.4)] animate-pulse"
-                        }`}
-                      />
-                    ))}
-
-                    {/* Fallback if boundingBoxes calculation yields 0 text items */}
-                    {boundingBoxes.length === 0 && (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-0 pointer-events-none rounded ring-4 ring-amber-400/80 shadow-[0_0_40px_rgba(251,191,36,0.2)]"
-                      >
-                        <div className="absolute top-3 left-3 right-3 p-2.5 rounded-lg bg-midnight-950/90 border border-amber-400/50 backdrop-blur-md text-amber-200 text-xs font-medium flex items-center gap-2 shadow-xl">
-                          <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                          <span className="font-semibold">{activeLabel}:</span>
-                          <span className="italic truncate">&quot;{activeSnippet}&quot;</span>
-                        </div>
-                      </motion.div>
-                    )}
-                  </>
-                )}
-              </AnimatePresence>
+                  {boundingBoxes.map((box, i) => (
+                    <div
+                      key={`bbox-${i}`}
+                      style={{
+                        position: "absolute",
+                        left: `${box.x}px`,
+                        top: `${box.y}px`,
+                        width: `${box.width}px`,
+                        height: `${box.height}px`,
+                        zIndex: 35,
+                      }}
+                      className="pointer-events-none citation-highlight-box citation-flash-active"
+                    />
+                  ))}
+                </>
+              )}
 
               {rendering && (
-                <div className="absolute inset-0 flex items-center justify-center bg-midnight-950/50">
-                  <div className="w-6 h-6 border-2 border-accent-primary/30 border-t-accent-primary rounded-full animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                  <div className="w-5 h-5 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
                 </div>
               )}
             </>
@@ -642,37 +582,34 @@ export default function PDFViewer() {
                 width: `${Math.floor(612 * pdfScale * 1.5)}px`,
                 minHeight: `${Math.floor(792 * pdfScale * 1.5)}px`,
               }}
-              className="bg-midnight-900/60 border border-white/10 rounded-2xl flex flex-col items-center justify-center p-8 backdrop-blur-xl shadow-2xl select-none"
+              className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-lg flex flex-col items-center justify-center p-8 select-none"
             >
-              <div className="w-12 h-12 rounded-2xl bg-accent-primary/10 border border-accent-primary/20 flex items-center justify-center mb-4">
-                <FileText className="w-6 h-6 text-accent-primary animate-pulse" />
-              </div>
-              <p className="text-sm font-semibold text-text-primary mb-1">
+              <FileText className="w-6 h-6 text-[var(--color-accent)] animate-pulse mb-2" />
+              <p className="text-xs font-semibold text-[var(--text-primary)] mb-0.5">
                 Loading {activeDocumentName}...
               </p>
-              <p className="text-xs text-text-muted mb-4">Preparing pages and citations</p>
-              <div className="w-48 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-accent-primary to-amber-500 animate-[shimmer_1.5s_infinite] w-full" />
-              </div>
+              <p className="text-[11px] text-[var(--text-muted)] font-mono-data">
+                Preparing pages & coordinates
+              </p>
             </div>
           ) : (
-            /* Interactive Demo Document with Pixel-Level Bounding Box Simulation */
+            /* Interactive Demo Document: Authentic Document Sheet */
             <div
               style={{
                 width: `${Math.floor(612 * pdfScale * 1.5)}px`,
                 minHeight: `${Math.floor(792 * pdfScale * 1.5)}px`,
                 fontSize: `${13 * pdfScale * 1.5}px`,
               }}
-              className="bg-white text-gray-900 shadow-2xl rounded-md p-8 sm:p-12 transition-all border border-gray-200 relative select-text"
+              className="bg-white text-gray-900 shadow-sm border border-gray-300 rounded p-8 sm:p-12 transition-all relative select-text"
             >
-              <div className="border-b border-gray-200 pb-4 mb-6">
-                <div className="flex items-center justify-between text-xs text-gray-500 font-mono mb-2">
-                  <span className="uppercase font-bold tracking-wider">
+              <div className="border-b border-gray-200 pb-3 mb-5">
+                <div className="flex items-center justify-between text-[11px] text-gray-500 font-mono-data mb-1.5">
+                  <span className="uppercase font-semibold tracking-wider">
                     {activeDocumentName.replace(".pdf", "").replace(/_/g, " ")}
                   </span>
                   <span>PAGE {currentPage} OF 3</span>
                 </div>
-                <h2 className="text-lg font-bold text-gray-900 tracking-tight">
+                <h2 className="text-base font-serif-doc font-bold text-gray-900 tracking-tight">
                   {activeDocumentName.includes("2024")
                     ? "MASTER SAAS & SERVICES AGREEMENT (2024 BASELINE)"
                     : activeDocumentName.includes("2025")
@@ -681,24 +618,25 @@ export default function PDFViewer() {
                 </h2>
               </div>
 
-              {/* Document Body Content based on document & page */}
-              <div className="space-y-4 leading-relaxed text-gray-700">
+              {/* Document Text Body */}
+              <div className="space-y-4 leading-relaxed text-gray-700 text-xs sm:text-sm">
                 {activeDocumentName.includes("2024") ? (
                   <>
                     {currentPage === 1 && (
                       <div className="space-y-3">
-                        <h3 className="font-bold text-gray-900">Section 4. Financial & Payment Terms</h3>
+                        <h3 className="font-serif-doc font-bold text-gray-900 text-sm">
+                          Section 4. Financial & Payment Terms
+                        </h3>
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("30 days")
-                              ? "bg-rose-50 border-2 border-rose-500 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-pulse"
-                              : "bg-gray-50 border border-gray-200"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
+                              : "bg-gray-50/50 border border-gray-200"
                           }`}
                         >
                           {activeSnippet.includes("30 days") && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <AlertOctagon className="w-3 h-3" />
-                              ⚖️ Contradiction Point: Net 30 with 1.5% late fee
+                            <div className="absolute -top-2.5 left-2 px-1.5 py-0.2 rounded bg-[var(--color-accent)] text-white text-[9px] font-mono-data font-semibold flex items-center gap-1 shadow-sm">
+                              <span>4.1 Net 30 Term</span>
                             </div>
                           )}
                           <p className="font-semibold text-gray-900">4.1 Payment Terms</p>
@@ -714,18 +652,19 @@ export default function PDFViewer() {
 
                     {currentPage === 2 && (
                       <div className="space-y-3">
-                        <h3 className="font-bold text-gray-900">Section 8. Limitation of Liability</h3>
+                        <h3 className="font-serif-doc font-bold text-gray-900 text-sm">
+                          Section 8. Limitation of Liability
+                        </h3>
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("1,000,000")
-                              ? "bg-rose-50 border-2 border-rose-500 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-pulse"
-                              : "bg-gray-50 border border-gray-200"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
+                              : "bg-gray-50/50 border border-gray-200"
                           }`}
                         >
                           {activeSnippet.includes("1,000,000") && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <AlertOctagon className="w-3 h-3" />
-                              ⚖️ Contradiction Point: $1M Liability Cap
+                            <div className="absolute -top-2.5 left-2 px-1.5 py-0.2 rounded bg-[var(--color-accent)] text-white text-[9px] font-mono-data font-semibold flex items-center gap-1 shadow-sm">
+                              <span>8.1 $1M Liability Cap</span>
                             </div>
                           )}
                           <p className="font-semibold text-gray-900">8.1 Liability Cap</p>
@@ -738,18 +677,19 @@ export default function PDFViewer() {
 
                     {currentPage === 3 && (
                       <div className="space-y-3">
-                        <h3 className="font-bold text-gray-900">Schedule B: Service Level Agreement (SLA)</h3>
+                        <h3 className="font-serif-doc font-bold text-gray-900 text-sm">
+                          Schedule B: Service Level Agreement (SLA)
+                        </h3>
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("99.95%")
-                              ? "bg-amber-50 border-2 border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.3)] animate-pulse"
-                              : "bg-gray-50 border border-gray-200"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
+                              : "bg-gray-50/50 border border-gray-200"
                           }`}
                         >
                           {activeSnippet.includes("99.95%") && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-amber-500 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3" />
-                              ⚖️ Modification: 99.95% Availability
+                            <div className="absolute -top-2.5 left-2 px-1.5 py-0.2 rounded bg-[var(--color-accent)] text-white text-[9px] font-mono-data font-semibold flex items-center gap-1 shadow-sm">
+                              <span>B.1 99.95% Availability</span>
                             </div>
                           )}
                           <p className="font-semibold text-gray-900">B.1 Availability Commitment</p>
@@ -764,18 +704,19 @@ export default function PDFViewer() {
                   <>
                     {currentPage === 1 && (
                       <div className="space-y-3">
-                        <h3 className="font-bold text-gray-900">Section 4. Settlement Schedule</h3>
+                        <h3 className="font-serif-doc font-bold text-gray-900 text-sm">
+                          Section 4. Settlement Schedule
+                        </h3>
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("60 calendar days")
-                              ? "bg-rose-50 border-2 border-rose-500 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-pulse"
-                              : "bg-gray-50 border border-gray-200"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
+                              : "bg-gray-50/50 border border-gray-200"
                           }`}
                         >
                           {activeSnippet.includes("60 calendar days") && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <AlertOctagon className="w-3 h-3" />
-                              ⚖️ Contradiction Point: 60 days with 0% penalty
+                            <div className="absolute -top-2.5 left-2 px-1.5 py-0.2 rounded bg-[var(--color-accent)] text-white text-[9px] font-mono-data font-semibold flex items-center gap-1 shadow-sm">
+                              <span>4.1 Net 60 Term</span>
                             </div>
                           )}
                           <p className="font-semibold text-gray-900">4.1 Settlement</p>
@@ -788,18 +729,19 @@ export default function PDFViewer() {
 
                     {currentPage === 2 && (
                       <div className="space-y-3">
-                        <h3 className="font-bold text-gray-900">Section 8. Damages & Indemnity</h3>
+                        <h3 className="font-serif-doc font-bold text-gray-900 text-sm">
+                          Section 8. Damages & Indemnity
+                        </h3>
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("250,000")
-                              ? "bg-rose-50 border-2 border-rose-500 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-pulse"
-                              : "bg-gray-50 border border-gray-200"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
+                              : "bg-gray-50/50 border border-gray-200"
                           }`}
                         >
                           {activeSnippet.includes("250,000") && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <AlertOctagon className="w-3 h-3" />
-                              ⚖️ Contradiction Point: Reduced to $250k
+                            <div className="absolute -top-2.5 left-2 px-1.5 py-0.2 rounded bg-[var(--color-accent)] text-white text-[9px] font-mono-data font-semibold flex items-center gap-1 shadow-sm">
+                              <span>8.1 $250k Cap</span>
                             </div>
                           )}
                           <p className="font-semibold text-gray-900">8.1 Damages Cap</p>
@@ -812,18 +754,19 @@ export default function PDFViewer() {
 
                     {currentPage === 3 && (
                       <div className="space-y-3">
-                        <h3 className="font-bold text-gray-900">Schedule B: Availability Target</h3>
+                        <h3 className="font-serif-doc font-bold text-gray-900 text-sm">
+                          Schedule B: Availability Target
+                        </h3>
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("99.5%")
-                              ? "bg-amber-50 border-2 border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.3)] animate-pulse"
-                              : "bg-gray-50 border border-gray-200"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
+                              : "bg-gray-50/50 border border-gray-200"
                           }`}
                         >
                           {activeSnippet.includes("99.5%") && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-amber-500 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3" />
-                              ⚖️ Downgraded to 99.5% Target
+                            <div className="absolute -top-2.5 left-2 px-1.5 py-0.2 rounded bg-[var(--color-accent)] text-white text-[9px] font-mono-data font-semibold flex items-center gap-1 shadow-sm">
+                              <span>B.1 99.5% Target</span>
                             </div>
                           )}
                           <p className="font-semibold text-gray-900">B.1 Availability Commitment</p>
@@ -835,23 +778,16 @@ export default function PDFViewer() {
                     )}
                   </>
                 ) : (
-                  /* Technical Whitepaper default */
                   <>
                     {currentPage === 1 && (
                       <div className="space-y-3">
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("two-stage hybrid")
-                              ? "bg-amber-50 border-2 border-amber-400 shadow-[0_0_25px_rgba(251,191,36,0.3)] animate-pulse"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
                               : ""
                           }`}
                         >
-                          {activeSnippet.includes("two-stage hybrid") && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-amber-500 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <Target className="w-3 h-3" />
-                              🎯 Grounded Claim Citation [97% Faithfulness]
-                            </div>
-                          )}
                           <p className="font-medium text-gray-900">
                             Veridocs implements a two-stage hybrid retrieval architecture fusing BM25 lexical indexing with dense semantic vector representations.
                           </p>
@@ -865,18 +801,12 @@ export default function PDFViewer() {
                     {currentPage === 2 && (
                       <div className="space-y-3">
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("cross-encoder")
-                              ? "bg-amber-50 border-2 border-amber-400 shadow-[0_0_25px_rgba(251,191,36,0.3)] animate-pulse"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
                               : ""
                           }`}
                         >
-                          {activeSnippet.includes("cross-encoder") && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-amber-500 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <Target className="w-3 h-3" />
-                              🎯 Grounded Claim Citation [98% Precision]
-                            </div>
-                          )}
                           <p className="font-medium text-gray-900">
                             A deep cross-encoder calculates full token cross-attention across the query and candidate passages, filtering out false positives.
                           </p>
@@ -890,20 +820,13 @@ export default function PDFViewer() {
                     {currentPage === 3 && (
                       <div className="space-y-3">
                         <div
-                          className={`p-3 rounded-lg transition-all relative ${
+                          className={`p-2.5 rounded transition-all relative ${
                             activeSnippet.includes("factual alignment") ||
                             activeSnippet.includes("entailment")
-                              ? "bg-amber-50 border-2 border-amber-400 shadow-[0_0_25px_rgba(251,191,36,0.3)] animate-pulse"
+                              ? "bg-amber-50/60 border border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
                               : ""
                           }`}
                         >
-                          {(activeSnippet.includes("factual alignment") ||
-                            activeSnippet.includes("entailment")) && (
-                            <div className="absolute -top-3 left-3 px-2 py-0.5 rounded bg-amber-500 text-white text-[10px] font-mono font-bold shadow-lg flex items-center gap-1">
-                              <Target className="w-3 h-3" />
-                              🎯 Grounded Entailment Verification [97% Confidence]
-                            </div>
-                          )}
                           <p className="font-medium text-gray-900">
                             Factual alignment is verified post-generation by computing premise-hypothesis entailment scores against source passages.
                           </p>
@@ -917,28 +840,29 @@ export default function PDFViewer() {
                 )}
               </div>
 
-              <div className="mt-12 pt-6 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
-                <span>Veridocs Forensic Verification Engine</span>
-                <span>Confidential & Certified</span>
+              <div className="mt-10 pt-4 border-t border-gray-200 flex items-center justify-between text-[11px] text-gray-400 font-mono-data">
+                <span>Veridocs Document Verification</span>
+                <span>Page {currentPage} of 3</span>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Page Thumbnails (bottom strip) */}
+      {/* Bottom Thumbnail Strip */}
       {totalPages > 0 && totalPages <= 50 && (
-        <div className="flex items-center gap-1 px-4 py-2 border-t border-white/6 overflow-x-auto bg-surface-primary/80">
+        <div className="flex items-center gap-1 px-3 py-1.5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] shrink-0 overflow-x-auto">
           {Array.from({ length: Math.min(totalPages, 20) }, (_, i) => (
             <button
               key={i + 1}
+              type="button"
               onClick={() => goToPage(i + 1)}
               className={`
-                min-w-[2rem] h-7 rounded text-xs font-medium transition-all
+                min-w-[1.75rem] h-6 rounded text-[11px] font-mono-data font-medium transition-colors
                 ${
                   currentPage === i + 1
-                    ? "bg-accent-primary text-midnight-950 font-bold"
-                    : "bg-white/5 text-text-muted hover:bg-white/10 hover:text-text-secondary"
+                    ? "bg-[var(--color-accent)] text-white font-semibold"
+                    : "bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                 }
               `}
             >
@@ -946,7 +870,9 @@ export default function PDFViewer() {
             </button>
           ))}
           {totalPages > 20 && (
-            <span className="text-xs text-text-muted px-2">+{totalPages - 20} more</span>
+            <span className="text-[10px] text-[var(--text-muted)] font-mono-data px-1">
+              +{totalPages - 20} more
+            </span>
           )}
         </div>
       )}

@@ -15,7 +15,7 @@ interface ResizablePanelProps {
 export default function ResizablePanel({
   width,
   minWidth,
-  maxWidth = 600,
+  maxWidth = 700,
   direction,
   onWidthChange,
   isCollapsed,
@@ -27,7 +27,7 @@ export default function ResizablePanel({
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-      
+
       let newWidth = width;
       if (direction === "left") {
         newWidth = e.clientX;
@@ -68,27 +68,26 @@ export default function ResizablePanel({
     <div
       className="relative flex h-full shrink-0"
       style={{
-        width: isCollapsed ? (direction === "left" ? "60px" : "0px") : `${width}px`,
-        transition: isResizing ? "none" : "width 200ms cubic-bezier(0.4, 0, 0.2, 1)",
+        width: isCollapsed ? (direction === "left" ? "48px" : "0px") : `${width}px`,
+        transition: isResizing ? "none" : "width 180ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}
     >
-      <div className="w-full h-full overflow-hidden flex flex-col">
+      <div className="w-full h-full overflow-hidden flex flex-col bg-[var(--bg-surface)]">
         {children}
       </div>
 
-      {/* Resize Handle */}
+      {/* Resize Handle: 1px divider, subtle orange on hover/active */}
       {!isCollapsed && (
         <div
           ref={resizeRef}
           onMouseDown={handleMouseDown}
           className={`
-            absolute top-0 bottom-0 w-1.5 cursor-col-resize z-50
-            transition-colors duration-150 group hover:bg-accent-primary/40 active:bg-accent-primary/80
+            absolute top-0 bottom-0 w-2 cursor-col-resize z-50 group
             ${direction === "left" ? "right-0 translate-x-1/2" : "left-0 -translate-x-1/2"}
           `}
+          title="Drag to resize panel"
         >
-          {/* Inner handle line indicator */}
-          <div className="w-[1px] h-full bg-white/5 mx-auto group-hover:bg-transparent" />
+          <div className="w-[1px] h-full bg-[var(--border-subtle)] mx-auto group-hover:bg-[var(--color-accent)] group-hover:w-[2px] transition-all" />
         </div>
       )}
     </div>

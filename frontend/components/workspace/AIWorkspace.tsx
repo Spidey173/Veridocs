@@ -16,39 +16,39 @@ export default function AIWorkspace() {
   const conflictCount = activeDiffReport?.conflicts?.length || 0;
 
   return (
-    <div className="w-full h-full flex flex-col bg-midnight-900 border-l border-white/5 overflow-hidden">
-      {/* Top Tab Switcher */}
-      <div className="h-11 px-3 border-b border-white/5 bg-midnight-950/80 backdrop-blur-sm flex items-center justify-between shrink-0">
+    <div className="w-full h-full flex flex-col bg-[var(--bg-surface)] border-l border-[var(--border-subtle)] overflow-hidden select-none">
+      {/* Top Tab Switcher: Dense, Tabular, High-Contrast */}
+      <div className="h-10 px-3 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={() => setActiveWorkspaceTab("chat")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
               activeWorkspaceTab === "chat"
-                ? "bg-white/10 text-white shadow-sm"
-                : "text-text-muted hover:text-text-secondary hover:bg-white/5"
+                ? "bg-[var(--bg-subtle)] text-[var(--text-primary)] font-semibold border border-[var(--border-subtle)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface-raised)]"
             }`}
           >
-            <MessageSquare className="w-3.5 h-3.5 text-accent-primary" />
-            Chat & Evidence
+            <MessageSquare className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+            <span>Chat & Evidence</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveWorkspaceTab("contradictions")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all relative ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors relative ${
               activeWorkspaceTab === "contradictions"
-                ? "bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-sm"
-                : "text-text-muted hover:text-text-secondary hover:bg-white/5"
+                ? "bg-[var(--bg-subtle)] text-[var(--text-primary)] font-semibold border border-[var(--border-subtle)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface-raised)]"
             }`}
           >
-            <Scale className="w-3.5 h-3.5 text-rose-400" />
-            Contradiction Matrix
-            {files.length >= 2 && conflictCount > 0 ? (
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-            ) : files.length >= 2 ? (
-              <span className="text-[9px] font-mono px-1 rounded bg-rose-500/20 text-rose-300 font-bold">
-                DIFF
+            <Scale className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+            <span>Contradiction Matrix</span>
+            {conflictCount > 0 && (
+              <span className="text-[10px] font-mono-data px-1 py-0.2 rounded bg-[var(--color-accent-subtle)] text-[var(--color-accent)] border border-[var(--color-accent-border)] font-bold">
+                {conflictCount}
               </span>
-            ) : null}
+            )}
           </button>
         </div>
       </div>

@@ -73,6 +73,7 @@ interface AppState {
   messages: ChatMessage[];
   isQuerying: boolean;
   currentStreamingId: string | null;
+  pendingQuestion: string | null;
 
   // Insights
   insights: InsightsResponse | null;
@@ -113,6 +114,7 @@ interface AppState {
   appendToMessage: (id: string, token: string) => void;
   setQuerying: (isQuerying: boolean) => void;
   setCurrentStreamingId: (id: string | null) => void;
+  setPendingQuestion: (q: string | null) => void;
   setInsights: (insights: InsightsResponse) => void;
   setLoadingInsights: (loading: boolean) => void;
   setCurrentPage: (page: number) => void;
@@ -147,6 +149,7 @@ export const useAppStore = create<AppState>()(
   messages: [],
   isQuerying: false,
   currentStreamingId: null,
+  pendingQuestion: null,
 
   insights: null,
   isLoadingInsights: false,
@@ -226,6 +229,7 @@ export const useAppStore = create<AppState>()(
         sessionId: null,
         files: [],
         messages: [],
+        pendingQuestion: null,
         insights: null,
         currentPage: 1,
         totalPages: 0,
@@ -261,6 +265,7 @@ export const useAppStore = create<AppState>()(
 
   setQuerying: (isQuerying) => set({ isQuerying }),
   setCurrentStreamingId: (id) => set({ currentStreamingId: id }),
+  setPendingQuestion: (q) => set({ pendingQuestion: q }),
 
   setInsights: (insights) => set({ insights, isLoadingInsights: false }),
   setLoadingInsights: (loading) => set({ isLoadingInsights: loading }),
