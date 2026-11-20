@@ -1,4 +1,4 @@
-.PHONY: help test unit eval clean
+.PHONY: help test unit eval hooks clean
 
 PYTHON ?= $(shell which python3)
 VENV_PYTHON = .venv/bin/python
@@ -12,6 +12,7 @@ help:
 	@echo "  make test      - Run fast unit tests (tests/unit/)"
 	@echo "  make eval      - Run live LLM evaluation harness (tests/evals/)"
 	@echo "                   Options: EVAL_RUNS=5 EVAL_THRESHOLD=0.75"
+	@echo "  make hooks     - Install git commit-msg hook for conventional commits"
 	@echo "  make clean     - Clean temporary test artifacts and pytest caches"
 
 test:
@@ -21,6 +22,11 @@ unit: test
 
 eval:
 	EVAL_RUNS=$(EVAL_RUNS) EVAL_THRESHOLD=$(EVAL_THRESHOLD) $(PYTEST_CMD) -m live_eval backend/tests/evals
+
+hooks:
+	chmod +x .githooks/commit-msg
+	git config core.hooksPath .githooks
+	@echo "Configured git core.hooksPath to .githooks"
 
 clean:
 	rm -rf .pytest_cache backend/.pytest_cache backend/tests/.pytest_cache backend/tests/unit/.pytest_cache backend/tests/evals/.pytest_cache
