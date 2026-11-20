@@ -8,6 +8,7 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
+from typing import Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -78,6 +79,12 @@ async def lifespan(app: FastAPI):
     """Lifecycle manager handling startup validation, database pool, warmup, and graceful shutdown."""
     # Validate configuration on startup
     settings.validate_production_configuration()
+    raw_env = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or settings.ENVIRONMENT).strip().lower()
+    if raw_env == "production" and settings.ENABLE_DEMO_AUTH:
+        raise RuntimeError(
+            "FATAL SECURITY CONFIGURATION: ENABLE_DEMO_AUTH is true while ENV=production. "
+            "Demo authentication endpoints are strictly prohibited in production environments. Refusing to boot."
+        )
 
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
 
@@ -155,12 +162,28 @@ async def metrics_telemetry_middleware(request: Request, call_next):
 Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
 # Register modular sub-routers
-app.include_router(auth.router)
+if settings.ENABLE_DEMO_AUTH:
+    app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(jobs.router)
 app.include_router(query.router)
 app.include_router(audit.router)
 app.include_router(system.router)
+
+
+def configure_demo_auth_routes(app_instance: FastAPI, enabled: Optional[bool] = None) -> bool:
+    """Register or unregister demo auth router dynamically based on settings/flag."""
+    is_enabled = get_settings().ENABLE_DEMO_AUTH if enabled is None else enabled
+    demo_paths = {"/api/auth/demo-token", "/api/auth/token"}
+    has_demo = any(getattr(r, "path", None) in demo_paths for r in app_instance.router.routes)
+    if is_enabled and not has_demo:
+        app_instance.include_router(auth.router)
+        return True
+    elif not is_enabled and has_demo:
+        app_instance.router.routes = [r for r in app_instance.router.routes if getattr(r, "path", None) not in demo_paths]
+        return False
+    return is_enabled
+
 
 # Mount static frontend build if present
 try:

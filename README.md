@@ -61,6 +61,25 @@ flowchart TD
     AuditEngine <--> Providers
 ```
 
+## Security & Authentication
+
+### Demo Token Endpoint Gating (`ENABLE_DEMO_AUTH`)
+- By default, `ENABLE_DEMO_AUTH=false`. The `/api/auth/demo-token` and `/api/auth/token` routes are completely unregistered from the application router (returning `404 Not Found`).
+- To enable demo authentication for local testing or staging demonstrations, explicitly set:
+  ```bash
+  ENABLE_DEMO_AUTH=true
+  ```
+- **Production Safeguard**: If `ENV=production` (or `ENVIRONMENT=production`) and `ENABLE_DEMO_AUTH=true`, the backend refuses to boot at startup and raises a fatal configuration exception.
+- **Least-Privilege Enforcement**: Demo tokens are locked to a low-privilege `demo` role with a strict 15-minute maximum lifetime (900s). Demo tokens cannot access administrative routes (such as `/api/admin/cleanup`) and cannot elevate to admin or any real user's role.
+
+---
+
+## Running Tests
+
+```bash
+pytest backend/tests
+```
+
 ---
 
 ## ⚡ Core Capabilities

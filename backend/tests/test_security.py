@@ -50,24 +50,106 @@ class TestSecurityAndAccessControl:
             verify_access_token(token)
         assert "401" in str(excinfo.value) or "expired" in str(excinfo.value).lower()
 
-    def test_auth_token_endpoint(self, test_client: TestClient):
-        """Verify POST /api/auth/demo-token generates a valid signed demo bearer token."""
+    def test_demo_token_route_absent_when_flag_off(self, test_client: TestClient):
+        """Verify POST /api/auth/demo-token is not registered when ENABLE_DEMO_AUTH is false."""
+        import main
+        from config import get_settings
+        settings = get_settings()
+        main.configure_demo_auth_routes(main.app, enabled=False)
+        assert not settings.ENABLE_DEMO_AUTH
+        # Route should not exist at all, returning 404 rather than 403
         response = test_client.post("/api/auth/demo-token")
-        assert response.status_code == 200
-        data = response.json()
-        assert "access_token" in data
-        assert data["token_type"] == "bearer"
-        assert data["mode"] == "demo"
-        assert "demo_usr_" in data["user_id"]
-        assert data["expires_in"] > 0
+        assert response.status_code == 404
+        # Verify route is not present in registered routes
+        route_paths = [getattr(r, "path", None) for r in main.app.routes]
+        assert "/api/auth/demo-token" not in route_paths
+        assert "/api/auth/token" not in route_paths
 
-    def test_demo_token_disabled_in_production(self, test_client: TestClient, monkeypatch):
-        """Verify demo token issuance is rejected with 403 in production or gateway mode."""
+    def test_demo_token_endpoint_when_flag_on(self, test_client: TestClient, monkeypatch):
+        """Verify POST /api/auth/demo-token generates a restricted demo token when ENABLE_DEMO_AUTH is true."""
+        import main
+        from config import get_settings
+        from auth import verify_access_token
+        settings = get_settings()
+        monkeypatch.setattr(settings, "ENABLE_DEMO_AUTH", True)
+        main.configure_demo_auth_routes(main.app, enabled=True)
+        try:
+            response = test_client.post("/api/auth/demo-token")
+            assert response.status_code == 200
+            data = response.json()
+            assert "access_token" in data
+            assert data["token_type"] == "bearer"
+            assert data["mode"] == "demo"
+            assert "demo_usr_" in data["user_id"]
+            # Max expiry is 15 minutes (900 seconds)
+            assert 0 < data["expires_in"] <= 900
+
+            ctx = verify_access_token(data["access_token"])
+            assert ctx.role == "demo"
+            assert ctx.expires_at - ctx.created_at <= 900
+        finally:
+            main.configure_demo_auth_routes(main.app, enabled=False)
+
+    def test_app_fails_to_start_in_prod_with_demo_auth_enabled(self, monkeypatch):
+        """Verify startup fails fast if ENV=production and ENABLE_DEMO_AUTH=true."""
+        from config import get_settings
+        import main
+        from fastapi.testclient import TestClient
         settings = get_settings()
         monkeypatch.setattr(settings, "ENVIRONMENT", "production")
-        resp = test_client.post("/api/auth/demo-token")
+        monkeypatch.setattr(settings, "AUTH_SECRET_KEY", "a" * 32)
+        monkeypatch.setattr(settings, "ENABLE_DEMO_AUTH", True)
+
+        # 1. Direct configuration check refuses to boot
+        with pytest.raises(RuntimeError) as excinfo:
+            settings.validate_production_configuration()
+        assert "ENABLE_DEMO_AUTH" in str(excinfo.value)
+        assert "production" in str(excinfo.value).lower()
+
+        # 2. Check with ENV=production env var
+        monkeypatch.setenv("ENV", "production")
+        with pytest.raises(RuntimeError) as excinfo:
+            settings.validate_production_configuration()
+        assert "ENABLE_DEMO_AUTH" in str(excinfo.value)
+
+        # 3. Test app startup / lifespan refuses to boot
+        with pytest.raises(RuntimeError) as excinfo:
+            with TestClient(main.app):
+                pass
+        assert "ENABLE_DEMO_AUTH" in str(excinfo.value)
+
+    def test_demo_token_cannot_access_admin_routes(self, test_client: TestClient):
+        """Verify demo tokens (role='demo') are strictly rejected from administrative endpoints."""
+        from auth import create_demo_token, verify_access_token
+        # Create a demo token
+        demo_token = create_demo_token()
+        ctx = verify_access_token(demo_token)
+        assert ctx.role == "demo"
+
+        # Attempt to access admin cleanup route
+        resp = test_client.post(
+            "/api/admin/cleanup",
+            headers={"Authorization": f"Bearer {demo_token}"}
+        )
         assert resp.status_code == 403
-        assert "disabled in production" in resp.json()["detail"].lower()
+        assert "access denied" in resp.json()["detail"].lower()
+
+    def test_demo_token_cannot_elevate_to_admin_or_user_role(self):
+        """Verify demo tokens are strictly constrained to role='demo' with max 15m expiry."""
+        from auth import create_access_token, verify_access_token
+        # Attempt to generate an admin token with a demo user id
+        tampered_token = create_access_token(user_id="demo_usr_hack123", role="admin", expires_in_hours=24)
+        ctx = verify_access_token(tampered_token)
+        # Must be forced to role demo
+        assert ctx.role == "demo"
+        # Must be capped at 15 minutes (900 seconds)
+        assert ctx.expires_at - ctx.created_at <= 900
+
+        # Attempt with role='demo'
+        demo_token = create_access_token(user_id="usr_normal", role="demo", expires_in_hours=10)
+        ctx2 = verify_access_token(demo_token)
+        assert ctx2.role == "demo"
+        assert ctx2.expires_at - ctx2.created_at <= 900
 
     def test_production_fails_without_strong_secret(self, monkeypatch):
         """Verify validation fails fast on startup in production if secret is missing or insecure."""

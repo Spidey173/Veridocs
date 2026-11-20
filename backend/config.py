@@ -160,7 +160,10 @@ class Settings:
         ]
 
         # Environment & Auth mode
-        self.ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
+        raw_env = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or "development").strip().lower()
+        self.ENVIRONMENT: str = raw_env
+        self.ENV: str = raw_env
+        self.ENABLE_DEMO_AUTH: bool = os.getenv("ENABLE_DEMO_AUTH", "false").lower() in ("true", "1", "yes")
         self.AUTH_MODE: str = os.getenv(
             "AUTH_MODE", "demo" if self.ENVIRONMENT != "production" else "gateway"
         ).lower()
@@ -210,7 +213,15 @@ class Settings:
 
     def validate_production_configuration(self):
         """Validate critical security settings in production."""
-        is_prod = self.ENVIRONMENT == "production" or self.AUTH_MODE == "gateway"
+        raw_env = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or self.ENVIRONMENT).strip().lower()
+        is_prod = raw_env == "production" or self.AUTH_MODE == "gateway"
+
+        if raw_env == "production" and self.ENABLE_DEMO_AUTH:
+            raise RuntimeError(
+                "FATAL SECURITY CONFIGURATION: ENABLE_DEMO_AUTH is true while ENV=production. "
+                "Demo authentication endpoints are strictly prohibited in production environments. Refusing to boot."
+            )
+
         if is_prod:
             insecure_placeholders = {
                 "veridocs-default-secret-key-change-in-production",

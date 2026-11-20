@@ -7,10 +7,11 @@ import secrets
 import hashlib
 import tempfile
 import logging
+import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, List
 from pydantic import BaseModel
-from fastapi import HTTPException, Header, Request
+from fastapi import HTTPException, Header, Request, APIRouter
 
 from config import get_settings
 
@@ -18,6 +19,21 @@ logger = logging.getLogger(__name__)
 
 # Fallback secret if not configured in environment
 _EPHEMERAL_SECRET: str = secrets.token_hex(32)
+
+_demo_rate_lock = threading.Lock()
+_demo_rate_history: Dict[str, List[float]] = {}
+
+
+def _check_demo_rate_limit(ip: str, max_requests: int = 60, window: int = 60) -> bool:
+    now = time.time()
+    with _demo_rate_lock:
+        timestamps = _demo_rate_history.setdefault(ip, [])
+        cutoff = now - window
+        _demo_rate_history[ip] = [t for t in timestamps if t > cutoff]
+        if len(_demo_rate_history[ip]) >= max_requests:
+            return False
+        _demo_rate_history[ip].append(now)
+        return True
 
 
 def _get_dev_secret() -> str:
@@ -85,13 +101,32 @@ def _b64decode(data: str) -> bytes:
 def create_access_token(
     user_id: Optional[str] = None,
     expires_in_hours: Optional[int] = None,
+    expires_in_seconds: Optional[int] = None,
     role: str = "user"
 ) -> str:
     """Generate an HMAC-SHA256 signed access token."""
     settings = get_settings()
     now = time.time()
-    ttl_hours = expires_in_hours or settings.TOKEN_EXPIRE_HOURS or 24
-    exp = now + (ttl_hours * 3600)
+
+    # Enforce demo restrictions: demo tokens must be limited to a low-privilege "demo" role,
+    # short expiry (15 min max), and never able to elevate to admin or any real user's role.
+    is_demo = (role == "demo") or (bool(user_id and user_id.startswith("demo_usr_")))
+    if is_demo:
+        role = "demo"
+        max_demo_ttl = 15 * 60  # 15 minutes max
+        if expires_in_seconds is not None:
+            ttl_seconds = min(max(1, expires_in_seconds), max_demo_ttl)
+        elif expires_in_hours is not None:
+            ttl_seconds = min(max(1, int(expires_in_hours * 3600)), max_demo_ttl)
+        else:
+            ttl_seconds = max_demo_ttl
+        exp = now + ttl_seconds
+    else:
+        if expires_in_seconds is not None:
+            exp = now + expires_in_seconds
+        else:
+            ttl_hours = expires_in_hours or settings.TOKEN_EXPIRE_HOURS or 24
+            exp = now + (ttl_hours * 3600)
 
     uid = user_id or f"usr_{secrets.token_hex(10)}"
 
@@ -110,6 +145,22 @@ def create_access_token(
     sig_b64 = _b64encode(sig)
 
     return f"{payload_b64}.{sig_b64}"
+
+
+def create_demo_token(
+    user_id: Optional[str] = None,
+    expires_in_seconds: int = 900
+) -> str:
+    """Generate a low-privilege demo token with role 'demo' and short expiry (max 15 min)."""
+    ttl = min(expires_in_seconds, 15 * 60)
+    if ttl <= 0:
+        ttl = 15 * 60
+    uid = user_id or f"demo_usr_{secrets.token_hex(6)}"
+    return create_access_token(
+        user_id=uid,
+        expires_in_seconds=ttl,
+        role="demo"
+    )
 
 
 def verify_access_token(token: str) -> UserContext:
@@ -162,11 +213,16 @@ def verify_access_token(token: str) -> UserContext:
             detail="Token payload missing valid user identity."
         )
 
+    role = payload.get("role", "user")
+    # Demo tokens must be strictly confined to role="demo" and cannot elevate
+    if role == "demo" or uid.startswith("demo_usr_"):
+        role = "demo"
+
     return UserContext(
         user_id=uid,
         created_at=float(payload.get("iat", time.time())),
         expires_at=float(exp),
-        role=payload.get("role", "user")
+        role=role
     )
 
 
@@ -268,6 +324,11 @@ async def require_admin_or_maintenance(
         x_user_token=x_user_token,
         x_api_key=x_api_key
     )
+    if user.role == "demo":
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Demo tokens cannot access administrator endpoints."
+        )
     if user.role != "admin":
         raise HTTPException(
             status_code=403,
@@ -308,3 +369,51 @@ def assert_resource_ownership(
             detail = f"Access denied: You do not have permission to {action} this {resource_type}."
         raise HTTPException(status_code=403, detail=detail)
 
+
+class DemoTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user_id: str
+    expires_in: int
+    mode: str = "demo"
+    warning: str
+
+
+demo_auth_router = APIRouter(tags=["auth"])
+
+
+@demo_auth_router.post("/api/auth/demo-token", response_model=DemoTokenResponse)
+@demo_auth_router.post("/api/auth/token", response_model=DemoTokenResponse)
+async def generate_demo_token(
+    request: Request,
+    x_api_key: Optional[str] = Header(None)
+):
+    """Generate a demo user token for development/demo mode."""
+    import os
+    settings = get_settings()
+    raw_env = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or settings.ENVIRONMENT).strip().lower()
+    if raw_env == "production" or settings.AUTH_MODE == "gateway":
+        raise HTTPException(
+            status_code=403,
+            detail="Demo tokens are disabled in production mode."
+        )
+
+    client_ip = request.client.host if request.client else "unknown"
+    if settings.RATE_LIMITING_ENABLED and not _check_demo_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded for demo token endpoint.")
+
+    if settings.REQUIRE_API_KEY:
+        if not x_api_key or x_api_key != settings.API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+
+    token = create_demo_token()
+    user_ctx = verify_access_token(token)
+
+    return DemoTokenResponse(
+        access_token=token,
+        token_type="bearer",
+        user_id=user_ctx.user_id,
+        expires_in=int(user_ctx.expires_at - user_ctx.created_at),
+        mode="demo",
+        warning="Local ephemeral demo token. Low-privilege demo role. Maximum 15 minutes lifetime."
+    )
