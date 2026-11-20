@@ -76,9 +76,31 @@ flowchart TD
 
 ## Running Tests
 
+### Fast Unit Tests
+Fast deterministic unit tests (using canned fixtures and mocks) are located under `tests/unit/`:
 ```bash
-pytest backend/tests
+# Run unit tests
+pytest backend/tests/unit
+# Or via Makefile
+make test
 ```
+
+### Live LLM Evaluation Harness
+A separate live evaluation harness (`tests/evals/`) tests the LLM evaluator against a 40-case labeled benchmark (including adversarial inversions, hallucinations, and prompt injections):
+```bash
+# Run live evaluation harness (runs each case 5 times by default)
+make eval
+
+# Configure number of runs and minimum 95% CI agreement threshold:
+make eval EVAL_RUNS=5 EVAL_THRESHOLD=0.75
+```
+
+#### Evaluation Metrics & Statistical Quality Gate:
+- **Mean & Standard Deviation**: Calculated per metric across $N$ stochastic runs ($N=5$ default).
+- **95% Confidence Interval**: Derived via Student's $t$-interval and bootstrap percentiles.
+- **Inter-Rater Reliability**: Compares predictions with human ground truth using **Agreement Rate** and **Cohen's Kappa ($\kappa$)**.
+- **Automated Failure Gate**: The evaluation suite automatically fails if the **lower bound** of the 95% CI drops below the configured `EVAL_THRESHOLD` (default: `0.75`).
+- **Reports**: JSON evaluation reports are cached to `tests/evals/reports/latest.json`.
 
 ---
 
