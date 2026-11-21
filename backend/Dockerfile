@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /install /install
 COPY --from=builder /root/.cache /root/.cache
+COPY public/ /app/public/
 COPY backend/ /app/
 
 # Ensure data and uploads directories exist with proper permissions

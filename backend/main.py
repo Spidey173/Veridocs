@@ -45,14 +45,11 @@ def seed_demo_session_if_needed():
             return
 
         settings = get_settings()
-        sample_path = Path(__file__).resolve().parent / "sample_agreement.pdf"
+        sample_path = Path(__file__).resolve().parent / "public" / "sample_agreement.pdf"
+        if not sample_path.exists():
+            sample_path = Path(__file__).resolve().parent.parent / "public" / "sample_agreement.pdf"
         if not sample_path.exists():
             sample_path = settings.UPLOAD_DIR / "sample_agreement.pdf"
-
-        if not sample_path.exists():
-            from pdf_processor import generate_sample_pdf_bytes
-            sample_path = settings.UPLOAD_DIR / "sample_agreement.pdf"
-            sample_path.write_bytes(generate_sample_pdf_bytes())
 
         if sample_path.exists():
             logger.info("Indexing sample_agreement.pdf into demo-session...")

@@ -6,7 +6,7 @@ import ResizablePanel from "./ResizablePanel";
 import FileManager from "./FileManager";
 import WorkspaceHeader from "./WorkspaceHeader";
 import PDFViewer from "../pdf-viewer/PDFViewer";
-import AIWorkspace from "./AIWorkspace";
+import ChatPanel from "../chat/ChatPanel";
 import { FileText, Eye, MessageSquare } from "lucide-react";
 
 export default function WorkspaceLayout() {
@@ -102,7 +102,9 @@ export default function WorkspaceLayout() {
             onWidthChange={setRightSidebarWidth}
             isCollapsed={rightSidebarCollapsed}
           >
-            <AIWorkspace />
+            <div className="w-full h-full flex flex-col bg-[var(--bg-surface)] border-l border-[var(--border-subtle)] overflow-hidden">
+              <ChatPanel />
+            </div>
           </ResizablePanel>
         </div>
       </div>

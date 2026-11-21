@@ -16,7 +16,7 @@ from models import QueryRequest, StreamQueryRequest, QueryResponse, SourceInfo, 
 from vector_store import VectorStore
 from llm_service import get_llm_service, LLMService
 from verification import extract_citations_from_answer, check_citations
-from session_store import validate_question
+from pdf_processor import validate_question
 from rate_limiter import check_rate_limit
 import database
 

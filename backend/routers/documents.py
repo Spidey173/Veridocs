@@ -13,8 +13,7 @@ from fastapi.responses import FileResponse
 from config import get_settings, get_model_registry
 from models import UploadResponse, SessionInfo
 import database
-from pdf_processor import extract_text_from_file, chunk_text, get_document_metadata
-from session_store import save_upload_file_stream, safe_delete_file
+from pdf_processor import extract_text_from_file, chunk_text, save_upload_file_stream, safe_delete_file
 from rate_limiter import check_rate_limit
 
 logger = logging.getLogger(__name__)

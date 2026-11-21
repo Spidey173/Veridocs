@@ -1,6 +1,6 @@
 """
 Vector Store for Veridocs: Persistent storage via SQLite and fast dense vector search
-using FAISS (if installed) with pure NumPy cosine similarity fallback.
+using pure NumPy cosine similarity.
 """
 
 import logging
@@ -15,13 +15,6 @@ logger = logging.getLogger(__name__)
 # Query embedding cache
 _QUERY_CACHE: Dict[str, np.ndarray] = {}
 _MAX_QUERY_CACHE = 512
-
-# Optional FAISS support
-try:
-    import faiss
-    HAS_FAISS = True
-except ImportError:
-    HAS_FAISS = False
 
 
 def get_query_embedding(query: str) -> np.ndarray:
@@ -44,7 +37,7 @@ def get_query_embedding(query: str) -> np.ndarray:
 
 
 class VectorStore:
-    """Persistent vector store backed by SQLite database with FAISS / NumPy cosine search."""
+    """Persistent vector store backed by SQLite database with NumPy cosine search."""
 
     @staticmethod
     def save_chunks(session_id: str, chunks: List[Dict[str, Any]], embeddings: List[np.ndarray]):
@@ -68,24 +61,7 @@ class VectorStore:
 
         q_emb = get_query_embedding(query)
 
-        # 1. Use FAISS if installed
-        if HAS_FAISS:
-            try:
-                dim = embeddings.shape[1]
-                index = faiss.IndexFlatIP(dim)
-                index.add(embeddings)
-                scores, indices = index.search(np.expand_dims(q_emb, axis=0), min(k, len(chunks)))
-                results = []
-                for score, idx in zip(scores[0], indices[0]):
-                    if idx >= 0 and idx < len(chunks):
-                        item = dict(chunks[idx])
-                        item["relevance_score"] = float(score)
-                        results.append(item)
-                return results
-            except Exception as e:
-                logger.warning(f"FAISS search failed, falling back to NumPy: {e}")
-
-        # 2. NumPy cosine similarity (dot product of L2-normalized vectors)
+        # NumPy cosine similarity (dot product of L2-normalized vectors)
         scores = np.dot(embeddings, q_emb)
         top_indices = np.argsort(scores)[::-1][:k]
 
@@ -104,7 +80,3 @@ class VectorStore:
             )
 
         return results
-
-
-def get_vector_store() -> VectorStore:
-    return VectorStore()

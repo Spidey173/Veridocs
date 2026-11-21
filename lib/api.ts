@@ -33,13 +33,6 @@ export interface CitationCheckResult {
   claims: ClaimCheckDetail[];
 }
 
-export interface QueryResponse {
-  answer: string;
-  sources: SourceInfo[];
-  citations: CitationInfo[];
-  citation_check?: CitationCheckResult;
-}
-
 export interface UploadResponse {
   session_id: string;
   chunk_count: number;

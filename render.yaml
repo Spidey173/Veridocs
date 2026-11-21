@@ -14,8 +14,6 @@ services:
         value: "20"
       - key: RATE_LIMIT_UPLOAD_PER_HOUR
         value: "10"
-      - key: MAX_SESSIONS_COUNT
-        value: "20"
       - key: PORT
         value: "8000"
 

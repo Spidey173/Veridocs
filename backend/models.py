@@ -1,14 +1,5 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from enum import Enum
-
-
-class StreamEventType(str, Enum):
-    TOKEN = "token"
-    CITATION = "citation"
-    CITATION_CHECK = "citation_check"
-    ERROR = "error"
-    DONE = "done"
 
 
 class SourceInfo(BaseModel):

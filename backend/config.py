@@ -97,7 +97,6 @@ class Settings:
         # Upload & page constraints
         self.MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
         self.MAX_PDF_PAGES: int = int(os.getenv("MAX_PDF_PAGES", "50"))
-        self.MAX_SESSIONS_COUNT: int = int(os.getenv("MAX_SESSIONS_COUNT", "20"))
         self.ALLOWED_EXTENSIONS: set = {".pdf", ".txt"}
 
         # Rate limiting constraints (per IP per hour)
