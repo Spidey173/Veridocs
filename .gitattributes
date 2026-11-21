@@ -19,7 +19,6 @@
 *.woff2 binary
 
 # Vendored and generated dependencies for GitHub Linguist
-public/pdf.worker.min.mjs linguist-vendored
 *.min.mjs linguist-vendored
 package-lock.json linguist-generated
 

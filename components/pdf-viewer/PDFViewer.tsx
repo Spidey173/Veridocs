@@ -47,7 +47,10 @@ export default function PDFViewer() {
     async function loadPdfJs() {
       try {
         const lib = await import("pdfjs-dist");
-        lib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+        lib.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/build/pdf.worker.min.mjs",
+          import.meta.url
+        ).toString();
         if (isMounted) setPdfLib(lib);
       } catch (err) {
         console.error("Failed to load PDF.js library:", err);

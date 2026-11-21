@@ -16,7 +16,7 @@ const npmCmd = isWin ? 'npm.cmd' : 'npm';
 const pythonCmd = isWin ? 'python' : 'python3';
 
 // 1. Spawn FastAPI backend
-const backend = spawn(pythonCmd, ['-m', 'uvicorn', 'main:app', '--host', '0.0.0.0', '--port', '8000', '--reload'], {
+const backend = spawn(pythonCmd, ['-m', 'uvicorn', 'main:app', '--host', '0.0.0.0', '--port', '8000', '--reload', '--reload-dir', backendDir], {
   cwd: backendDir,
   stdio: 'inherit',
   shell: true,

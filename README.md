@@ -83,7 +83,7 @@ pip install -r requirements.txt
 npm install
 
 # Terminal 1: Backend
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir backend
 
 # Terminal 2: Frontend
 npm run dev:frontend

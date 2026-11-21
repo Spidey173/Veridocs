@@ -34,8 +34,7 @@ uploads/
 !backend/sample_resume.pdf
 !public/sample_resume.pdf
 
-# Generated PDF worker & TypeScript environment
-public/pdf.worker.min.mjs
+# Generated TypeScript environment
 next-env.d.ts
 
 # Testing / Reports

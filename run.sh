@@ -46,7 +46,7 @@ echo "Starting backend on http://localhost:8000..."
 (
   export PYTHONPATH="$ROOT_DIR/.venv/lib/python3.11/site-packages:$ROOT_DIR/backend:$PYTHONPATH"
   cd "$ROOT_DIR"
-  "$PYTHON_EXEC" -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+  "$PYTHON_EXEC" -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir "$ROOT_DIR/backend"
 ) &
 BACKEND_PID=$!
 
