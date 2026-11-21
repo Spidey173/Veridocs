@@ -5,96 +5,54 @@ ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$ROOT_DIR"
 
 echo "=========================================================="
-echo "  🚀 Starting Veridocs Engine"
+echo "  🚀 Starting Veridocs Workspace"
+echo "  - Web App: http://localhost:3000"
 echo "=========================================================="
 
-# 1. Auto-generate backend/.env if missing
-if [ ! -f "$ROOT_DIR/backend/.env" ]; then
-    echo "Creating backend/.env from .env.example..."
-    if [ -f "$ROOT_DIR/backend/.env.example" ]; then
-        cp "$ROOT_DIR/backend/.env.example" "$ROOT_DIR/backend/.env"
-    else
-        touch "$ROOT_DIR/backend/.env"
-    fi
-    # Generate secure random AUTH_SECRET_KEY
-    SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || python -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || openssl rand -hex 32 2>/dev/null || echo "veridocs_default_secret_key_32bytes_long")
-    echo "AUTH_SECRET_KEY=$SECRET_KEY" >> "$ROOT_DIR/backend/.env"
-fi
-
-# 2. Cross-platform Python resolver (macOS/Linux: .venv/bin/python, Windows/GitBash: .venv/Scripts/python.exe)
-if [ -f "$ROOT_DIR/.venv/bin/python" ]; then
-    VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
-elif [ -f "$ROOT_DIR/.venv/Scripts/python.exe" ]; then
-    VENV_PYTHON="$ROOT_DIR/.venv/Scripts/python.exe"
-elif [ -f "$ROOT_DIR/venv/bin/python" ]; then
-    VENV_PYTHON="$ROOT_DIR/venv/bin/python"
-elif [ -f "$ROOT_DIR/venv/Scripts/python.exe" ]; then
-    VENV_PYTHON="$ROOT_DIR/venv/Scripts/python.exe"
-else
-    echo "Setting up Python virtual environment..."
-    PYTHON_CMD="python3"
-    if ! command -v python3 >/dev/null 2>&1; then
-        if command -v python >/dev/null 2>&1; then
-            PYTHON_CMD="python"
-        else
-            echo "Error: Python is not installed or not in PATH."
-            exit 1
-        fi
-    fi
-    "$PYTHON_CMD" -m venv "$ROOT_DIR/.venv" || {
-        echo ""
-        echo "❌ Error: Failed to create Python virtual environment (.venv)."
-        echo "On Ubuntu/Debian Linux, install python3-venv by running:"
-        echo "   sudo apt update && sudo apt install -y python3-venv python3-pip"
-        echo ""
-        exit 1
-    }
-    if [ -f "$ROOT_DIR/.venv/bin/python" ]; then
-        VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
-    else
-        VENV_PYTHON="$ROOT_DIR/.venv/Scripts/python.exe"
-    fi
-    "$VENV_PYTHON" -m pip install --upgrade pip
-    "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/backend/requirements.txt"
-fi
-
-# 3. Ensure frontend dependencies exist
+# 1. Ensure frontend dependencies are installed
 if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
-    echo "Installing frontend dependencies..."
+    echo "Installing frontend dependencies (first-time setup)..."
     (cd "$ROOT_DIR/frontend" && npm install --legacy-peer-deps)
 fi
 
-# 4. Free up port 8000 and 3000 if previously occupied
-if command -v lsof >/dev/null 2>&1; then
-    OLD_BACKEND=$(lsof -ti :8000 2>/dev/null || true)
-    if [ -n "$OLD_BACKEND" ]; then
-        echo "Clearing existing process on port 8000 (PID: $OLD_BACKEND)..."
-        kill -9 $OLD_BACKEND 2>/dev/null || true
+# 2. Check if user explicitly requested full backend mode (--full or --backend)
+START_BACKEND=false
+for arg in "$@"; do
+    if [ "$arg" == "--full" ] || [ "$arg" == "--backend" ]; then
+        START_BACKEND=true
+        break
     fi
-    OLD_FRONTEND=$(lsof -ti :3000 2>/dev/null || true)
-    if [ -n "$OLD_FRONTEND" ]; then
-        echo "Clearing existing process on port 3000 (PID: $OLD_FRONTEND)..."
-        kill -9 $OLD_FRONTEND 2>/dev/null || true
+done
+
+if [ "$START_BACKEND" = true ]; then
+    echo "Full mode requested: checking Python backend..."
+    if [ -f "$ROOT_DIR/.venv/bin/python" ]; then
+        VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
+    else
+        PYTHON_CMD="python3"
+        command -v python3 >/dev/null 2>&1 || PYTHON_CMD="python"
+        "$PYTHON_CMD" -m venv "$ROOT_DIR/.venv" || true
+        VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
+        [ -f "$VENV_PYTHON" ] && "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/backend/requirements.txt" || true
+    fi
+
+    if [ -f "$VENV_PYTHON" ]; then
+        echo "Starting backend on http://localhost:8000..."
+        (cd "$ROOT_DIR/backend" && "$VENV_PYTHON" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload) &
+        BACKEND_PID=$!
     fi
 fi
 
-# 5. Start Backend
-echo "Starting FastAPI backend on http://localhost:8000..."
-(cd "$ROOT_DIR/backend" && "$VENV_PYTHON" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude "uploads" --reload-exclude "uploads/*" --reload-exclude "uploads/**" --reload-exclude "*.npy" --reload-exclude "*.json") &
-BACKEND_PID=$!
-
-# 6. Start Frontend
-echo "Starting Next.js frontend on http://localhost:3000..."
+# 3. Start Next.js frontend
+echo "Launching Next.js frontend on http://localhost:3000..."
 (cd "$ROOT_DIR/frontend" && npm run dev) &
 FRONTEND_PID=$!
 
 cleanup() {
     echo ""
-    echo "Stopping Veridocs servers..."
-    kill $BACKEND_PID 2>/dev/null || true
+    echo "Stopping Veridocs..."
     kill $FRONTEND_PID 2>/dev/null || true
-    wait $BACKEND_PID 2>/dev/null || true
-    wait $FRONTEND_PID 2>/dev/null || true
+    [ -n "$BACKEND_PID" ] && kill $BACKEND_PID 2>/dev/null || true
     exit 0
 }
 
@@ -103,10 +61,8 @@ trap cleanup SIGINT SIGTERM EXIT
 echo ""
 echo "=========================================================="
 echo "  🚀 Veridocs is running!"
-echo "  - Web App:      http://localhost:3000"
-echo "  - API Backend:  http://localhost:8000"
-echo "  - API Docs:     http://localhost:8000/docs"
-echo "  Press Ctrl+C to stop all servers."
+echo "  Open in browser: http://localhost:3000"
+echo "  Press Ctrl+C to stop."
 echo "=========================================================="
 echo ""
 

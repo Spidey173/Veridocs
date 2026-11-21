@@ -140,11 +140,21 @@ LLM_PROVIDER=groq  # or 'openai', 'anthropic', 'google', 'ollama', etc.
 
 ---
 
-## 🚀 Quickstart (Clone & Run in 60s)
+## 🚀 Quickstart (Clone & Run in 10s)
 
-Veridocs features **zero-config single-command bootstrap**. Fresh clones will automatically set up Python virtual environments, generate `.env` cryptographic secrets, install dependencies, and start both the backend API and Next.js frontend without manual steps.
+Veridocs runs **instantly across macOS, Windows, and Linux** with **zero setup or external dependencies required**.
 
-### 🪟 Windows (Double-Click or Command Prompt)
+### ⚡ Instant Showcase Mode (Any OS)
+Install dependencies and run:
+```bash
+npm install
+npm run dev
+```
+Open **[http://localhost:3000](http://localhost:3000)** in your browser. 
+
+The workspace launches immediately with pre-indexed contract review data, full PDF canvas, token-by-token streaming answers, citation coordinates, contradiction matrix, and RAG Triad verification. You can also upload your own documents directly into the canvas.
+
+### 🪟 Windows (One-Click)
 Double-click `run.bat` or run:
 ```cmd
 run.bat
@@ -156,18 +166,17 @@ Run in your terminal:
 chmod +x run.sh && ./run.sh
 ```
 
-### 📦 Or via Root npm (Any OS)
+---
+
+### 🔧 Optional: Full Python Backend Mode
+For database persistence and running evaluation harnesses:
 ```bash
-npm run dev
+# Start FastAPI backend on http://localhost:8000
+npm run dev:backend
+
+# Or run full stack via bash
+./run.sh --full
 ```
-
-#### Service Endpoints:
-- **Web Client UI**: [http://localhost:3000](http://localhost:3000)
-- **FastAPI Backend**: [http://localhost:8000](http://localhost:8000)
-- **Interactive API Docs & Swagger**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health Check**: [http://localhost:8000/api/health](http://localhost:8000/api/health)
-
-*Note: Veridocs works 100% out of the box with zero required external API keys (defaults to local extractive reasoning and in-memory vector storage). To enable cloud LLMs (Groq, Gemini, OpenAI, Claude, DeepSeek), simply paste your key into `backend/.env`.*
 
 ---
 

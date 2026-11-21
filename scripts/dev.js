@@ -3,22 +3,21 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
-const isWin = process.platform === 'win32';
+const frontendDir = path.join(rootDir, 'frontend');
 
-if (isWin) {
-  // On Windows, trigger run.bat via cmd.exe
-  const batPath = path.join(rootDir, 'run.bat');
-  const child = spawn('cmd.exe', ['/c', batPath], {
-    cwd: rootDir,
-    stdio: 'inherit'
-  });
-  child.on('exit', (code) => process.exit(code || 0));
-} else {
-  // On macOS / Linux, run bash run.sh
-  const shPath = path.join(rootDir, 'run.sh');
-  const child = spawn('bash', [shPath], {
-    cwd: rootDir,
-    stdio: 'inherit'
-  });
-  child.on('exit', (code) => process.exit(code || 0));
-}
+console.log('==========================================================');
+console.log('  🚀 Starting Veridocs Showcase Workspace');
+console.log('  - Mode:    Instant Local Showcase (Zero Backend Needed)');
+console.log('  - Web App: http://localhost:3000');
+console.log('==========================================================\n');
+
+const isWin = process.platform === 'win32';
+const npmCmd = isWin ? 'npm.cmd' : 'npm';
+
+const child = spawn(npmCmd, ['run', 'dev'], {
+  cwd: frontendDir,
+  stdio: 'inherit',
+  shell: true,
+});
+
+child.on('exit', (code) => process.exit(code || 0));
