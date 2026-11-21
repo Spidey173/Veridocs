@@ -39,49 +39,57 @@ Runs entirely locally on an 8GB RAM laptop with **zero Docker required**.
 
 ## Quickstart
 
-Tested from a fresh clone. Requires **Python 3.11+** and **Node.js 18+**.
+Tested from a fresh clone. Requires **Python 3.10+** and **Node.js 18+**.
 
-### 1. Clone & Install Dependencies
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/Spidey173/Veridocs.git
 cd Veridocs
+```
 
-# Python virtual environment & backend dependencies
-python3.11 -m venv .venv
+### 2. Configure Environment
+
+Copy the example environment template:
+
+```bash
+cp .env.example .env
+```
+
+*(Optional: Open `.env` and add your Groq or OpenAI API key. If left blank, document indexing, vector search, and the PDF viewer work completely. You can also paste your API key directly in the chat panel via the **Add Key (Bypass limits)** button).*
+
+### 3. Launch the Application
+
+#### Option A: One-Command Start (Recommended)
+
+Run the automated startup script:
+
+```bash
+./run.sh
+```
+*(Or use `npm run dev`). This script automatically verifies `.venv`, installs `requirements.txt`, installs `node_modules`, and concurrently boots both the FastAPI backend (port 8000) and Next.js frontend (port 3000).*
+
+#### Option B: Manual Setup (Separate Terminals)
+
+If you prefer running services in separate terminal windows:
+
+```bash
+# 1. Setup Python backend
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Frontend dependencies (automatically installs PDF worker)
+# 2. Setup Node frontend
 npm install
+
+# Terminal 1: Backend
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Terminal 2: Frontend
+npm run dev:frontend
 ```
 
-### 2. Configure Environment (Optional)
-
-Create a `.env` file in the project root:
-
-```env
-# Primary LLM Configuration (OpenAI-compatible: Groq, Together, DeepSeek, OpenAI, vLLM)
-LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_API_KEY=gsk_your_groq_api_key_here
-LLM_MODEL=openai/gpt-oss-120b
-
-# Optional: Local Ollama (100% private, zero cost)
-# LLM_BASE_URL=http://localhost:11434/v1
-# LLM_MODEL=llama3.2
-
-# Optional: Standard OpenAI
-# OPENAI_API_KEY=sk-your-openai-key-here
-# OPENAI_MODEL=gpt-4o-mini
-```
-
-*(If omitted, vector search, document indexing, and PDF viewing work completely. The UI displays an honest banner explaining that an LLM key is needed for generated answers, or visitors can paste their own key directly in the chat panel).*
-
-### 3. Run Development Server
-
-```bash
-npm run dev
-```
+### 4. Access the App
 
 - **Web Application**: [http://localhost:3000](http://localhost:3000)
 - **FastAPI Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
@@ -129,6 +137,7 @@ Veridocs/
 │   ├── Dockerfile        # Production multi-stage Docker build
 │   └── tests/            # 22 backend behavior pytest tests
 ├── requirements.txt      # Unified Python dependencies (used by local, Docker, Render)
+├── run.sh                # One-command development startup script
 ├── package.json          # Single package.json for frontend, test & dev orchestration
 └── scripts/
     ├── dev.js            # Starts FastAPI and Next.js concurrently (npm run dev)
