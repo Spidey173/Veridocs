@@ -109,3 +109,4 @@ for q in TEST_QUESTIONS:
     # Update conversation history
     history.append({"role": "user", "content": q})
     history.append({"role": "assistant", "content": full_text.strip()})
+

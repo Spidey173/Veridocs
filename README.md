@@ -1,23 +1,39 @@
 # 📑 Veridocs
 
-Fast, honest, lightweight document question answering (RAG) with real page citations and citation support checks.
+Fast, honest, lightweight document question answering (RAG) with real page citations and claim grounding checks.
 
 Runs entirely locally on an 8GB RAM laptop with **zero Docker required**.
 
 ---
 
+## 🚀 Live Demo
+
+- **Web Application**: [https://veridocs17.vercel.app](https://veridocs17.vercel.app)
+- **FastAPI Backend**: [https://veridocs-backend.onrender.com](https://veridocs-backend.onrender.com)
+- **API Documentation**: [https://veridocs-backend.onrender.com/docs](https://veridocs-backend.onrender.com/docs)
+
+*(Hosted on free-tier Render & Vercel. Inactive instances spin down after 15 minutes of idle time; please allow ~20–30s on first load if the backend is waking up).*
+
+---
+
+## 📸 Preview
+
+![Veridocs Document Intelligence & Verification](docs/demo.png)
+
+---
+
 ## What Actually Works
 
-- **Real Document Ingestion**: Upload multi-page PDF or TXT documents. Documents are parsed with `pypdf`, chunked into granular ~550-character passage windows with overlap, and embedded locally using Fastembed ONNX (`bge-small-en-v1.5`).
-- **Realistic 6-Page Demo Document**: Ships with a realistic 6-page Master Cloud Services Agreement covering Parties, 250 Authorized Users, Fees & Overages, 99.9% SLA & Credits, AES-256 Security, and $500,000 Liability Cap.
-- **Durable Local Storage**: Chunks and L2-normalized float32 vectors are stored directly in SQLite (`backend/data/veridocs.db`). No Postgres, pgvector, Redis, or Celery.
-- **Fast Vector Retrieval**: Pure NumPy cosine similarity search over persistent embeddings (~3.4ms retrieval latency).
-- **Streaming Answers with Real Citations**: Token-by-token streaming via Server-Sent Events (SSE). Citations pinpoint exact document names, page numbers, and passage excerpts that jump directly to that page in the PDF.
-- **Real PDF Rendering**: Built-in PDF.js canvas viewer rendering actual PDF bytes from the backend with interactive page navigation.
-- **Honest Citation Check**: Verifies answer claims against retrieved source chunks via n-gram overlap check. No fabricated scores or fake "RAG Triad" numbers.
-- **Single OpenAI-Compatible LLM + BYOK**: Connects to any standard endpoint (OpenAI, local Ollama, Groq, vLLM) via `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`. Visitors can also paste their own API key directly in the UI ("Bring Your Own Key"), stored only in the browser to bypass rate limits.
-- **Public Demo Abuse Protection**: In-memory per-IP rate limiting (20 queries/hr, 10 uploads/hr), 10 MB maximum upload size, 50-page document cap, and 20 active sessions ceiling.
-- **Render Cold-Start Detection**: UI monitors backend health and informs users if a free-tier backend is spinning up from sleep.
+- **Real Document Ingestion**: Upload multi-page PDF or TXT documents. Documents are extracted with `pypdf`, chunked into granular ~600-character windows with 100-character overlap and section header boundary detection, and embedded locally using Fastembed ONNX (`bge-small-en-v1.5`).
+- **Interactive PDF Viewer**: Built-in PDF.js canvas viewer rendering actual PDF bytes from the backend with fit-to-width default, zoom controls, and responsive centered alignment with zero left-edge clipping.
+- **Granular Page Citations**: Citations format as clickable inline chips (`[1]`, `[2]`). Clicking a chip jumps directly to that page in the PDF viewer and displays a floating preview banner with the cited passage excerpt.
+- **GFM Markdown Answers**: Full GitHub-Flavored Markdown support in streaming responses, cleanly formatting tables, code blocks, bulleted lists, and bold text without conversational fluff or closing recap lines.
+- **Conversational Memory & Follow-up Rewriting**: Retains recent conversational turns. Follow-up questions referencing previous answers are rewritten into standalone vector search queries before retrieval.
+- **Small-Talk Bypass**: Conversational pleasantries ("ok thanks", "hi", "thank you") bypass vector search and citation checks entirely, returning immediate friendly responses.
+- **Honest Citation Check**: Verifies whether factual answer claims are supported by retrieved excerpts using an n-gram overlap check. Includes safe sentence splitting that protects numbered lists (`1.`) and abbreviations (`e.g.`, `i.e.`). Intro sentences, meta-statements, and missing-data replies are automatically excluded from scoring.
+- **Universal OpenAI-Compatible LLM + BYOK**: Driven by standard `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` (supporting Groq, Together, DeepSeek, OpenAI, or local Ollama). Visitors can also click **Add Key (Bypass limits)** in the UI to paste their own key directly into the browser, stored locally only.
+- **Abuse Protection**: In-memory per-IP rate limiting (20 queries/hr, 10 uploads/hr), 10 MB maximum upload size, 50-page document limit, and 20 active sessions maximum.
+- **Durable Local Storage**: Chunks and L2-normalized float32 vectors are stored in SQLite (`backend/data/veridocs.db`). No Postgres, pgvector, Redis, or Celery.
 
 ---
 
@@ -25,50 +41,65 @@ Runs entirely locally on an 8GB RAM laptop with **zero Docker required**.
 
 Tested from a fresh clone. Requires **Python 3.11+** and **Node.js 18+**.
 
-### 1. Install Dependencies
+### 1. Clone & Install Dependencies
+
 ```bash
-pip install -r backend/requirements.txt
+git clone https://github.com/Spidey173/Veridocs.git
+cd Veridocs
+
+# Python virtual environment & backend dependencies
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Frontend dependencies (automatically installs PDF worker)
 npm install
 ```
 
-### 2. Configure LLM (Optional)
+### 2. Configure Environment (Optional)
+
 Create a `.env` file in the project root:
-```bash
-# Hosted OpenAI
-OPENAI_API_KEY=sk-...
 
-# Or Local Ollama (100% private, zero cost)
-OLLAMA_BASE_URL=http://localhost:11434/v1
-OLLAMA_MODEL=llama3.2
-
-# Or any OpenAI-compatible provider (e.g. Groq)
+```env
+# Primary LLM Configuration (OpenAI-compatible: Groq, Together, DeepSeek, OpenAI, vLLM)
 LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_API_KEY=gsk_...
-LLM_MODEL=llama-3.3-70b-versatile
-```
-*(If omitted, vector search, PDF viewing, and document indexing still work completely. The UI displays an honest banner explaining that an LLM key is needed for generated answers, or visitors can paste their own key directly into the UI).*
+LLM_API_KEY=gsk_your_groq_api_key_here
+LLM_MODEL=openai/gpt-oss-120b
 
-### 3. Run Dev Server
+# Optional: Local Ollama (100% private, zero cost)
+# LLM_BASE_URL=http://localhost:11434/v1
+# LLM_MODEL=llama3.2
+
+# Optional: Standard OpenAI
+# OPENAI_API_KEY=sk-your-openai-key-here
+# OPENAI_MODEL=gpt-4o-mini
+```
+
+*(If omitted, vector search, document indexing, and PDF viewing work completely. The UI displays an honest banner explaining that an LLM key is needed for generated answers, or visitors can paste their own key directly in the chat panel).*
+
+### 3. Run Development Server
+
 ```bash
 npm run dev
 ```
-- **Web App**: http://localhost:3000
-- **API Docs**: http://localhost:8000/docs
+
+- **Web Application**: [http://localhost:3000](http://localhost:3000)
+- **FastAPI Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
 ## Performance & Memory Benchmarks
 
-Measured on macOS (Apple Silicon, 8GB RAM baseline):
+Measured on macOS (Apple Silicon, 8GB RAM baseline) on the bundled **6-page sample agreement** (12 passage chunks):
 
 | Metric | Measured Value | Notes |
 | :--- | :--- | :--- |
 | **RAM Usage (Idle)** | **~302 MB** | Baseline Python runtime + loaded Fastembed ONNX session |
 | **RAM Usage (Peak Querying)** | **~311 MB** | Fully stable under 500 MB (runs easily on 8GB laptops) |
-| **Fastembed Model Download** | **~133 MB** | One-time download on first cold run (5–15s), cached locally |
+| **Fastembed Model Download** | **~133 MB** | One-time download on first cold run, cached locally |
 | **Model Init from Disk Cache** | **~360 ms** | Once cached, loads locally in under half a second |
-| **6-Page PDF Ingestion & Embed** | **~207 ms** | ~34.6 ms per passage chunk |
-| **Vector Retrieval Latency** | **~3.4 ms** | SQLite scan + NumPy dot product cosine similarity |
+| **6-Page PDF Ingestion & Embed** | **~207 ms** | ~17.2 ms per passage chunk |
+| **Vector Retrieval Latency** | **~3.4 ms** | SQLite scan + NumPy dot product cosine similarity on the 6-page sample |
 | **Citation Check Latency** | **~0.3 ms** | N-gram claim overlap analysis |
 
 ---
@@ -77,27 +108,33 @@ Measured on macOS (Apple Silicon, 8GB RAM baseline):
 
 ```
 Veridocs/
-├── app/                  # Next.js App Router (layout, page, styles)
-├── components/           # React UI components (PDF viewer, Chat, Upload, Layout)
-├── lib/                  # Zustand store and API client
-├── public/               # Static assets & PDF.js worker
-├── tests/                # Frontend Vitest test suite (10 tests)
+├── app/                  # Next.js App Router (layout, page, theme)
+├── components/           # React UI components
+│   ├── chat/             # ChatPanel, CitationBadge, VerificationDrawer
+│   ├── pdf-viewer/       # PDFViewer canvas with fit-to-width & jump-to-page
+│   ├── upload/           # DropZone document upload
+│   └── workspace/        # WorkspaceLayout, Header, FileManager
+├── lib/                  # Zustand store and honest API client
+├── public/               # Sample contract, icons, static assets
+├── tests/                # Frontend Vitest test suite (11 tests)
 ├── backend/
 │   ├── main.py           # FastAPI entrypoint, lifespan & CORS
 │   ├── database.py       # SQLite chunk & vector persistence + TTL cleanup
 │   ├── vector_store.py   # Vector retrieval with NumPy dot product
 │   ├── llm_service.py    # OpenAI-compatible streaming client
-│   ├── pdf_processor.py  # pypdf text extraction, granular chunker & sample generator
-│   ├── verification.py   # N-gram citation claim check
+│   ├── pdf_processor.py  # pypdf text extraction, smart chunking & sample generator
+│   ├── verification.py   # N-gram citation claim check & sentence splitter
 │   ├── rate_limiter.py   # Per-IP sliding window abuse protection
 │   ├── config.py         # App configuration & Fastembed model registry
-│   └── tests/            # 16 backend behavior pytest tests
+│   ├── Dockerfile        # Production multi-stage Docker build
+│   └── tests/            # 22 backend behavior pytest tests
+├── requirements.txt      # Unified Python dependencies (used by local, Docker, Render)
 ├── package.json          # Single package.json for frontend, test & dev orchestration
 └── scripts/
-    ├── dev.js            # Starts FastAPI and Next.js concurrently
-    ├── test_live_e2e.py  # Real HTTP port-binding integration smoke test
-    ├── test_real_llm.py  # Live OpenAI-compatible LLM streaming verification
-    └── measure_performance.py # RSS memory and latency benchmark
+    ├── dev.js            # Starts FastAPI and Next.js concurrently (npm run dev)
+    └── dev/              # Development testing and verification tools
+        ├── README.md
+        └── test_resume_qa.py # Multi-turn resume QA test script
 ```
 
 ---
@@ -105,29 +142,36 @@ Veridocs/
 ## Verification & Tests
 
 ### Run Full Test Suite (Frontend + Backend)
+
 ```bash
 npm test
 ```
-*Runs frontend Vitest suite (10 tests in ~350ms) and backend Pytest suite (16 tests in ~1.5s).*
+
+- **Frontend (Vitest)**: 11 tests passing (~400ms)
+- **Backend (Pytest)**: 22 tests passing (~1.8s)
 
 ### Production Build
+
 ```bash
 npm run build
 ```
-*Result: Compiled successfully with zero TypeScript or webpack errors in ~1.5s.*
+
+*Result: Compiled successfully with zero TypeScript or webpack errors in ~2.5s.*
 
 ---
 
 ## Deployment & Environment Variables
 
 ### 1. Backend on Render (Web Service)
-- **Runtime**: Docker (points to `backend/Dockerfile`).
-- **Build**: Fastembed ONNX weights (`bge-small-en-v1.5`) are pre-downloaded during Docker build so the image starts up quickly without downloading weights at runtime.
+- **Runtime**: Docker (points to `backend/Dockerfile`, context `.`).
+- **Build**: Fastembed ONNX weights (`bge-small-en-v1.5`) are pre-downloaded during Docker build so the image boots immediately without downloading weights at runtime.
 - **Environment Variables**:
   | Variable | Value | Description |
   | :--- | :--- | :--- |
-  | `FRONTEND_ORIGIN` | `https://your-app.vercel.app` | Allowed CORS origin (also auto-allows `*.vercel.app` previews) |
-  | `OPENAI_API_KEY` | `sk-...` | (Optional) Server-side fallback LLM key |
+  | `FRONTEND_ORIGIN` | `https://veridocs17.vercel.app` | Allowed CORS origin (also auto-allows `*.vercel.app` previews) |
+  | `LLM_BASE_URL` | `https://api.groq.com/openai/v1` | OpenAI-compatible API endpoint |
+  | `LLM_API_KEY` | `gsk_...` | API key for LLM |
+  | `LLM_MODEL` | `openai/gpt-oss-120b` | Model identifier |
   | `RATE_LIMIT_QUERY_PER_HOUR` | `20` | Max queries/hour per IP (BYOK users bypass this limit) |
   | `MAX_FILE_SIZE_MB` | `10` | Max upload size in megabytes |
 
@@ -136,16 +180,16 @@ npm run build
 - **Environment Variables**:
   | Variable | Value | Description |
   | :--- | :--- | :--- |
-  | `NEXT_PUBLIC_API_URL` | `https://your-backend.onrender.com` | Render backend URL |
+  | `NEXT_PUBLIC_API_URL` | `https://veridocs-backend.onrender.com` | Render backend URL |
 
 ---
 
 ## Known Limitations
 
-1. **Ephemeral Storage on Render Free Tier**: Render's free tier uses an ephemeral filesystem. On container restarts or after spinning down from inactivity (~15 minutes idle), custom uploaded documents reset. The bundled 6-page `sample_agreement.pdf` is automatically re-indexed on boot for showcase testing. An automatic 24-hour TTL and 20-session limit in `database.py` prevents disk growth while the container is running.
-2. **Cold Starts on Free Hosting**: Render free instances spin down when idle. Cold starts take **30–60 seconds** to wake up the container. The frontend detects this and displays a "Backend is waking up" indicator.
-3. **Single-User Workspace**: Veridocs is designed for single-user document inspection and local execution; it does not include multi-tenant organization management or document RBAC.
-4. **Citation Check Methodology**: The citation check is an **n-gram text overlap heuristic** verifying whether answer claims literally appear in the retrieved context chunks. It is not an expensive multi-judge LLM evaluation model.
+1. **Ephemeral Storage on Render Free Tier**: Render's free tier uses an ephemeral filesystem. On container restarts or after spinning down from inactivity (~15 minutes idle), custom uploaded documents reset. The bundled 6-page `sample_agreement.pdf` is automatically re-indexed on boot for showcase testing.
+2. **Cold Starts on Free Hosting**: Free-tier Render instances spin down when idle. Cold starts take **20–30 seconds** to wake up the container. The frontend detects this and displays a notification banner while polling for health.
+3. **Single-User Workspace**: Veridocs is designed for focused document inspection and local execution; it does not include multi-tenant organization management or document RBAC.
+4. **Citation Check Scope**: The citation check is an **n-gram text overlap heuristic** verifying whether answer claims literally appear in the retrieved context chunks. It is not an expensive multi-judge LLM evaluation model.
 
 ---
 

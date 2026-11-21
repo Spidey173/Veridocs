@@ -4,6 +4,7 @@
   "private": true,
   "description": "Fast, honest document RAG with real citations and grounding verification",
   "scripts": {
+    "postinstall": "node -e \"const fs = require('fs'); fs.copyFileSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'public/pdf.worker.min.mjs');\"",
     "dev": "node scripts/dev.js",
     "dev:frontend": "next dev",
     "dev:backend": "cd backend && python -m uvicorn main:app --reload",
