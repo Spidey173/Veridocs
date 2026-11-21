@@ -4,7 +4,7 @@
   "private": true,
   "description": "Veridocs - Enterprise Document Intelligence & Verification Engine",
   "scripts": {
-    "dev": "bash run.sh",
+    "dev": "node scripts/dev.js",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && python -m uvicorn main:app --reload",
     "build": "cd frontend && npm run build",

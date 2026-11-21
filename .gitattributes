@@ -1,0 +1,19 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Unix shell scripts must always have LF line endings
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows batch files must always have CRLF line endings
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Documents & binary formats
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff binary
+*.woff2 binary

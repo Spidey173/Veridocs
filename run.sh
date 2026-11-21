@@ -41,7 +41,14 @@ else
             exit 1
         fi
     fi
-    "$PYTHON_CMD" -m venv "$ROOT_DIR/.venv"
+    "$PYTHON_CMD" -m venv "$ROOT_DIR/.venv" || {
+        echo ""
+        echo "❌ Error: Failed to create Python virtual environment (.venv)."
+        echo "On Ubuntu/Debian Linux, install python3-venv by running:"
+        echo "   sudo apt update && sudo apt install -y python3-venv python3-pip"
+        echo ""
+        exit 1
+    }
     if [ -f "$ROOT_DIR/.venv/bin/python" ]; then
         VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
     else
@@ -78,7 +85,7 @@ BACKEND_PID=$!
 
 # 6. Start Frontend
 echo "Starting Next.js frontend on http://localhost:3000..."
-(cd "$ROOT_DIR/frontend" && npx next dev --turbopack) &
+(cd "$ROOT_DIR/frontend" && npm run dev) &
 FRONTEND_PID=$!
 
 cleanup() {
