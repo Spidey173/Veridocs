@@ -44,10 +44,10 @@ function cleanup() {
   console.log('\nShutting down Veridocs...');
   try {
     backend.kill('SIGINT');
-  } catch {}
+  } catch { }
   try {
     frontend.kill('SIGINT');
-  } catch {}
+  } catch { }
   process.exit(0);
 }
 

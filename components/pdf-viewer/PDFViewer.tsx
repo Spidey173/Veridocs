@@ -99,7 +99,7 @@ export default function PDFViewer() {
               setPdfScale(targetScale);
             }
           }
-        } catch {}
+        } catch { }
       } catch (err: unknown) {
         if (!isMounted) return;
         console.error("PDF load error:", err);
@@ -128,7 +128,7 @@ export default function PDFViewer() {
       if (renderTaskRef.current) {
         try {
           renderTaskRef.current.cancel();
-        } catch {}
+        } catch { }
       }
 
       setRendering(true);
@@ -186,7 +186,7 @@ export default function PDFViewer() {
         const targetScale = Math.min(Math.max(containerWidth / (defaultViewport.width * 1.5), 0.5), 2.5);
         setPdfScale(targetScale);
       }
-    } catch {}
+    } catch { }
   }, [pdfDoc, currentPage, setPdfScale]);
 
   return (
