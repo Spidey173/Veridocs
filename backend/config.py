@@ -81,9 +81,9 @@ class Settings:
 
         # Embedding & search
         self.EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
-        self.CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "500"))
-        self.CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "50"))
-        self.TOP_K: int = int(os.getenv("TOP_K", "5"))
+        self.CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "600"))
+        self.CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "100"))
+        self.TOP_K: int = int(os.getenv("TOP_K", "6"))
 
         # Storage & persistence
         backend_dir = Path(__file__).resolve().parent
@@ -103,7 +103,7 @@ class Settings:
         self.RATE_LIMIT_UPLOAD_PER_HOUR: int = int(os.getenv("RATE_LIMIT_UPLOAD_PER_HOUR", "10"))
 
         # CORS
-        raw_origins = os.getenv("FRONTEND_ORIGIN") or os.getenv("CORS_ORIGINS") or "http://localhost:3000,http://127.0.0.1:3000"
+        raw_origins = os.getenv("FRONTEND_ORIGIN") or os.getenv("CORS_ORIGINS") or "http://localhost:3000,http://127.0.0.1:3000,https://veridocs17.vercel.app"
         self.CORS_ORIGINS: list = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
     def is_llm_configured(self) -> bool:

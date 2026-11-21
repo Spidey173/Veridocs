@@ -5,7 +5,17 @@ import { Send, Loader2, Bot, User, CornerDownLeft, Sparkles, Key, Check, X } fro
 import { useAppStore, type ChatMessage } from "@/lib/store";
 import { streamQuery, getUserApiKey, setUserApiKey, type CitationInfo, type CitationCheckResult } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import VerificationDrawer from "./VerificationDrawer";
+
+function formatContentWithCitations(content: string): string {
+  if (!content) return "";
+  // Strip raw retrieval markers like 【...】 or convert 【1】 to [1]
+  let text = content.replace(/【(\d+)】/g, "[$1]").replace(/【[^】]*】/g, "");
+  // Convert [1], [2] to [[1]](#citation-1) for ReactMarkdown anchor component
+  text = text.replace(/(?<!\[)\[(\d+)\](?!\()/g, "[[$1]](#citation-$1)");
+  return text;
+}
 
 export default function ChatPanel() {
   const [input, setInput] = useState("");
@@ -48,6 +58,7 @@ export default function ChatPanel() {
     setQuerying,
     setCurrentStreamingId,
     setPendingQuestion,
+    highlightCitation,
   } = useAppStore();
 
   useEffect(() => {
@@ -229,8 +240,77 @@ export default function ChatPanel() {
                 </div>
 
                 {m.content ? (
-                  <div className="prose prose-sm dark:prose-invert max-w-none break-words text-xs">
-                    <ReactMarkdown>{m.content}</ReactMarkdown>
+                  <div className="prose prose-sm dark:prose-invert max-w-none break-words text-xs leading-relaxed space-y-2">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        table: ({ ...props }) => (
+                          <div className="overflow-x-auto my-2 border border-[var(--border-subtle)] rounded">
+                            <table className="w-full text-left text-xs border-collapse" {...props} />
+                          </div>
+                        ),
+                        thead: ({ ...props }) => (
+                          <thead className="bg-[var(--bg-subtle)] border-b border-[var(--border-subtle)] text-[var(--text-secondary)] font-semibold" {...props} />
+                        ),
+                        th: ({ ...props }) => (
+                          <th className="px-2.5 py-1.5 font-semibold text-[var(--text-primary)]" {...props} />
+                        ),
+                        td: ({ ...props }) => (
+                          <td className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] last:border-0" {...props} />
+                        ),
+                        ul: ({ ...props }) => (
+                          <ul className="list-disc pl-4 space-y-1 my-1.5" {...props} />
+                        ),
+                        ol: ({ ...props }) => (
+                          <ol className="list-decimal pl-4 space-y-1 my-1.5" {...props} />
+                        ),
+                        li: ({ ...props }) => (
+                          <li className="leading-relaxed" {...props} />
+                        ),
+                        strong: ({ ...props }) => (
+                          <strong className="font-semibold text-[var(--text-primary)]" {...props} />
+                        ),
+                        code: ({ className, children, ...props }) => {
+                          const isInline = !className && !String(children).includes("\n");
+                          return isInline ? (
+                            <code className="px-1 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] font-mono text-[11px] text-[var(--color-accent)]" {...props}>
+                              {children}
+                            </code>
+                          ) : (
+                            <pre className="p-2.5 my-2 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] font-mono text-[11px] overflow-x-auto">
+                              <code className={className} {...props}>{children}</code>
+                            </pre>
+                          );
+                        },
+                        a: ({ href, children, ...props }) => {
+                          if (href?.startsWith("#citation-")) {
+                            const citId = parseInt(href.replace("#citation-", ""), 10);
+                            const citation = m.citations?.find((c) => c.citation_id === citId) || m.citations?.[citId - 1];
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (citation) {
+                                    highlightCitation(citation);
+                                  }
+                                }}
+                                className="inline-flex items-center px-1.5 py-0.2 mx-0.5 rounded text-[10.5px] font-mono-data font-semibold bg-[var(--color-accent-subtle)] text-[var(--color-accent)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent)] hover:text-white transition-all cursor-pointer align-baseline"
+                                title={citation ? `Jump to ${citation.source_file} (Page ${citation.page})` : `Citation [${citId}]`}
+                              >
+                                [{citId}]
+                              </button>
+                            );
+                          }
+                          return (
+                            <a href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] underline decoration-dotted" {...props}>
+                              {children}
+                            </a>
+                          );
+                        },
+                      }}
+                    >
+                      {formatContentWithCitations(m.content)}
+                    </ReactMarkdown>
                     {m.content.includes("No LLM is configured") && (
                       <div className="pt-2">
                         <button
@@ -251,12 +331,14 @@ export default function ChatPanel() {
                   </div>
                 ) : null}
 
-                {/* Real Citation Check Drawer - only for real answers, never for system notices */}
+                {/* Real Citation Check Drawer - only for answers that used retrieval */}
                 {m.role === "assistant" &&
                   !m.isStreaming &&
                   !m.content.startsWith("⚠️") &&
                   !m.content.includes("No LLM is configured") &&
-                  !m.content.includes("Rate Limit Reached") && (
+                  !m.content.includes("Rate Limit Reached") &&
+                  !m.content.toLowerCase().includes("not found in the document") &&
+                  Boolean((m.citations && m.citations.length > 0) || (m.citation_check && m.citation_check.total_claims > 0)) && (
                     <VerificationDrawer
                       citations={m.citations}
                       citationCheck={m.citation_check}

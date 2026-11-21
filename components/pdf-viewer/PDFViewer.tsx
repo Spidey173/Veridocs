@@ -32,6 +32,7 @@ export default function PDFViewer() {
     setCurrentPage,
     setTotalPages,
     setPdfScale,
+    highlightCitation,
   } = useAppStore();
 
   const [pdfLib, setPdfLib] = useState<any>(null);
@@ -83,6 +84,19 @@ export default function PDFViewer() {
 
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
+
+        // Default to fit-to-width on initial load
+        try {
+          const page = await doc.getPage(1);
+          const defaultViewport = page.getViewport({ scale: 1.0 });
+          if (containerRef.current && defaultViewport.width > 0) {
+            const containerWidth = containerRef.current.clientWidth - 48;
+            if (containerWidth > 0) {
+              const targetScale = Math.min(Math.max(containerWidth / (defaultViewport.width * 1.5), 0.5), 2.5);
+              setPdfScale(targetScale);
+            }
+          }
+        } catch {}
       } catch (err: unknown) {
         if (!isMounted) return;
         console.error("PDF load error:", err);
@@ -159,7 +173,18 @@ export default function PDFViewer() {
 
   const zoomIn = () => setPdfScale(Math.min(pdfScale + 0.15, 2.5));
   const zoomOut = () => setPdfScale(Math.max(pdfScale - 0.15, 0.5));
-  const fitWidth = () => setPdfScale(1.0);
+  const fitWidth = useCallback(async () => {
+    if (!pdfDoc || !containerRef.current) return;
+    try {
+      const page = await pdfDoc.getPage(currentPage || 1);
+      const defaultViewport = page.getViewport({ scale: 1.0 });
+      const containerWidth = containerRef.current.clientWidth - 48;
+      if (containerWidth > 0 && defaultViewport.width > 0) {
+        const targetScale = Math.min(Math.max(containerWidth / (defaultViewport.width * 1.5), 0.5), 2.5);
+        setPdfScale(targetScale);
+      }
+    } catch {}
+  }, [pdfDoc, currentPage, setPdfScale]);
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg-canvas)] select-none overflow-hidden">
@@ -229,43 +254,65 @@ export default function PDFViewer() {
         </div>
       </div>
 
-      {/* PDF Stage */}
+      {/* PDF Stage: w-fit min-w-full prevents flex negative coordinate clipping */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-auto flex p-6 items-center justify-center bg-[var(--bg-canvas)]"
+        className="flex-1 overflow-auto bg-[var(--bg-canvas)] p-6 relative"
       >
-        {isLoadingDoc ? (
-          <div className="flex flex-col items-center justify-center gap-2 p-8 text-center text-xs text-[var(--text-muted)]">
-            <Loader2 className="w-6 h-6 text-[var(--color-accent)] animate-spin" />
-            <span>Loading {activeDocumentName}...</span>
-          </div>
-        ) : errorMsg ? (
-          <div className="p-6 text-center text-xs text-red-500 max-w-sm">
-            <p className="font-semibold mb-1">Rendering Error</p>
-            <p>{errorMsg}</p>
-          </div>
-        ) : pdfDoc ? (
-          <div className="relative shadow-md border border-[var(--border-default)] rounded bg-white">
-            <canvas ref={canvasRef} className="block" />
-            {rendering && (
-              <div className="absolute inset-0 bg-white/40 flex items-center justify-center">
-                <Loader2 className="w-5 h-5 text-[var(--color-accent)] animate-spin" />
-              </div>
-            )}
-            {highlightedCitation && highlightedCitation.page === currentPage && (
-              <div className="absolute top-3 right-3 bg-[var(--color-accent)] text-white text-[10px] font-mono-data font-semibold px-2 py-0.5 rounded shadow">
-                Citation on Page {currentPage}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center p-8 text-center max-w-xs text-[var(--text-muted)]">
-            <FileText className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-60" />
-            <p className="text-sm font-semibold text-[var(--text-primary)] mb-1">
-              {activeDocumentName ? activeDocumentName : "No Document Loaded"}
-            </p>
-            <p className="text-xs">
-              Upload a PDF or select a document from the left sidebar to view pages and citations.
+        <div className="w-fit min-w-full min-h-full flex flex-col items-center my-auto">
+          {isLoadingDoc ? (
+            <div className="flex flex-col items-center justify-center gap-2 p-8 text-center text-xs text-[var(--text-muted)] m-auto">
+              <Loader2 className="w-6 h-6 text-[var(--color-accent)] animate-spin" />
+              <span>Loading {activeDocumentName}...</span>
+            </div>
+          ) : errorMsg ? (
+            <div className="p-6 text-center text-xs text-red-500 max-w-sm m-auto">
+              <p className="font-semibold mb-1">Rendering Error</p>
+              <p>{errorMsg}</p>
+            </div>
+          ) : pdfDoc ? (
+            <div className="relative shadow-md border border-[var(--border-default)] rounded bg-white my-auto">
+              <canvas ref={canvasRef} className="block" />
+              {rendering && (
+                <div className="absolute inset-0 bg-white/40 flex items-center justify-center">
+                  <Loader2 className="w-5 h-5 text-[var(--color-accent)] animate-spin" />
+                </div>
+              )}
+              {highlightedCitation && highlightedCitation.page === currentPage && (
+                <div className="absolute top-3 right-3 bg-[var(--color-accent)] text-white text-[10px] font-mono-data font-semibold px-2 py-0.5 rounded shadow">
+                  Citation on Page {currentPage}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center p-8 text-center max-w-xs text-[var(--text-muted)] m-auto">
+              <FileText className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-60" />
+              <p className="text-sm font-semibold text-[var(--text-primary)] mb-1">
+                {activeDocumentName ? activeDocumentName : "No Document Loaded"}
+              </p>
+              <p className="text-xs">
+                Upload a PDF or select a document from the left sidebar to view pages and citations.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Floating Citation Excerpt Preview */}
+        {highlightedCitation && highlightedCitation.page === currentPage && highlightedCitation.highlighted_text && (
+          <div className="sticky bottom-0 mx-auto max-w-xl bg-[var(--bg-surface)]/95 backdrop-blur border border-[var(--color-accent)] rounded-lg p-3 shadow-xl text-xs z-10 animate-in fade-in slide-in-from-bottom-2">
+            <div className="flex items-center justify-between text-[11px] font-mono-data font-semibold text-[var(--color-accent)] mb-1">
+              <span>Cited Passage (Page {currentPage})</span>
+              <button
+                type="button"
+                onClick={() => highlightCitation(null)}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] px-1"
+                title="Dismiss highlight"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-[var(--text-primary)] line-clamp-3 leading-relaxed italic text-[11.5px]">
+              &ldquo;{highlightedCitation.highlighted_text}&rdquo;
             </p>
           </div>
         )}

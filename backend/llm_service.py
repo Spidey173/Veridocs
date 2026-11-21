@@ -5,6 +5,7 @@ No external provider-specific SDK bloat.
 """
 
 import os
+import re
 import logging
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from openai import OpenAI
@@ -14,9 +15,19 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are Veridocs AI, a precise document intelligence assistant.
-Your answers must be grounded strictly in the provided document context.
-For every key factual statement, include a citation marker like [Page X] or [Page X: filename.pdf] referencing where in the document that information was found.
-If the provided excerpts do not contain enough information to answer the question, state honestly that the information was not found in the uploaded documents. Do not speculate or invent facts."""
+Rules:
+- Be concise and answer directly using short bullets.
+- Do not use tables unless the user explicitly asks for a table.
+- Do not add conversational filler, preambles, or a closing recap line.
+- For every factual statement, cite your source using bracketed numbers corresponding to the context passages, like [1] or [2].
+- If the answer cannot be found in the provided excerpts, say exactly: "Not found in the document." Do not speculate or invent facts."""
+
+
+def strip_raw_markers(text: str) -> str:
+    """Convert 【1】 to [1] and remove raw citation symbols."""
+    text = re.sub(r'【(\d+)】', r'[\1]', text)
+    text = re.sub(r'【[^】]*】', '', text)
+    return text
 
 
 class LLMService:
@@ -79,11 +90,12 @@ class LLMService:
     ) -> List[Dict[str, str]]:
         """Construct messages payload including system prompt, context chunks, and history."""
         context_parts = []
-        for c in chunks:
+        for i, c in enumerate(chunks):
             src = c.get("source_file", "Document")
             page = c.get("page", 1)
             text = c.get("text", "").strip()
-            context_parts.append(f"--- [Document: {src} | Page {page}] ---\n{text}")
+            idx = i + 1
+            context_parts.append(f"[{idx}] Document: {src} | Page {page}\n{text}")
 
         context_str = "\n\n".join(context_parts)
         user_content = f"CONTEXT EXCERPTS:\n{context_str}\n\nQUESTION:\n{question}"
@@ -124,7 +136,8 @@ class LLMService:
                 max_tokens=self.max_tokens,
                 extra_body=extra_body if extra_body else None,
             )
-            return response.choices[0].message.content or ""
+            raw_answer = response.choices[0].message.content or ""
+            return strip_raw_markers(raw_answer)
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
             raise RuntimeError(f"LLM request failed: {str(e)}")
@@ -176,7 +189,9 @@ class LLMService:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
                     if delta and delta.content:
-                        yield delta.content
+                        cleaned_token = strip_raw_markers(delta.content)
+                        if cleaned_token:
+                            yield cleaned_token
         except Exception as e:
             logger.error(f"Streaming failed: {e}")
             yield f"\n\n[Error from LLM provider: {str(e)}]"

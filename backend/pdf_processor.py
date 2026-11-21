@@ -109,14 +109,14 @@ def extract_text_from_file(
 
 def chunk_text(
     pages: List[Dict[str, Any]],
-    chunk_size: int = 550,
+    chunk_size: int = 600,
     chunk_overlap: int = 100,
     document_name: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Split extracted pages into granular passage chunks (~500-600 characters with overlap),
-    splitting on natural paragraph/sentence boundaries so citations highlight exact passages.
-    Preserves page number metadata for every chunk.
+    Split extracted pages into cohesive passage chunks (~700-800 characters with overlap),
+    splitting before natural section headers and on paragraph boundaries.
+    Preserves page number and document name metadata for every chunk.
     """
     all_chunks = []
     doc_prefix = f"[Document: {document_name}] " if document_name else ""
@@ -127,31 +127,53 @@ def chunk_text(
         if not text:
             continue
 
-        paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
-        current_chunk = ""
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        current_lines: List[str] = []
+        curr_len = 0
 
-        for para in paragraphs:
-            if not current_chunk:
-                current_chunk = para
-            elif len(current_chunk) + len(para) + 1 <= chunk_size:
-                current_chunk += " " + para
+        for line in lines:
+            # Check for major section headings (resumes, contracts, reports)
+            is_heading = bool(
+                re.match(r'^(?:SECTION\s*\d+|KEY\s+[A-Z\s]+|[A-Z\s&–—\-\:]{4,35})$', line)
+                and len(line) < 40
+                and not line.endswith(".")
+            )
+
+            # Break before heading if chunk is already substantive, or when max size reached
+            if (is_heading and curr_len > 250) or (curr_len + len(line) + 1 > chunk_size):
+                if current_lines:
+                    chunk_text_str = " ".join(current_lines)
+                    all_chunks.append({
+                        "source_file": document_name or "document",
+                        "page": page_num,
+                        "text": f"{doc_prefix}{chunk_text_str}",
+                    })
+
+                    # Maintain word-boundary overlap
+                    overlap_words = []
+                    o_len = 0
+                    for word_line in reversed(current_lines):
+                        if o_len + len(word_line) + 1 <= chunk_overlap:
+                            overlap_words.insert(0, word_line)
+                            o_len += len(word_line) + 1
+                        else:
+                            break
+
+                    current_lines = overlap_words + [line]
+                    curr_len = sum(len(w) + 1 for w in current_lines)
+                else:
+                    current_lines = [line]
+                    curr_len = len(line) + 1
             else:
-                all_chunks.append({
-                    "source_file": document_name or "document",
-                    "page": page_num,
-                    "text": f"{doc_prefix}{current_chunk}",
-                })
-                # Overlap to maintain context across chunk boundaries
-                overlap = current_chunk[-chunk_overlap:] if len(current_chunk) > chunk_overlap else ""
-                if " " in overlap:
-                    overlap = overlap[overlap.find(" ") + 1:]
-                current_chunk = f"{overlap} {para}".strip() if overlap else para
+                current_lines.append(line)
+                curr_len += len(line) + 1
 
-        if current_chunk:
+        if current_lines:
+            chunk_text_str = " ".join(current_lines)
             all_chunks.append({
                 "source_file": document_name or "document",
                 "page": page_num,
-                "text": f"{doc_prefix}{current_chunk}",
+                "text": f"{doc_prefix}{chunk_text_str}",
             })
 
     return all_chunks

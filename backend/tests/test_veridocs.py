@@ -302,3 +302,60 @@ def test_dynamic_suggested_questions(test_client: TestClient, sample_txt_bytes: 
     assert sugg_res.json()["suggestions"] == suggestions
 
 
+def test_sentence_splitter_and_abbreviations():
+    """Verify sentence splitter does not break on '1.', '2.', 'e.g.', 'i.e.', 'vs.', 'p.'."""
+    from verification import split_sentences_safely
+
+    text = (
+        "Based on the document, here are the key details:\n"
+        "1. BankForge: Built a credit risk model (AUC-ROC 0.884), e.g. using logistic regression. [1]\n"
+        "2. DailyDrop: Evaluated customer basket data, i.e. 200+ grocery items vs. churn rate. [2]\n"
+        "Refer to p. 4 for additional details."
+    )
+
+    sentences = split_sentences_safely(text)
+    # Must NOT split 'e.g.' or 'i.e.' or 'p.' into separate fragments
+    assert not any(s == "g." or s == "e." for s in sentences)
+    assert not any(s == "e" or s == "g" for s in sentences)
+    assert any("BankForge" in s and "logistic regression" in s for s in sentences)
+    assert any("DailyDrop" in s and "churn rate" in s for s in sentences)
+
+
+def test_factual_claim_filter():
+    """Verify is_factual_claim ignores intro/meta lines and accepts real claims."""
+    from verification import is_factual_claim
+
+    assert not is_factual_claim("Based on the uploaded document:")
+    assert not is_factual_claim("Here are the key points found in the document:")
+    assert not is_factual_claim("Not found in the document.")
+    assert not is_factual_claim("Short text?")
+
+    assert is_factual_claim("BankForge achieved 88.4% accuracy using logistic regression.")
+    assert is_factual_claim("Vendor guarantees a Monthly Uptime Percentage of at least 99.9%.")
+
+
+def test_small_talk_detection(test_client: TestClient, sample_txt_bytes: bytes):
+    """Verify small talk skips retrieval and replies instantly without citations."""
+    from routers.query import detect_small_talk
+
+    assert detect_small_talk("ok thanks") is not None
+    assert detect_small_talk("hi") is not None
+    assert detect_small_talk("thank you very much") is not None
+    assert detect_small_talk("What projects did he build?") is None
+
+    # Upload test document
+    files = [("files", ("test.txt", sample_txt_bytes, "text/plain"))]
+    sid = test_client.post("/api/upload", files=files).json()["session_id"]
+
+    # Test via API query
+    res = test_client.post("/api/query", json={
+        "session_id": sid,
+        "question": "ok thanks"
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "welcome" in data["answer"].lower()
+    assert data["citations"] == []
+    assert data["citation_check"] is None
+
+

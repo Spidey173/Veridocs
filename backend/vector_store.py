@@ -95,6 +95,14 @@ class VectorStore:
             item["relevance_score"] = float(scores[idx])
             results.append(item)
 
+        # Debug logging for retrieved chunks
+        logger.info(f"[VectorStore Debug] Query: '{query}' | top_k={k} | found={len(results)} chunks:")
+        for i, r in enumerate(results):
+            logger.info(
+                f"  Rank {i+1} [Score {r.get('relevance_score', 0):.3f} | Page {r.get('page')} | File: {r.get('source_file')}]: "
+                f"{r.get('text', '')[:120].replace(chr(10), ' ')}..."
+            )
+
         return results
 
 

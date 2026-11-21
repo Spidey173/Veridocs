@@ -91,8 +91,8 @@ export default function VerificationDrawer({
                         <span className="font-semibold">{c.source_file}</span>
                         <span className="text-[var(--color-accent)] font-semibold">Page {c.page}</span>
                       </div>
-                      <p className="text-xs text-[var(--text-primary)] line-clamp-2 leading-relaxed">
-                        {c.highlighted_text}
+                      <p className="text-[11.5px] text-[var(--text-secondary)] line-clamp-3 leading-relaxed">
+                        &ldquo;{c.highlighted_text}&rdquo;
                       </p>
                     </div>
                   </button>
