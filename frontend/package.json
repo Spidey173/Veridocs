@@ -4,17 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run",
-    "test:unit": "vitest run",
-    "test:e2e": "playwright test",
-    "test:e2e:smoke": "playwright test e2e/live-backend-smoke.spec.ts",
-    "test:e2e:headed": "playwright test --headed"
+    "test": "vitest run"
   },
   "dependencies": {
-    "framer-motion": "^12.40.0",
     "lucide-react": "^1.17.0",
     "next": "16.2.6",
     "pdfjs-dist": "^6.0.227",
@@ -25,16 +20,12 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0",
     "@tailwindcss/postcss": "^4",
-    "@testing-library/dom": "^10.4.2",
-    "@testing-library/react": "^16.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
-    "jsdom": "^29.1.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^8.3.6",

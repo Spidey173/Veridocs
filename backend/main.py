@@ -1,222 +1,96 @@
 """
-Veridocs — Enterprise Document Intelligence & Verification Engine API.
-High-throughput document extraction, hybrid vector search (RRF), cross-encoder reranking,
-claim-level RAG Triad grounding verification, and cross-document contradiction auditing.
+Veridocs — Document Intelligence & Verification Engine API.
+Lightweight, fast, and real: local Fastembed ONNX embeddings, SQLite persistence,
+OpenAI-compatible streaming QA, and honest citation checks.
 """
 
-import os
-import asyncio
+import shutil
 import logging
-import threading
 from pathlib import Path
-from typing import Optional
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, Request
-import time
-from metrics import metrics
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from config import get_settings, get_model_registry
 import database
+from pdf_processor import extract_text_from_file, chunk_text
+from routers import documents, query, system
 
-# Modular Routers
-from routers import auth, documents, jobs, query, audit, system
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("veridocs")
 
-# Re-exported domain components for backward compatibility
-from session_store import (
-    sessions,
-    _sessions_lock,
-    _get_session,
-    _safe_delete_file,
-    _persist_session_background,
-    _generate_insights_background,
-    _cleanup_session,
-    cleanup_expired_sessions,
-    _retention_cleanup_loop,
-    _validate_question,
-)
-from rate_limiter import (
-    _http_rate_limiter,
-    InMemoryRateLimiter,
-    HttpRateLimiter,
-    enforce_rate_limit,
-)
-from routers.query import _generate_followups, _sse_event
 
-# Aliases for existing test fixtures
-_rate_limiter = _http_rate_limiter
+def seed_demo_session_if_needed():
+    """Ensure sample_agreement.pdf is indexed into SQLite for instant showcase."""
+    try:
+        session = database.get_session("demo-session")
+        if session and session["chunk_count"] > 0:
+            return
 
-__all__ = [
-    "app",
-    "sessions",
-    "_sessions_lock",
-    "_get_session",
-    "_safe_delete_file",
-    "_persist_session_background",
-    "_generate_insights_background",
-    "_cleanup_session",
-    "cleanup_expired_sessions",
-    "_retention_cleanup_loop",
-    "_validate_question",
-    "_http_rate_limiter",
-    "_rate_limiter",
-    "InMemoryRateLimiter",
-    "HttpRateLimiter",
-    "enforce_rate_limit",
-    "_generate_followups",
-    "_sse_event",
-]
+        settings = get_settings()
+        sample_path = Path(__file__).resolve().parent / "sample_agreement.pdf"
+        if not sample_path.exists():
+            sample_path = settings.UPLOAD_DIR / "sample_agreement.pdf"
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+        if sample_path.exists():
+            logger.info("Indexing sample_agreement.pdf into demo-session...")
+            pages = extract_text_from_file(sample_path, filename="sample_agreement.pdf")
+            chunks = chunk_text(pages, chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP, document_name="sample_agreement.pdf")
 
-settings = get_settings()
+            reg = get_model_registry()
+            chunk_texts = [c["text"] for c in chunks]
+            embeddings = list(reg.embedding_model.embed(chunk_texts))
+
+            database.save_session("demo-session", ["sample_agreement.pdf"])
+            database.save_chunks("demo-session", chunks, embeddings)
+
+            dest = settings.UPLOAD_DIR / "demo-session_sample_agreement.pdf"
+            if not dest.exists():
+                shutil.copyfile(sample_path, dest)
+            logger.info("Demo session seeded successfully.")
+    except Exception as e:
+        logger.warning(f"Could not seed demo session: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle manager handling startup validation, database pool, warmup, and graceful shutdown."""
-    # Validate configuration on startup
-    settings.validate_production_configuration()
-    raw_env = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or settings.ENVIRONMENT).strip().lower()
-    if raw_env == "production" and settings.ENABLE_DEMO_AUTH:
-        raise RuntimeError(
-            "FATAL SECURITY CONFIGURATION: ENABLE_DEMO_AUTH is true while ENV=production. "
-            "Demo authentication endpoints are strictly prohibited in production environments. Refusing to boot."
-        )
-
-    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-
-    # Initialize PostgreSQL + pgvector if configured
-    if database.is_database_configured():
-        db_ok = await database.init_db()
-        if not db_ok and settings.ENVIRONMENT == "production":
-            raise RuntimeError(
-                "FATAL DATABASE ERROR: Could not connect to PostgreSQL database in production mode. "
-                "Refusing to start in a degraded multi-worker state to prevent worker divergence."
-            )
-    elif settings.ENVIRONMENT == "production":
-        raise RuntimeError(
-            "FATAL CONFIGURATION ERROR: DATABASE_URL must be configured when ENVIRONMENT=production. "
-            "Multi-worker production nodes require a shared PostgreSQL + pgvector database."
-        )
-
-    # Preload models in background thread
-    def _warmup():
-        reg = get_model_registry()
-        _ = reg.embedding_model
-        if settings.RERANKER_ENABLED:
-            _ = reg.reranker_model
-
-    threading.Thread(target=_warmup, daemon=True).start()
-
-    # Start background cleanup task if enabled
-    cleanup_task = None
-    if settings.AUTO_CLEANUP_ENABLED:
-        cleanup_task = asyncio.create_task(_retention_cleanup_loop())
-
+    """Initialize SQLite database schema and seed demo document on startup."""
+    logger.info("Initializing Veridocs SQLite database...")
+    database.init_db()
+    seed_demo_session_if_needed()
+    logger.info("Veridocs backend ready.")
     yield
 
-    # Teardown
-    if database.is_database_configured():
-        await database.close_db()
 
-    if cleanup_task:
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
-
+settings = get_settings()
 
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description="Document Intelligence & Verification API",
-    lifespan=lifespan
+    title="Veridocs API",
+    version="0.2.0",
+    description="Document Question Answering with real citations and grounding verification",
+    lifespan=lifespan,
 )
 
-# CORS configuration
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=settings.CORS_ORIGINS or ["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Prometheus and OpenMetrics latency & throughput telemetry middleware
-@app.middleware("http")
-async def metrics_telemetry_middleware(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    duration = time.time() - start_time
-    path = request.url.path
-    status = str(response.status_code)
-    metrics.inc_counter("veridocs_http_requests_total", {"method": request.method, "endpoint": path, "status": status})
-    metrics.record_latency(path, duration)
-    return response
-
-# Ensure upload directory exists
-Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
-
-# Register modular sub-routers
-if settings.ENABLE_DEMO_AUTH:
-    app.include_router(auth.router)
-app.include_router(documents.router)
-app.include_router(jobs.router)
-app.include_router(query.router)
-app.include_router(audit.router)
+# Mount core routers
 app.include_router(system.router)
+app.include_router(documents.router)
+app.include_router(query.router)
 
 
-def configure_demo_auth_routes(app_instance: FastAPI, enabled: Optional[bool] = None) -> bool:
-    """Register or unregister demo auth router dynamically based on settings/flag."""
-    is_enabled = get_settings().ENABLE_DEMO_AUTH if enabled is None else enabled
-    demo_paths = {"/api/auth/demo-token", "/api/auth/token"}
-    has_demo = any(getattr(r, "path", None) in demo_paths for r in app_instance.router.routes)
-    if is_enabled and not has_demo:
-        app_instance.include_router(auth.router)
-        return True
-    elif not is_enabled and has_demo:
-        app_instance.router.routes = [r for r in app_instance.router.routes if getattr(r, "path", None) not in demo_paths]
-        return False
-    return is_enabled
-
-
-# Mount static frontend build if present
-try:
-    frontend_path = Path(__file__).parent.parent / "frontend" / "out"
-    if frontend_path.exists():
-        app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
-except Exception as e:
-    logger.warning(f"Frontend static files not mounted: {e}")
-
-
-@app.api_route("/", methods=["GET", "HEAD"])
+@app.get("/")
 async def root():
-    return {"message": f"Welcome to {settings.APP_NAME} API v{settings.APP_VERSION}. Visit /docs for API documentation."}
-
-
-# Re-export route handlers for test imports
-generate_demo_token = auth.generate_demo_token
-upload_documents = documents.upload_documents
-get_document_pdf = documents.get_document_pdf
-get_document_insights = documents.get_document_insights
-get_session_info = documents.get_session_info
-delete_session = documents.delete_session
-delete_document_from_session = documents.delete_document_from_session
-submit_async_document_job = jobs.submit_async_document_job
-get_job_status = jobs.get_job_status
-list_user_jobs = jobs.list_user_jobs
-delete_or_cancel_job = jobs.delete_or_cancel_job
-answer_query = query.answer_query
-stream_query = query.stream_query
-chat_stream = query.chat_stream
-get_conversation_history = query.get_conversation_history
-audit_contradictions = audit.audit_contradictions
-health_check = system.health_check
-list_llm_providers = system.list_llm_providers
-trigger_retention_cleanup = system.trigger_retention_cleanup
+    return {
+        "name": "Veridocs API",
+        "version": "0.2.0",
+        "status": "online",
+        "docs_url": "/docs",
+    }

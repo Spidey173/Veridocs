@@ -1,24 +1,19 @@
 import os
-
-# Limit thread pools to prevent high memory usage
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["ONNXRUNTIME_INTER_OP_NUM_THREADS"] = "1"
-os.environ["ONNXRUNTIME_INTRA_OP_NUM_THREADS"] = "1"
-
+from pathlib import Path
 from functools import lru_cache
 from typing import Optional
 import threading
 import logging
-import hashlib
-from pathlib import Path
-import numpy as np
 from dotenv import load_dotenv
 
-# Prioritize loading .env from backend directory, then fallback to current working directory
+# Limit OpenMP/BLAS threads to prevent high RAM/CPU usage on laptops
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["ONNXRUNTIME_INTER_OP_NUM_THREADS"] = "1"
+os.environ["ONNXRUNTIME_INTRA_OP_NUM_THREADS"] = "1"
+
+# Load environment variables
 _backend_env = Path(__file__).resolve().parent / ".env"
 if _backend_env.exists():
     load_dotenv(dotenv_path=_backend_env)
@@ -28,347 +23,103 @@ logger = logging.getLogger(__name__)
 
 
 class Settings:
-    """Application settings loaded from environment variables."""
+    """Application settings for Veridocs."""
 
     def __init__(self):
-        # API Keys & Endpoints for any LLM Provider
-        self.GOOGLE_API_KEY: str = (os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE", "") or os.getenv("google", "")).strip()
-        self.GROQ_API_KEY: str = (os.getenv("GROQ_API_KEY", "")).strip()
-        self.GROQ_MODEL: str = (os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")).strip()
-        self.OPENAI_API_KEY: str = (os.getenv("OPENAI_API_KEY", "")).strip()
-        self.OPENAI_MODEL: str = (os.getenv("OPENAI_MODEL", "gpt-4o-mini")).strip()
-        self.ANTHROPIC_API_KEY: str = (os.getenv("ANTHROPIC_API_KEY", "")).strip()
-        self.ANTHROPIC_MODEL: str = (os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")).strip()
-        self.DEEPSEEK_API_KEY: str = (os.getenv("DEEPSEEK_API_KEY", "")).strip()
-        self.DEEPSEEK_MODEL: str = (os.getenv("DEEPSEEK_MODEL", "deepseek-chat")).strip()
-        self.MISTRAL_API_KEY: str = (os.getenv("MISTRAL_API_KEY", "")).strip()
-        self.MISTRAL_MODEL: str = (os.getenv("MISTRAL_MODEL", "mistral-small-latest")).strip()
-        self.OPENROUTER_API_KEY: str = (os.getenv("OPENROUTER_API_KEY", "")).strip()
-        self.OPENROUTER_MODEL: str = (os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-r1:free")).strip()
-        self.GITHUB_TOKEN: str = (os.getenv("GITHUB_TOKEN", "") or os.getenv("GITHUB_API_KEY", "") or os.getenv("GITHUB", "") or os.getenv("github", "")).strip()
-        self.GITHUB_MODEL: str = (os.getenv("GITHUB_MODEL", "gpt-4o-mini")).strip()
-        self.OLLAMA_BASE_URL: str = (os.getenv("OLLAMA_BASE_URL", "") or os.getenv("OLLAMA_HOST", "")).strip()
-        self.OLLAMA_MODEL: str = (os.getenv("OLLAMA_MODEL", "llama3.2")).strip()
-        self.LLM_BASE_URL: str = (os.getenv("LLM_BASE_URL", "") or os.getenv("CUSTOM_LLM_URL", "")).strip()
-        self.LLM_API_KEY: str = (os.getenv("LLM_API_KEY", "")).strip()
-        self.LLM_MODEL: str = (os.getenv("LLM_MODEL", "")).strip()
+        # OpenAI-compatible LLM configuration (hosted or local Ollama)
+        self.OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "").strip()
+        self.OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "").strip()
 
-        # Dynamic LLM Provider selection (no hardcoded default)
-        env_provider = os.getenv("LLM_PROVIDER", "").strip().lower()
-        if env_provider:
-            self.LLM_PROVIDER: str = env_provider
+        explicit_key = os.getenv("LLM_API_KEY", "").strip()
+        explicit_url = os.getenv("LLM_BASE_URL", "").strip()
+        explicit_model = os.getenv("LLM_MODEL", "").strip()
+
+        if explicit_url:
+            self.LLM_BASE_URL: str = explicit_url
+            self.LLM_API_KEY: str = explicit_key or self.OPENAI_API_KEY or "not-needed"
+            self.LLM_MODEL: str = explicit_model or "default"
+        elif self.OPENAI_API_KEY:
+            self.LLM_BASE_URL: str = "https://api.openai.com/v1"
+            self.LLM_API_KEY: str = self.OPENAI_API_KEY
+            self.LLM_MODEL: str = explicit_model or os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+        elif self.OLLAMA_BASE_URL:
+            self.LLM_BASE_URL: str = self.OLLAMA_BASE_URL.rstrip("/") + ("/v1" if not self.OLLAMA_BASE_URL.endswith("/v1") else "")
+            self.LLM_API_KEY: str = explicit_key or "ollama"
+            self.LLM_MODEL: str = explicit_model or os.getenv("OLLAMA_MODEL", "llama3.2").strip()
         else:
-            # Auto-detect available provider from active credentials / endpoints
-            if self.OPENAI_API_KEY:
-                self.LLM_PROVIDER = "openai"
-            elif self.ANTHROPIC_API_KEY:
-                self.LLM_PROVIDER = "anthropic"
-            elif self.DEEPSEEK_API_KEY:
-                self.LLM_PROVIDER = "deepseek"
-            elif self.GROQ_API_KEY:
-                self.LLM_PROVIDER = "groq"
-            elif self.GOOGLE_API_KEY:
-                self.LLM_PROVIDER = "google"
-            elif self.MISTRAL_API_KEY:
-                self.LLM_PROVIDER = "mistral"
-            elif self.OPENROUTER_API_KEY:
-                self.LLM_PROVIDER = "openrouter"
-            elif self.GITHUB_TOKEN:
-                self.LLM_PROVIDER = "github"
-            elif self.OLLAMA_BASE_URL:
-                self.LLM_PROVIDER = "ollama"
-            elif self.LLM_BASE_URL:
-                self.LLM_PROVIDER = "custom"
-            else:
-                self.LLM_PROVIDER = "auto"
+            # Check default local Ollama port
+            self.LLM_BASE_URL: str = ""
+            self.LLM_API_KEY: str = explicit_key
+            self.LLM_MODEL: str = explicit_model
+
         self.LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
-        self.LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "750"))
+        self.LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1000"))
 
-        # Embedding settings
-        self.EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        self.EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
-
-        # Dynamic embedding dimension detection (supports 384, 768, 1024, 1536, 3072)
-        env_dim = os.getenv("EMBEDDING_DIMENSION", "").strip()
-        if env_dim.isdigit():
-            self.EMBEDDING_DIMENSION: int = int(env_dim)
-        elif "text-embedding-3-large" in self.EMBEDDING_MODEL:
-            self.EMBEDDING_DIMENSION = 3072
-        elif "text-embedding-3-small" in self.EMBEDDING_MODEL or "text-embedding-ada-002" in self.EMBEDDING_MODEL:
-            self.EMBEDDING_DIMENSION = 1536
-        elif "bge-large" in self.EMBEDDING_MODEL:
-            self.EMBEDDING_DIMENSION = 1024
-        elif "bge-base" in self.EMBEDDING_MODEL:
-            self.EMBEDDING_DIMENSION = 768
-        else:
-            self.EMBEDDING_DIMENSION = 384
-
-        # Search settings
-        self.RETRIEVAL_INITIAL_K: int = int(os.getenv("RETRIEVAL_INITIAL_K", "20"))
-        self.RETRIEVAL_FINAL_K: int = int(os.getenv("RETRIEVAL_FINAL_K", "5"))
-        self.BM25_WEIGHT: float = float(os.getenv("BM25_WEIGHT", "0.3"))
-        self.DENSE_WEIGHT: float = float(os.getenv("DENSE_WEIGHT", "0.7"))
-        self.RRF_K: int = int(os.getenv("RRF_K", "60"))
-
-        # Re-ranker settings
-        self.RERANKER_MODEL: str = os.getenv("RERANKER_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2")
-        self.RERANKER_ENABLED: bool = (
-            os.getenv("RERANKER_ENABLED", os.getenv("ENABLE_RERANKER", "false")).lower() == "true"
-        )
-
-        # Chunking settings
+        # Embedding & search
+        self.EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
         self.CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "500"))
         self.CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "50"))
+        self.TOP_K: int = int(os.getenv("TOP_K", "5"))
 
-        # OCR settings
-        self.OCR_ENABLED: bool = os.getenv("OCR_ENABLED", "true").lower() in ("true", "1", "yes")
-        self.OCR_ENGINE: str = os.getenv("OCR_ENGINE", "auto").strip().lower()
-        self.OCR_MAX_WORKERS: int = int(os.getenv("OCR_MAX_WORKERS", "6"))
-        self.OCR_BATCH_SIZE: int = int(os.getenv("OCR_BATCH_SIZE", "8"))
-        self.OCR_IMAGE_MAX_DIM: int = int(os.getenv("OCR_IMAGE_MAX_DIM", "1800"))
-        self.OCR_TIMEOUT_SECONDS: int = int(os.getenv("OCR_TIMEOUT_SECONDS", "30"))
-        self.OCR_MIN_TEXT_LENGTH: int = int(os.getenv("OCR_MIN_TEXT_LENGTH", "30"))
+        # Storage & persistence
+        backend_dir = Path(__file__).resolve().parent
+        self.UPLOAD_DIR: Path = Path(os.getenv("UPLOAD_DIR", str(backend_dir / "uploads"))).resolve()
+        self.DATA_DIR: Path = Path(os.getenv("DATA_DIR", str(backend_dir / "data"))).resolve()
+        self.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        self.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.DATABASE_PATH: str = str(self.DATA_DIR / "veridocs.db")
 
-        # Background processing settings
-        self.CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0").strip()
-        self.CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0").strip()
-        self.CELERY_TASK_ALWAYS_EAGER: bool = os.getenv("CELERY_TASK_ALWAYS_EAGER", "false").lower() in ("true", "1", "yes")
-        self.JOB_TIMEOUT_SECONDS: int = int(os.getenv("JOB_TIMEOUT_SECONDS", "3600"))
-        self.ASYNC_WORKER_CONCURRENCY: int = int(os.getenv("ASYNC_WORKER_CONCURRENCY", "4"))
-
-        # Database settings (PostgreSQL + pgvector)
-        self.DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
-
-        # Application settings
-        self.APP_NAME: str = os.getenv("APP_NAME", "Veridocs")
-        self.APP_VERSION: str = "1.0.0"
-        self.MAX_SESSIONS: int = int(os.getenv("MAX_SESSIONS", "200"))
+        # Upload constraints
         self.MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
-        self.ALLOWED_EXTENSIONS: set = {".pdf", ".docx", ".txt"}
+        self.ALLOWED_EXTENSIONS: set = {".pdf", ".txt"}
 
-        # File upload directory
-        self.UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./uploads")
+        # CORS
+        origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+        self.CORS_ORIGINS: list = [o.strip() for o in origins if o.strip()]
 
-        # CORS allowed origins
-        self.CORS_ORIGINS: list = [
-            origin.strip()
-            for origin in os.getenv(
-                "CORS_ORIGINS",
-                "http://localhost:3000,http://localhost:8000,http://127.0.0.1:3000,http://127.0.0.1:8000,http://localhost:3100,http://127.0.0.1:3100"
-            ).split(",")
-            if origin.strip()
-        ]
-
-        # Environment & Auth mode
-        raw_env = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or "development").strip().lower()
-        self.ENVIRONMENT: str = raw_env
-        self.ENV: str = raw_env
-        self.ENABLE_DEMO_AUTH: bool = os.getenv("ENABLE_DEMO_AUTH", "false").lower() in ("true", "1", "yes")
-        self.AUTH_MODE: str = os.getenv(
-            "AUTH_MODE", "demo" if self.ENVIRONMENT != "production" else "gateway"
-        ).lower()
-
-        # Security keys and headers
-        self.AUTH_SECRET_KEY: str = os.getenv("AUTH_SECRET_KEY", "").strip()
-        self.ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "").strip()
-        self.REQUIRE_API_KEY: bool = os.getenv("REQUIRE_API_KEY", "false").lower() in ("true", "1", "yes")
-        self.API_KEY: str = os.getenv("API_KEY", "").strip()
-        self.TOKEN_EXPIRE_HOURS: int = int(os.getenv("TOKEN_EXPIRE_HOURS", "24"))
-        self.GATEWAY_USER_HEADER: str = os.getenv("GATEWAY_USER_HEADER", "X-Consumer-Custom-ID")
-        self.GATEWAY_ROLE_HEADER: str = os.getenv("GATEWAY_ROLE_HEADER", "X-Consumer-Role")
-        self.GATEWAY_SHARED_SECRET: str = os.getenv("GATEWAY_SHARED_SECRET", "").strip()
-        self.GATEWAY_SECRET_HEADER: str = os.getenv("GATEWAY_SECRET_HEADER", "X-Gateway-Secret")
-
-        # Rate limiting
-        self.RATE_LIMITING_ENABLED: bool = os.getenv("RATE_LIMITING_ENABLED", "true").lower() in ("true", "1", "yes")
-        self.UPLOAD_RATE_LIMIT: int = int(os.getenv("UPLOAD_RATE_LIMIT", "60"))
-        self.QUERY_RATE_LIMIT: int = int(os.getenv("QUERY_RATE_LIMIT", "180"))
-        self.AUDIT_RATE_LIMIT: int = int(os.getenv("AUDIT_RATE_LIMIT", "30"))
-        self.LLM_MAX_TPM: int = int(os.getenv("LLM_MAX_TPM", "30000"))
-        self.LLM_MAX_RPM: int = int(os.getenv("LLM_MAX_RPM", "60"))
-
-        # Contradiction & Audit Optimization
-        self.AUDIT_MODE: str = os.getenv("AUDIT_MODE", "hybrid").lower()
-        self.AUDIT_CACHE_ENABLED: bool = os.getenv("AUDIT_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
-
-        # Retention & cleanup
-        self.RETENTION_HOURS: int = int(os.getenv("RETENTION_HOURS", "24"))
-        self.AUTO_CLEANUP_ENABLED: bool = os.getenv("AUTO_CLEANUP_ENABLED", "true").lower() in ("true", "1", "yes")
-        self.CLEANUP_INTERVAL_MINUTES: int = int(os.getenv("CLEANUP_INTERVAL_MINUTES", "60"))
-
-    def get_available_llm_providers(self) -> dict:
-        """Return dict of available LLM providers based on configured credentials and endpoints."""
-        return {
-            "openai": bool(self.OPENAI_API_KEY),
-            "anthropic": bool(self.ANTHROPIC_API_KEY),
-            "deepseek": bool(self.DEEPSEEK_API_KEY),
-            "groq": bool(self.GROQ_API_KEY),
-            "google": bool(self.GOOGLE_API_KEY),
-            "mistral": bool(self.MISTRAL_API_KEY),
-            "openrouter": bool(self.OPENROUTER_API_KEY),
-            "github": bool(self.GITHUB_TOKEN),
-            "ollama": bool(self.OLLAMA_BASE_URL),
-            "custom": bool(self.LLM_BASE_URL),
-        }
-
-    def validate_production_configuration(self):
-        """Validate critical security settings in production."""
-        raw_env = (os.getenv("ENV") or os.getenv("ENVIRONMENT") or self.ENVIRONMENT).strip().lower()
-        is_prod = raw_env == "production" or self.AUTH_MODE == "gateway"
-
-        if raw_env == "production" and self.ENABLE_DEMO_AUTH:
-            raise RuntimeError(
-                "FATAL SECURITY CONFIGURATION: ENABLE_DEMO_AUTH is true while ENV=production. "
-                "Demo authentication endpoints are strictly prohibited in production environments. Refusing to boot."
-            )
-
-        if is_prod:
-            insecure_placeholders = {
-                "veridocs-default-secret-key-change-in-production",
-                "change-me",
-                "secret",
-                "password",
-                "default",
-            }
-            if not self.AUTH_SECRET_KEY:
-                raise RuntimeError(
-                    "FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is required in production/gateway mode "
-                    "but was not set. Define a strong secret of at least 32 characters in your environment."
-                )
-            if len(self.AUTH_SECRET_KEY) < 32:
-                raise RuntimeError(
-                    f"FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is too short ({len(self.AUTH_SECRET_KEY)} chars). "
-                    "Production deployments require at least 32 characters for HMAC-SHA256 signing security."
-                )
-            if self.AUTH_SECRET_KEY.lower() in insecure_placeholders:
-                raise RuntimeError(
-                    "FATAL SECURITY CONFIGURATION: AUTH_SECRET_KEY is set to an insecure default placeholder. "
-                    "You must provide a unique, random secret in production."
-                )
-
-            if self.ENVIRONMENT == "production":
-                if not self.DATABASE_URL or not self.DATABASE_URL.strip():
-                    raise RuntimeError(
-                        "FATAL DATABASE CONFIGURATION: DATABASE_URL is required when ENVIRONMENT=production. "
-                        "Multi-worker production nodes require a shared PostgreSQL + pgvector database. "
-                        "Refusing to start in production with ephemeral in-memory storage to prevent worker divergence."
-                    )
-
-            if self.AUTH_MODE == "gateway":
-                allow_unprotected = os.getenv("ALLOW_UNPROTECTED_GATEWAY_HEADERS", "false").lower() in ("true", "1", "yes")
-                if not self.GATEWAY_SHARED_SECRET and not self.REQUIRE_API_KEY and not allow_unprotected:
-                    raise RuntimeError(
-                        "FATAL SECURITY CONFIGURATION: When AUTH_MODE=gateway in production, GATEWAY_SHARED_SECRET "
-                        "(or REQUIRE_API_KEY=true) must be configured to verify that gateway identity headers "
-                        f"({self.GATEWAY_USER_HEADER}) originate from an authentic gateway rather than directly from an "
-                        "untrusted client. If network isolation (e.g. private VPC, ingress firewall) guarantees the "
-                        "backend cannot be reached directly from the public internet, set ALLOW_UNPROTECTED_GATEWAY_HEADERS=true."
-                    )
-
-
-@lru_cache()
-def get_settings() -> Settings:
-    """Return the cached settings object."""
-    return Settings()
-
-
-class FastEmbeddingWrapper:
-    """Local embedding wrapper using FastEmbed."""
-
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        if model_name == "all-MiniLM-L6-v2":
-            model_name = "sentence-transformers/all-MiniLM-L6-v2"
-        logger.info(f"Loading embedding model: {model_name}")
-        from fastembed import TextEmbedding
-        threads = min(4, max(1, os.cpu_count() or 1))
-        try:
-            self._model = TextEmbedding(model_name=model_name, threads=threads)
-        except TypeError:
-            self._model = TextEmbedding(model_name=model_name)
-
-    def encode(self, texts, batch_size: int = 32, **kwargs):
-        """Encode text into float32 numpy vectors."""
-        if isinstance(texts, str):
-            texts = [texts]
-        embeddings = list(self._model.embed(texts, batch_size=batch_size))
-        return np.array(embeddings, dtype=np.float32)
-
-
-class DeterministicOfflineEmbedding:
-    """Zero-dependency offline deterministic embedding generator for air-gapped/offline runtime."""
-
-    def encode(self, texts, **kwargs):
-        if isinstance(texts, str):
-            texts = [texts]
-        vectors = []
-        for text in texts:
-            seed = int(hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()[:8], 16)
-            rng = np.random.RandomState(seed)
-            vec = rng.randn(384).astype(np.float32)
-            norm = np.linalg.norm(vec)
-            if norm > 0:
-                vec = vec / norm
-            vectors.append(vec)
-        return np.array(vectors, dtype=np.float32)
+    def is_llm_configured(self) -> bool:
+        """Check if an LLM is configured (either OpenAI key or custom/Ollama base URL)."""
+        return bool(self.LLM_BASE_URL and (self.LLM_API_KEY or "localhost" in self.LLM_BASE_URL or "127.0.0.1" in self.LLM_BASE_URL))
 
 
 class ModelRegistry:
-    """Loads and caches models in memory."""
+    """Thread-safe singleton for lazy-loading Fastembed embedding model."""
 
-    _instance: Optional["ModelRegistry"] = None
-    _embedding_model = None
-    _reranker_model = None
+    _instance = None
     _lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = super().__new__(cls)
+                    cls._instance = super(ModelRegistry, cls).__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._embedding_model = None
+        self._model_lock = threading.Lock()
+        self._initialized = True
 
     @property
     def embedding_model(self):
         if self._embedding_model is None:
-            with self._lock:
+            with self._model_lock:
                 if self._embedding_model is None:
                     settings = get_settings()
-                    try:
-                        self._embedding_model = FastEmbeddingWrapper(settings.EMBEDDING_MODEL)
-                    except Exception as e:
-                        logger.warning(
-                            f"FastEmbed model load notice ({e}). Falling back to deterministic offline embedding engine."
-                        )
-                        self._embedding_model = DeterministicOfflineEmbedding()
+                    logger.info(f"Loading Fastembed model: {settings.EMBEDDING_MODEL}...")
+                    from fastembed import TextEmbedding
+                    self._embedding_model = TextEmbedding(model_name=settings.EMBEDDING_MODEL)
+                    logger.info("Fastembed model loaded successfully.")
         return self._embedding_model
 
-    @property
-    def reranker_model(self):
-        if self._reranker_model is None:
-            settings = get_settings()
-            if not settings.RERANKER_ENABLED:
-                return None
-            with self._lock:
-                if self._reranker_model is None:
-                    if not settings.RERANKER_ENABLED:
-                        return None
-                    try:
-                        try:
-                            from fastembed.rerank.cross_encoder import TextCrossEncoder
-                        except ImportError:
-                            from fastembed import TextCrossEncoder
-                        logger.info(f"Loading reranker model: {settings.RERANKER_MODEL}")
-                        threads = min(4, max(1, os.cpu_count() or 1))
-                        try:
-                            self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL, threads=threads)
-                        except TypeError:
-                            self._reranker_model = TextCrossEncoder(model_name=settings.RERANKER_MODEL)
-                    except Exception as e:
-                        logger.warning(f"Reranker unavailable: {e}")
-                        return None
-        return self._reranker_model
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()
 
 
 def get_model_registry() -> ModelRegistry:
-    """Return the global ModelRegistry singleton."""
     return ModelRegistry()

@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAppStore } from "@/lib/store";
-import { getInsights } from "@/lib/api";
 import ResizablePanel from "./ResizablePanel";
 import FileManager from "./FileManager";
 import WorkspaceHeader from "./WorkspaceHeader";
@@ -12,7 +11,6 @@ import { FileText, Eye, MessageSquare } from "lucide-react";
 
 export default function WorkspaceLayout() {
   const {
-    sessionId,
     leftSidebarCollapsed,
     rightSidebarCollapsed,
     leftSidebarWidth,
@@ -20,37 +18,16 @@ export default function WorkspaceLayout() {
     activeDocumentName,
     setLeftSidebarWidth,
     setRightSidebarWidth,
-    setInsights,
-    setLoadingInsights,
   } = useAppStore();
 
   const [mobileTab, setMobileTab] = useState<"left" | "center" | "right">("center");
-
-  // Load document-specific insights dynamically when active document changes
-  useEffect(() => {
-    if (!sessionId || !activeDocumentName) return;
-
-    async function loadDocInsights() {
-      setLoadingInsights(true);
-      try {
-        const docInsights = await getInsights(sessionId!, activeDocumentName!);
-        setInsights(docInsights);
-      } catch (err) {
-        console.error("Failed to load document insights:", err);
-      } finally {
-        setLoadingInsights(false);
-      }
-    }
-
-    loadDocInsights();
-  }, [sessionId, activeDocumentName, setInsights, setLoadingInsights]);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       {/* Global Workspace Header */}
       <WorkspaceHeader />
 
-      {/* Mobile Tab Strip (visible only on small screens < md) */}
+      {/* Mobile Tab Strip (< md) */}
       <div className="md:hidden h-9 px-2 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex items-center justify-around text-xs shrink-0 font-mono-data">
         <button
           type="button"
@@ -86,18 +63,18 @@ export default function WorkspaceLayout() {
           }`}
         >
           <MessageSquare className="w-3.5 h-3.5" />
-          <span>Evidence & Chat</span>
+          <span>Answers</span>
         </button>
       </div>
 
       {/* Main 3-Column Shell (Desktop) / Tabbed (Mobile) */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Left sidebar: File & Session Manager + Document Insights */}
+        {/* Left sidebar: File & Session Manager */}
         <div className={`h-full ${mobileTab === "left" ? "w-full flex" : "hidden"} md:flex md:w-auto`}>
           <ResizablePanel
             width={leftSidebarWidth}
-            minWidth={220}
-            maxWidth={400}
+            minWidth={200}
+            maxWidth={360}
             direction="left"
             onWidthChange={setLeftSidebarWidth}
             isCollapsed={leftSidebarCollapsed}
@@ -106,7 +83,7 @@ export default function WorkspaceLayout() {
           </ResizablePanel>
         </div>
 
-        {/* Center Panel: Focus Mode PDF Viewer */}
+        {/* Center Panel: Real PDF Viewer */}
         <div
           className={`flex-1 h-full min-w-0 overflow-hidden ${
             mobileTab === "center" ? "flex" : "hidden"
@@ -115,12 +92,12 @@ export default function WorkspaceLayout() {
           <PDFViewer key={activeDocumentName || "empty"} />
         </div>
 
-        {/* Right sidebar: AI Workspace (Chat + Insights + Contradictions) */}
+        {/* Right sidebar: Real Streaming Q&A Workspace */}
         <div className={`h-full ${mobileTab === "right" ? "w-full flex" : "hidden"} md:flex md:w-auto`}>
           <ResizablePanel
             width={rightSidebarWidth}
-            minWidth={320}
-            maxWidth={800}
+            minWidth={300}
+            maxWidth={600}
             direction="right"
             onWidthChange={setRightSidebarWidth}
             isCollapsed={rightSidebarCollapsed}

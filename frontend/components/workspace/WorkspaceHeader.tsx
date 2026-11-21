@@ -8,13 +8,12 @@ import {
   PanelRightClose,
   PanelRight,
   FileText,
-  Keyboard,
 } from "lucide-react";
 
 export default function WorkspaceHeader() {
   const {
     sessionId,
-    selectedFileNames,
+    files,
     activeDocumentName,
     currentPage,
     totalPages,
@@ -34,7 +33,7 @@ export default function WorkspaceHeader() {
             type="button"
             onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
             className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
-            title={leftSidebarCollapsed ? "Expand Documents & Insights (Cmd+B)" : "Collapse Sidebar"}
+            title={leftSidebarCollapsed ? "Expand Documents" : "Collapse Sidebar"}
           >
             {leftSidebarCollapsed ? (
               <PanelLeft className="w-4 h-4 text-[var(--color-accent)]" />
@@ -57,7 +56,7 @@ export default function WorkspaceHeader() {
         {sessionId && (
           <div className="hidden sm:flex items-center gap-2 pl-3 ml-1 border-l border-[var(--border-subtle)] text-xs">
             <span className="text-[10px] font-mono-data px-1.5 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
-              {selectedFileNames.length} {selectedFileNames.length === 1 ? "doc" : "docs"}
+              {files.length} {files.length === 1 ? "doc" : "docs"}
             </span>
 
             {activeDocumentName && (
@@ -76,19 +75,6 @@ export default function WorkspaceHeader() {
       </div>
 
       <div className="flex items-center gap-2">
-        {/* Keyboard navigation quick hints */}
-        <div className="hidden lg:flex items-center gap-2 text-[10px] text-[var(--text-muted)] font-mono-data pr-2 border-r border-[var(--border-subtle)]">
-          <span className="flex items-center gap-1">
-            <kbd className="px-1 py-0.5 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)]">⌘K</kbd>
-            <span>Ask</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <kbd className="px-1 py-0.5 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)]">J</kbd>
-            <kbd className="px-1 py-0.5 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)]">K</kbd>
-            <span>Citations</span>
-          </span>
-        </div>
-
         {sessionId && (
           <button
             type="button"
@@ -96,7 +82,7 @@ export default function WorkspaceHeader() {
             className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] border border-transparent hover:border-[var(--border-subtle)] transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>New Workspace</span>
+            <span>New Session</span>
           </button>
         )}
 
@@ -106,7 +92,7 @@ export default function WorkspaceHeader() {
             type="button"
             onClick={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
             className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors"
-            title={rightSidebarCollapsed ? "Expand Answers & Evidence" : "Collapse Right Panel"}
+            title={rightSidebarCollapsed ? "Expand Answers" : "Collapse Answers"}
           >
             {rightSidebarCollapsed ? (
               <PanelRight className="w-4 h-4 text-[var(--color-accent)]" />

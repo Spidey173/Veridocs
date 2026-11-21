@@ -1,1109 +1,160 @@
+"""
+Document processing and text extraction for Veridocs (PDF and TXT).
+Fast, reliable, and lightweight extraction using pypdf.
+"""
+
 import io
 import re
-import os
-import base64
 import logging
-import concurrent.futures
-import threading
-import time
-import random
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Callable, Union, Generator, Any
-from PIL import Image
+from typing import List, Dict, Any, Union, Optional
 import pypdf
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-from config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Optional hook for testing or injecting custom multimodal vision transcribers
-_custom_vision_transcriber: Optional[Callable[[bytes, int], Optional[str]]] = None
 
-# Optional hook for testing or injecting custom dedicated OCR engines (DocTR, Surya, etc.)
-_custom_ocr_engine: Optional[Callable[[bytes, List[int]], List[Dict[str, Any]]]] = None
-
-
-def register_vision_transcriber(fn: Optional[Callable[[bytes, int], Optional[str]]]) -> None:
-    """Register or clear a custom vision transcriber function (useful for tests and plugins)."""
-    global _custom_vision_transcriber
-    _custom_vision_transcriber = fn
-
-
-def register_ocr_engine(fn: Optional[Callable[[bytes, List[int]], List[Dict[str, Any]]]]) -> None:
-    """Register or clear a custom dedicated OCR engine function (useful for tests, plugins, DocTR, Surya)."""
-    global _custom_ocr_engine
-    _custom_ocr_engine = fn
-
-
-def _optimize_image_for_ocr(img_bytes: bytes, max_dim: int = 1800) -> bytes:
-    """Downscale oversized scanned images and compress to high-quality JPEG to slash transmission latency."""
-    if not img_bytes:
-        return img_bytes
-    try:
-        img = Image.open(io.BytesIO(img_bytes))
-        width, height = img.size
-
-        # If already within dimensions and reasonable size (< 400KB), return as is
-        if max(width, height) <= max_dim and len(img_bytes) < 400 * 1024 and getattr(img, "format", None) in ("JPEG", "PNG"):
-            return img_bytes
-
-        # Downscale proportionally if larger than max_dim
-        if max(width, height) > max_dim:
-            scale = max_dim / max(width, height)
-            new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
-            img = img.resize(new_size, Image.Resampling.LANCZOS)
-
-        # Convert to RGB if needed (handling RGBA, CMYK, P modes)
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85, optimize=True)
-        compressed = buf.getvalue()
-
-        if len(compressed) < len(img_bytes):
-            logger.debug(f"Optimized OCR image: {len(img_bytes)} -> {len(compressed)} bytes ({img.size})")
-            return compressed
-        return img_bytes
-    except Exception as e:
-        logger.warning(f"Image optimization for OCR skipped due to error: {e}")
-        return img_bytes
-
-
-def fix_spaced_text(text: str) -> str:
-    """Reconstruct text that has spaces between every character."""
-    if not text:
-        return ""
-
-    lines = text.splitlines()
-    cleaned_lines = []
-
-    for line in lines:
-        tokens = line.split()
-        if not tokens:
-            cleaned_lines.append("")
-            continue
-
-        single_char_tokens = [t for t in tokens if len(t) == 1 and t.isalnum()]
-        alnum_tokens = [t for t in tokens if any(c.isalnum() for c in t)]
-
-        if len(alnum_tokens) > 3 and (len(single_char_tokens) / len(alnum_tokens)) > 0.4:
-            parts = re.split(r'\s{2,}', line.strip())
-            if len(parts) > 1:
-                cleaned_parts = []
-                for part in parts:
-                    cleaned_word = part.replace(" ", "")
-                    if cleaned_word:
-                        cleaned_parts.append(cleaned_word)
-                cleaned_line = " ".join(cleaned_parts)
-            else:
-                cleaned_line = line.replace(" ", "")
-                cleaned_line = re.sub(r'([,.;:!?])', r'\1 ', cleaned_line)
-                cleaned_line = " ".join(cleaned_line.split())
-
-            cleaned_lines.append(cleaned_line)
-        else:
-            cleaned_lines.append(line)
-
-    return "\n".join(cleaned_lines)
-
-
-# Common heading patterns in documents
-HEADING_PATTERNS = [
-    re.compile(r'^(\d+\.[\d.]*)\s+(.+)$'),
-    re.compile(r'^((?:I{1,3}|IV|V|VI{0,3}|IX|X{0,3})\.)\s+(.+)$', re.IGNORECASE),
-    re.compile(r'^(ITEM\s+\d+[A-Z]?\.?)\s*(.*)$', re.IGNORECASE),
-    re.compile(r'^(PART\s+(?:I{1,3}|IV)\.?)\s*(.*)$', re.IGNORECASE),
-    re.compile(r'^([A-Z][A-Z\s&]{2,60})$'),
-    re.compile(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*:'),
-    re.compile(r'^\*\*(.+)\*\*$'),
-]
-
-
-def detect_sections(text: str) -> List[Dict[str, str]]:
-    """Detect section headings from text lines."""
-    sections = []
-    lines = text.split('\n')
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or len(stripped) < 3:
-            continue
-
-        for j, pattern in enumerate(HEADING_PATTERNS):
-            match = pattern.match(stripped)
-            if match:
-                level = 1 if j < 2 else 2
-                heading_text = match.group(0).strip()
-
-                if 3 <= len(heading_text) <= 100:
-                    sections.append({
-                        "heading": heading_text,
-                        "line_index": i,
-                        "level": level
-                    })
-                break
-
-    return sections
-
-
-def iter_pdf_pages(
-    file_input: Union[bytes, str, Path, io.IOBase],
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
-) -> Generator[Dict[str, Any], None, None]:
-    """Stream PDF pages one by one to minimize memory usage on large documents."""
-    close_stream = False
+def extract_text_from_pdf(file_input: Union[bytes, str, Path]) -> List[Dict[str, Any]]:
+    """Extract text page-by-page from a PDF file."""
     if isinstance(file_input, (str, Path)):
-        stream = open(file_input, "rb")
-        close_stream = True
-    elif isinstance(file_input, bytes):
-        stream = io.BytesIO(file_input)
+        reader = pypdf.PdfReader(str(file_input))
     else:
-        stream = file_input
+        reader = pypdf.PdfReader(io.BytesIO(file_input))
 
-    try:
-        try:
-            reader = pypdf.PdfReader(stream)
-        except Exception as e:
-            logger.error(f"Failed to read PDF: {str(e)}")
-            raise ValueError(f"Invalid or corrupted PDF file: {str(e)}")
-
-        if reader.is_encrypted:
-            try:
-                reader.decrypt("")
-            except Exception as e:
-                logger.error(f"Cannot decrypt PDF: {str(e)}")
-                raise ValueError("PDF is encrypted and cannot be processed")
-
-        total_pages = len(reader.pages)
-        logger.info(f"Extracting text from {total_pages} PDF pages")
-
-        extracted_pages: Dict[int, Dict[str, Any]] = {}
-        scanned_indices: List[int] = []
-
-        for i, page in enumerate(reader.pages):
-            page_num = i + 1
-            if progress_callback and (i % 5 == 0 or i == total_pages - 1):
-                progress_callback(page_num, total_pages, f"Extracting digital text (page {page_num}/{total_pages})")
-
-            try:
-                text = page.extract_text()
-
-                if text:
-                    text = fix_spaced_text(text)
-                    cleaned_text = ' '.join(text.split())
-
-                    if len(cleaned_text.strip()) > 10:
-                        sections = detect_sections(text)
-                        section_names = [s["heading"] for s in sections]
-
-                        extracted_pages[page_num] = {
-                            "page": page_num,
-                            "text": cleaned_text.strip(),
-                            "raw_text": text,
-                            "sections": section_names,
-                            "is_scanned": False
-                        }
-                    else:
-                        scanned_indices.append(page_num)
-                else:
-                    scanned_indices.append(page_num)
-
-            except Exception as e:
-                logger.warning(f"Error extracting text from page {page_num}: {str(e)}")
-                scanned_indices.append(page_num)
-                continue
-
-        # If pages appear to be scanned images or lack digital text, invoke OCR / Vision fallback
-        settings = get_settings()
-        if scanned_indices and getattr(settings, "OCR_ENABLED", True):
-            logger.info(f"{len(scanned_indices)}/{total_pages} pages have no digital text. Running OCR/Vision fallback...")
-            if isinstance(file_input, bytes):
-                ocr_bytes = file_input
-            elif isinstance(file_input, (str, Path)):
-                ocr_bytes = Path(file_input).read_bytes()
-            else:
-                stream.seek(0)
-                ocr_bytes = stream.read()
-
-            # 1. Try dedicated local OCR engines first (Custom hook, DocTR, Surya, EasyOCR, Tesseract)
-            ocr_pages = _ocr_pdf_pages(
-                ocr_bytes,
-                total_pages,
-                scanned_indices=scanned_indices,
-                progress_callback=progress_callback
-            )
-
-            resolved_pages = set()
-            for ocr_p in ocr_pages:
-                p_num = ocr_p.get("page")
-                if p_num:
-                    extracted_pages[p_num] = ocr_p
-                    resolved_pages.add(p_num)
-
-            # 2. For remaining unresolved scanned pages, invoke parallelized Multimodal Vision fallback
-            unresolved_indices = [idx for idx in scanned_indices if idx not in resolved_pages]
-            if unresolved_indices:
-                logger.info(f"Invoking parallelized Multimodal Vision fallback for {len(unresolved_indices)} pages...")
-                vision_pages = _multimodal_vision_pdf_fallback(
-                    reader,
-                    total_pages,
-                    scanned_indices=unresolved_indices,
-                    progress_callback=progress_callback
-                )
-                for vp in vision_pages:
-                    p_num = vp.get("page")
-                    if p_num:
-                        extracted_pages[p_num] = vp
-
-        if not extracted_pages:
-            raise ValueError(
-                "No readable text found in the PDF. The file might be scanned images only."
-            )
-
-        # Yield all pages strictly in ascending order 1..N
-        for p_num in sorted(extracted_pages.keys()):
-            yield extracted_pages[p_num]
-
-    finally:
-        if close_stream:
-            stream.close()
-
-
-def extract_text_from_pdf(
-    file_input: Union[bytes, str, Path, io.IOBase],
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
-) -> List[Dict[str, Any]]:
-    """Extract text from PDF pages as a list."""
-    return list(iter_pdf_pages(file_input, progress_callback=progress_callback))
-
-
-def _transcribe_scanned_image_via_vision(img_bytes: bytes, page_num: int) -> Optional[str]:
-    """Transcribe a scanned document page image using Multimodal Vision Models (Gemini Flash or OpenAI)."""
-    global _custom_vision_transcriber
-    if _custom_vision_transcriber is not None:
-        try:
-            custom_result = _custom_vision_transcriber(img_bytes, page_num)
-            if custom_result:
-                return custom_result.strip()
-        except Exception as e:
-            logger.warning(f"Custom vision transcriber error on page {page_num}: {e}")
-
-    settings = get_settings()
-
-    # 1. Try Google Gemini Flash Vision
-    gemini_key = (
-        settings.GOOGLE_API_KEY
-        or os.getenv("GOOGLE_API_KEY", "")
-        or os.getenv("GEMINI_API_KEY", "")
-    ).strip()
-    if gemini_key:
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                import google.generativeai as genai
-
-                genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                prompt = (
-                    "You are an optical document transcription engine for financial, legal, and technical reports. "
-                    "Transcribe all readable text, headers, and tables from this scanned document page. "
-                    "Format tabular data with markdown pipes (| col | col |). "
-                    "Preserve exact numbers, dates, currency signs, and section headings. "
-                    "Do not include conversational commentary—return ONLY the transcribed document content."
-                )
-                image = Image.open(io.BytesIO(img_bytes))
-                response = model.generate_content([prompt, image])
-                if response and response.text and len(response.text.strip()) > 10:
-                    logger.info(f"Page {page_num} successfully transcribed via Gemini Flash Vision.")
-                    return response.text.strip()
-                break
-            except Exception as e:
-                err_msg = str(e).lower()
-                if attempt < max_retries and any(k in err_msg for k in ("429", "resource exhausted", "quota", "timeout")):
-                    sleep_s = (2 ** attempt) + random.uniform(0.1, 0.4)
-                    logger.warning(f"Gemini Flash vision retryable error on page {page_num}: {e}. Retrying in {sleep_s:.2f}s...")
-                    time.sleep(sleep_s)
-                else:
-                    logger.warning(f"Gemini Flash vision transcription failed on page {page_num}: {e}")
-                    break
-
-    # 2. Try OpenAI Vision (gpt-4o-mini / gpt-4o)
-    openai_key = (settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")).strip()
-    if openai_key:
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                import openai
-
-                client = openai.OpenAI(api_key=openai_key)
-                b64_img = base64.b64encode(img_bytes).decode("utf-8")
-                response = client.chat.completions.create(
-                    model=settings.OPENAI_MODEL or "gpt-4o-mini",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": "Transcribe this scanned document page into text and markdown tables. Preserve all headers, numbers, and dates without conversational commentary.",
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"},
-                                },
-                            ],
-                        }
-                    ],
-                    max_tokens=2048,
-                )
-                text = response.choices[0].message.content
-                if text and len(text.strip()) > 10:
-                    logger.info(f"Page {page_num} successfully transcribed via OpenAI Vision.")
-                    return text.strip()
-                break
-            except Exception as e:
-                err_msg = str(e).lower()
-                if attempt < max_retries and any(k in err_msg for k in ("429", "rate limit", "timeout", "server_error")):
-                    sleep_s = (2 ** attempt) + random.uniform(0.1, 0.4)
-                    logger.warning(f"OpenAI vision retryable error on page {page_num}: {e}. Retrying in {sleep_s:.2f}s...")
-                    time.sleep(sleep_s)
-                else:
-                    logger.warning(f"OpenAI vision transcription failed on page {page_num}: {e}")
-                    break
-
-    return None
-
-
-def _multimodal_vision_pdf_fallback(
-    reader: pypdf.PdfReader,
-    total_pages: int,
-    scanned_indices: List[int],
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
-) -> List[Dict[str, Any]]:
-    """Transcribe flattened/corrupted image PDFs using multimodal vision models in parallel batches."""
-    settings = get_settings()
-    max_workers = getattr(settings, "OCR_MAX_WORKERS", 6)
-    max_dim = getattr(settings, "OCR_IMAGE_MAX_DIM", 1800)
-    batch_size = getattr(settings, "OCR_BATCH_SIZE", 8)
-    timeout = getattr(settings, "OCR_TIMEOUT_SECONDS", 30)
-
-    # 1. Extract image tasks synchronously from reader (fast local CPU operation)
-    page_tasks: List[Tuple[int, bytes]] = []
-    for page_num in scanned_indices:
-        if page_num > len(reader.pages):
-            continue
-        try:
-            page = reader.pages[page_num - 1]
-            page_images = [img.data for img in page.images if img.data and len(img.data) > 200]
-            if page_images:
-                largest_image = max(page_images, key=len)
-                page_tasks.append((page_num, largest_image))
-            else:
-                logger.warning(f"No embedded images detected on scanned page {page_num}.")
-        except Exception as e:
-            logger.warning(f"Failed to extract image on page {page_num}: {e}")
-
-    if not page_tasks:
-        return []
-
-    # 2. Worker task to optimize image and transcribe
-    def _process_page(task: Tuple[int, bytes]) -> Optional[Dict[str, Any]]:
-        page_num, raw_img_bytes = task
-        try:
-            optimized_bytes = _optimize_image_for_ocr(raw_img_bytes, max_dim=max_dim)
-            transcribed = _transcribe_scanned_image_via_vision(optimized_bytes, page_num)
-            if transcribed and len(transcribed.strip()) > 10:
-                sections = detect_sections(transcribed)
-                section_names = [s["heading"] for s in sections]
-                return {
-                    "page": page_num,
-                    "text": transcribed.strip(),
-                    "raw_text": transcribed,
-                    "sections": section_names,
-                    "is_scanned": True,
-                    "ocr_engine": "multimodal_vision"
-                }
-        except Exception as e:
-            logger.warning(f"Multimodal vision transcription failed on page {page_num}: {e}")
-        return None
-
-    # 3. Process concurrently in bounded batches
-    vision_pages: List[Dict[str, Any]] = []
-    total_tasks = len(page_tasks)
-    completed_count = 0
-    lock = threading.Lock()
-
-    for batch_start in range(0, total_tasks, batch_size):
-        batch = page_tasks[batch_start : batch_start + batch_size]
-        actual_workers = min(len(batch), max_workers)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
-            future_to_page = {
-                executor.submit(_process_page, task): task[0]
-                for task in batch
-            }
-
-            for future in concurrent.futures.as_completed(future_to_page):
-                page_num = future_to_page[future]
-                try:
-                    result = future.result(timeout=timeout)
-                    if result:
-                        vision_pages.append(result)
-                except concurrent.futures.TimeoutError:
-                    logger.warning(f"Vision transcription timed out on page {page_num} after {timeout}s.")
-                except Exception as e:
-                    logger.warning(f"Vision transcription worker error on page {page_num}: {e}")
-                finally:
-                    with lock:
-                        completed_count += 1
-                        if progress_callback:
-                            progress_callback(
-                                completed_count,
-                                total_tasks,
-                                f"Transcribing scanned pages ({completed_count}/{total_tasks})...",
-                            )
-
-    # 4. Strictly sort results by page number to guarantee document sequence
-    vision_pages.sort(key=lambda p: p["page"])
-    return vision_pages
-
-
-def _ocr_pdf_pages(
-    file_bytes: bytes,
-    total_pages: int,
-    scanned_indices: Optional[List[int]] = None,
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
-) -> List[Dict[str, Any]]:
-    """OCR fallback for scanned PDF pages using dedicated engines (Custom hook, DocTR, Surya, EasyOCR, or Tesseract)."""
-    global _custom_ocr_engine
-    target_indices = scanned_indices if scanned_indices else list(range(1, total_pages + 1))
-
-    # 1. Custom registered OCR engine
-    if _custom_ocr_engine is not None:
-        try:
-            logger.info("Executing custom registered OCR engine...")
-            custom_results = _custom_ocr_engine(file_bytes, target_indices)
-            if custom_results:
-                return sorted(custom_results, key=lambda p: p["page"])
-        except Exception as e:
-            logger.warning(f"Custom OCR engine failed: {e}")
-
-    settings = get_settings()
-    engine_pref = getattr(settings, "OCR_ENGINE", "auto").lower()
-
-    # 2. Dedicated OCR Engine: DocTR
-    if engine_pref in ("auto", "doctr"):
-        try:
-            from doctr.io import DocumentFile
-            from doctr.models import ocr_predictor
-            logger.info("Running DocTR OCR engine on scanned pages...")
-            predictor = ocr_predictor(pretrained=True)
-            doc = DocumentFile.from_pdf(file_bytes)
-            doctr_pages = []
-            for p_num in target_indices:
-                if p_num <= len(doc):
-                    result = predictor([doc[p_num - 1]])
-                    page_export = result.export()["pages"][0]
-                    lines = []
-                    for block in page_export.get("blocks", []):
-                        for line in block.get("lines", []):
-                            line_text = " ".join(w["value"] for w in line.get("words", []))
-                            if line_text:
-                                lines.append(line_text)
-                    page_text = "\n".join(lines).strip()
-                    if len(page_text) > 10:
-                        doctr_pages.append({
-                            "page": p_num,
-                            "text": page_text,
-                            "raw_text": page_text,
-                            "sections": [s["heading"] for s in detect_sections(page_text)],
-                            "is_scanned": True,
-                            "ocr_engine": "doctr"
-                        })
-            if doctr_pages:
-                return doctr_pages
-        except ImportError:
-            if engine_pref == "doctr":
-                logger.warning("DocTR requested but not installed.")
-        except Exception as e:
-            logger.warning(f"DocTR processing failed: {e}")
-
-    # 3. Dedicated OCR Engine: Surya
-    if engine_pref in ("auto", "surya"):
-        try:
-            import surya  # noqa: F401
-            logger.info("Running Surya OCR engine on scanned pages...")
-        except ImportError:
-            if engine_pref == "surya":
-                logger.warning("Surya requested but not installed.")
-        except Exception as e:
-            logger.warning(f"Surya processing failed: {e}")
-
-    # 4. Dedicated OCR Engine: EasyOCR + PyMuPDF
-    if engine_pref in ("auto", "easyocr"):
-        try:
-            import easyocr
-            import fitz
-            logger.info("Running EasyOCR engine on scanned pages...")
-            reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-            doc = fitz.open(stream=file_bytes, filetype="pdf")
-            ocr_pages = []
-
-            for p_num in target_indices:
-                if p_num <= len(doc):
-                    if progress_callback:
-                        progress_callback(
-                            p_num,
-                            total_pages,
-                            f"Running EasyOCR on page {p_num}/{total_pages}"
-                        )
-                    page = doc[p_num - 1]
-                    pix = page.get_pixmap(dpi=200)
-                    img_bytes = pix.tobytes("png")
-                    results = reader.readtext(img_bytes, detail=0, paragraph=True)
-                    text = " ".join(results).strip()
-                    if len(text) > 20:
-                        ocr_pages.append({
-                            "page": p_num,
-                            "text": text,
-                            "raw_text": text,
-                            "sections": [s["heading"] for s in detect_sections(text)],
-                            "is_scanned": True,
-                            "ocr_engine": "easyocr"
-                        })
-            doc.close()
-            if ocr_pages:
-                return ocr_pages
-        except ImportError:
-            if engine_pref == "easyocr":
-                logger.warning("EasyOCR requested but easyocr/pymupdf not installed.")
-        except Exception as e:
-            logger.warning(f"EasyOCR processing failed: {e}")
-
-    # 5. Dedicated OCR Engine: Tesseract + PyMuPDF
-    if engine_pref in ("auto", "tesseract"):
-        try:
-            import pytesseract
-            import fitz
-            logger.info("Running Tesseract OCR engine on scanned pages...")
-            doc = fitz.open(stream=file_bytes, filetype="pdf")
-            tess_pages = []
-            for p_num in target_indices:
-                if p_num <= len(doc):
-                    page = doc[p_num - 1]
-                    pix = page.get_pixmap(dpi=200)
-                    img = Image.open(io.BytesIO(pix.tobytes("png")))
-                    text = pytesseract.image_to_string(img).strip()
-                    if len(text) > 10:
-                        tess_pages.append({
-                            "page": p_num,
-                            "text": text,
-                            "raw_text": text,
-                            "sections": [s["heading"] for s in detect_sections(text)],
-                            "is_scanned": True,
-                            "ocr_engine": "tesseract"
-                        })
-            doc.close()
-            if tess_pages:
-                return tess_pages
-        except ImportError:
-            if engine_pref == "tesseract":
-                logger.warning("Tesseract requested but pytesseract/pymupdf not installed.")
-        except Exception as e:
-            logger.warning(f"Tesseract processing failed: {e}")
-
-    return []
-
-
-def extract_text_from_docx(file_bytes: bytes) -> List[Dict[str, str]]:
-    """Extract text from DOCX files."""
-    try:
-        from docx import Document as DocxDocument
-    except ImportError:
-        raise ValueError("DOCX support requires python-docx package")
-
-    try:
-        doc = DocxDocument(io.BytesIO(file_bytes))
-        pages = []
-        current_text = []
-        current_page = 1
-
-        for para in doc.paragraphs:
-            for run in para.runs:
-                if run._element.xml.find('w:br') != -1 and 'type="page"' in run._element.xml:
-                    if current_text:
-                        combined = " ".join(current_text)
-                        if len(combined.strip()) > 10:
-                            pages.append({
-                                "page": current_page,
-                                "text": combined.strip(),
-                                "raw_text": "\n".join(current_text),
-                                "sections": [],
-                                "is_scanned": False
-                            })
-                        current_page += 1
-                        current_text = []
-
-            if para.text.strip():
-                current_text.append(para.text.strip())
-
-        if current_text:
-            combined = " ".join(current_text)
-            if len(combined.strip()) > 10:
-                pages.append({
-                    "page": current_page,
-                    "text": combined.strip(),
-                    "raw_text": "\n".join(current_text),
-                    "sections": [],
-                    "is_scanned": False
-                })
-
-        if not pages:
-            raise ValueError("No readable text found in the DOCX file.")
-
-        return pages
-
-    except ValueError:
-        raise
-    except Exception as e:
-        logger.error(f"Error processing DOCX: {str(e)}")
-        raise ValueError(f"Error processing DOCX file: {str(e)}")
-
-
-def extract_text_from_txt(file_bytes: bytes) -> List[Dict[str, str]]:
-    """Extract text from plain text files."""
-    try:
-        text = file_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        text = file_bytes.decode("latin-1")
-
-    if not text.strip():
-        raise ValueError("Text file is empty.")
-
-    page_size = 3000
     pages = []
-    for i in range(0, len(text), page_size):
-        page_text = text[i:i + page_size].strip()
-        if len(page_text) > 10:
-            page_num = (i // page_size) + 1
+    for idx, page in enumerate(reader.pages):
+        try:
+            text = page.extract_text() or ""
+        except Exception as e:
+            logger.warning(f"Failed to extract text from page {idx + 1}: {e}")
+            text = ""
+
+        # Clean excess null bytes or erratic whitespace
+        clean_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+        clean_text = re.sub(r'\n{3,}', '\n\n', clean_text).strip()
+
+        if clean_text:
             pages.append({
-                "page": page_num,
-                "text": page_text,
-                "raw_text": page_text,
-                "sections": detect_sections(page_text),
-                "is_scanned": False
+                "page": idx + 1,
+                "text": clean_text
             })
 
     if not pages:
-        raise ValueError("No readable text found in the file.")
+        raise ValueError("No extractable text found in PDF.")
+
+    return pages
+
+
+def extract_text_from_txt(file_input: Union[bytes, str, Path]) -> List[Dict[str, Any]]:
+    """Extract text from a TXT file, splitting into virtual pages for long documents."""
+    if isinstance(file_input, (str, Path)):
+        raw = Path(file_input).read_bytes()
+    else:
+        raw = file_input
+
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1", errors="replace")
+
+    text = text.strip()
+    if not text:
+        raise ValueError("Text file is empty.")
+
+    # Split into virtual pages of roughly 2500 characters
+    page_size = 2500
+    pages = []
+    total_len = len(text)
+    page_num = 1
+    start = 0
+
+    while start < total_len:
+        end = min(start + page_size, total_len)
+        # Find clean boundary (paragraph or sentence)
+        if end < total_len:
+            boundary = text.rfind("\n\n", start, end)
+            if boundary != -1 and boundary > start + 1000:
+                end = boundary + 2
+            else:
+                space_boundary = text.rfind(". ", start, end)
+                if space_boundary != -1 and space_boundary > start + 1000:
+                    end = space_boundary + 2
+
+        chunk_str = text[start:end].strip()
+        if chunk_str:
+            pages.append({
+                "page": page_num,
+                "text": chunk_str
+            })
+            page_num += 1
+        start = end
 
     return pages
 
 
 def extract_text_from_file(
     file_input: Union[bytes, str, Path],
-    filename: Optional[str] = None,
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
+    filename: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Extract text from PDF, DOCX, or TXT file bytes or path on disk."""
-    if isinstance(file_input, (str, Path)):
-        fname = filename or Path(file_input).name
-        ext = Path(fname).suffix.lower()
-        if ext == ".pdf":
-            return extract_text_from_pdf(file_input, progress_callback=progress_callback)
-        elif ext == ".docx":
-            return extract_text_from_docx(Path(file_input).read_bytes())
-        elif ext == ".txt":
-            return extract_text_from_txt(Path(file_input).read_bytes())
-        else:
-            raise ValueError(f"Unsupported file type: {ext}. Supported: .pdf, .docx, .txt")
+    """Extract text based on file extension."""
+    fname = filename or (Path(file_input).name if isinstance(file_input, (str, Path)) else "document.pdf")
+    ext = Path(fname).suffix.lower()
+
+    if ext == ".pdf":
+        return extract_text_from_pdf(file_input)
+    elif ext == ".txt":
+        return extract_text_from_txt(file_input)
     else:
-        fname = filename or "document"
-        ext = Path(fname).suffix.lower()
-        if ext == ".pdf":
-            return extract_text_from_pdf(file_input, progress_callback=progress_callback)
-        elif ext == ".docx":
-            return extract_text_from_docx(file_input)
-        elif ext == ".txt":
-            return extract_text_from_txt(file_input)
-        else:
-            raise ValueError(f"Unsupported file type: {ext}. Supported: .pdf, .docx, .txt")
-
-
-_FINANCIAL_NUM_RE = re.compile(
-    r'^[\$€£¥]?\s*\(?[\d,]+(?:\.\d+)?\)?%?$'
-)
-
-
-def _is_table_line(line: str) -> bool:
-    """Check if a line is part of a markdown, tab-separated, or borderless space-aligned table."""
-    s = line.strip()
-    if not s:
-        return False
-
-    # 1. Standard markdown tables (| col | col |)
-    if s.startswith("|") and s.endswith("|") and s.count("|") >= 2:
-        return True
-    if re.match(r'^\|?[\s\-:]+(\|[\s\-:]+)+\|?$', s):
-        return True
-
-    # 2. Tab-separated tables
-    if "\t" in s and len(s.split("\t")) >= 3:
-        return True
-
-    # 3. Accounting & table divider lines (e.g. "-----------------", "=================")
-    if len(s) >= 8 and (s.count("-") >= 6 or s.count("=") >= 6 or s.count("_") >= 6):
-        if re.match(r'^[\s\-=_]+$', s):
-            return True
-
-    # 4. Multi-column space-aligned financial lines (SEC 10-K balance sheets, cash flows, income statements)
-    columns = [col.strip() for col in re.split(r'\s{2,}', s) if col.strip()]
-    if len(columns) >= 3:
-        num_count = sum(1 for c in columns if _FINANCIAL_NUM_RE.match(c))
-        if num_count >= 1 or len(columns) >= 4:
-            return True
-    elif len(columns) == 2:
-        if _FINANCIAL_NUM_RE.match(columns[1]):
-            return True
-
-    return False
-
-
-def _format_table_block(block_text: str, default_header: Optional[str] = None) -> str:
-    """Ensure table block is formatted with markdown pipes for optimal LLM and embedding comprehension."""
-    lines = block_text.strip().split("\n")
-    if not lines:
-        return block_text
-
-    # If already formatted as a markdown table with separator, return as is (or attach default_header if missing)
-    has_pipes = any(line.strip().startswith("|") for line in lines)
-    has_sep = any(re.match(r'^\|?[\s\-:]+(\|[\s\-:]+)+\|?$', line.strip()) for line in lines)
-    if has_pipes and has_sep:
-        return block_text
-
-    formatted_rows = []
-    for line in lines:
-        s = line.strip()
-        if not s:
-            continue
-        if re.match(r'^[\s\-=_]+$', s):
-            continue  # omit raw divider lines in markdown conversion
-
-        if s.startswith("|") and s.endswith("|") and s.count("|") >= 2:
-            cols = [c.strip() for c in s.strip("|").split("|")]
-        elif "\t" in s:
-            cols = [c.strip() for c in s.split("\t") if c.strip()]
-        else:
-            cols = [c.strip() for c in re.split(r'\s{2,}', s) if c.strip()]
-
-        if cols:
-            formatted_rows.append("| " + " | ".join(cols) + " |")
-
-    if not formatted_rows:
-        return block_text
-
-    # If a default continuation header is provided and the continuing table lacks its own header
-    if default_header and formatted_rows:
-        first_row_clean = re.sub(r'[\s|]', '', formatted_rows[0]).lower()
-        hdr_clean = re.sub(r'[\s|]', '', default_header.strip().split("\n")[0]).lower()
-        if first_row_clean != hdr_clean:
-            return default_header.strip() + "\n" + "\n".join(formatted_rows)
-
-    if len(formatted_rows) >= 2:
-        col_count = formatted_rows[0].count("|") - 1
-        sep = "| " + " | ".join(["---"] * max(col_count, 1)) + " |"
-        return "\n".join([formatted_rows[0], sep] + formatted_rows[1:])
-    elif formatted_rows:
-        return "\n".join(formatted_rows)
-
-    return block_text
-
-
-def _chunk_table_atomically(
-    table_text: str,
-    max_chunk_chars: int = 1200
-) -> List[str]:
-    """Preserve table structures as indivisible semantic units.
-    
-    If the table exceeds max_chunk_chars, it splits strictly at row boundaries
-    and re-injects the original column headers into every subsequent chunk.
-    """
-    cleaned_table = table_text.strip()
-    if not cleaned_table:
-        return []
-
-    lines = [ln.strip() for ln in cleaned_table.split("\n") if ln.strip()]
-    if not lines:
-        return []
-
-    # If table comfortably fits within limit, keep it indivisible
-    if len(cleaned_table) <= max_chunk_chars:
-        return [cleaned_table]
-
-    # Find the markdown separator line
-    sep_idx = -1
-    for i, line in enumerate(lines):
-        if re.match(r'^\|?[\s\-:]+(\|[\s\-:]+)+\|?$', line):
-            sep_idx = i
-            break
-
-    if sep_idx > 0:
-        header_rows = lines[:sep_idx]
-        sep_row = lines[sep_idx]
-        data_rows = lines[sep_idx + 1:]
-    else:
-        # Fallback: treat first line as header
-        header_rows = [lines[0]]
-        col_count = header_rows[0].count("|") - 1
-        sep_row = "| " + " | ".join(["---"] * max(col_count, 1)) + " |"
-        data_rows = lines[1:]
-
-    header_prefix = "\n".join(header_rows + [sep_row])
-
-    if not data_rows:
-        return [cleaned_table]
-
-    chunks = []
-    current_chunk_rows = []
-    current_chunk_len = len(header_prefix)
-
-    for row in data_rows:
-        row_len = len(row) + 1  # includes newline
-        if current_chunk_rows and (current_chunk_len + row_len > max_chunk_chars):
-            chunks.append(header_prefix + "\n" + "\n".join(current_chunk_rows))
-            current_chunk_rows = [row]
-            current_chunk_len = len(header_prefix) + row_len
-        else:
-            current_chunk_rows.append(row)
-            current_chunk_len += row_len
-
-    if current_chunk_rows:
-        chunks.append(header_prefix + "\n" + "\n".join(current_chunk_rows))
-
-    return chunks
-
-
-def _extract_blocks(text: str) -> List[Tuple[str, bool]]:
-    """Separate text lines into table blocks and regular paragraph blocks."""
-    lines = text.split("\n")
-    blocks = []
-    current_lines = []
-    in_table = False
-
-    for i, line in enumerate(lines):
-        is_tbl = _is_table_line(line)
-
-        # Allow single blank line inside an active table if followed by another table line
-        if not is_tbl and in_table and not line.strip():
-            next_is_tbl = False
-            for j in range(i + 1, min(i + 3, len(lines))):
-                if lines[j].strip():
-                    next_is_tbl = _is_table_line(lines[j])
-                    break
-            if next_is_tbl:
-                is_tbl = True
-
-        if is_tbl != in_table:
-            if current_lines:
-                blocks.append(("\n".join(current_lines), in_table))
-                current_lines = []
-            in_table = is_tbl
-        current_lines.append(line)
-
-    if current_lines:
-        blocks.append(("\n".join(current_lines), in_table))
-
-    return blocks
+        raise ValueError(f"Unsupported file type '{ext}'. Supported formats: .pdf, .txt")
 
 
 def chunk_text(
-    pages: List[Dict[str, str]],
+    pages: List[Dict[str, Any]],
     chunk_size: int = 500,
     chunk_overlap: int = 50,
     document_name: Optional[str] = None
-) -> List[Dict]:
-    """Split document pages into overlapping text chunks with metadata."""
-    try:
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", ". ", " ", ""],
-            length_function=len,
-            is_separator_regex=False
-        )
+) -> List[Dict[str, Any]]:
+    """Split extracted pages into smaller chunks with metadata while preserving page numbers."""
+    all_chunks = []
+    doc_prefix = f"[Document: {document_name}]\n" if document_name else ""
 
-        chunks = []
-        current_section = None
-        active_table_header: Optional[str] = None
+    for page_data in pages:
+        page_num = page_data["page"]
+        text = page_data["text"]
 
-        for page_info in pages:
-            page_num = page_info["page"]
-            page_text = page_info["text"]
-            page_sections = page_info.get("sections", [])
-            is_scanned = page_info.get("is_scanned", False)
+        words = text.split()
+        if not words:
+            continue
 
-            if page_sections:
-                if isinstance(page_sections[0], dict):
-                    current_section = page_sections[0].get("heading", current_section)
-                elif isinstance(page_sections[0], str):
-                    current_section = page_sections[0]
-
-            if not page_text or len(page_text.strip()) < 10:
+        step = max(1, chunk_size - chunk_overlap)
+        for i in range(0, len(words), step):
+            chunk_words = words[i:i + chunk_size]
+            if len(chunk_words) < 10 and all_chunks:
+                # Avoid tiny trailing fragments
                 continue
 
-            try:
-                blocks = _extract_blocks(page_text)
+            chunk_text_str = " ".join(chunk_words)
+            all_chunks.append({
+                "source_file": document_name or "document",
+                "page": page_num,
+                "text": f"{doc_prefix}{chunk_text_str}" if doc_prefix else chunk_text_str,
+            })
 
-                for block_idx, (block_text, is_table) in enumerate(blocks):
-                    block_stripped = block_text.strip()
-                    if not block_stripped:
-                        continue
-
-                    if is_table:
-                        # Cross-page table stitching: if preceding page ended with table and current starts with table
-                        use_header = None
-                        if active_table_header and (block_idx == 0 or (block_idx == 1 and len(blocks[0][0].strip()) < 80)):
-                            use_header = active_table_header
-
-                        formatted_table = _format_table_block(block_stripped, default_header=use_header)
-
-                        # Extract table header to preserve if this table reaches the page boundary
-                        sep_match = re.search(r'\n(\|?[\s\-:]+(\|[\s\-:]+)+\|?)(?:\n|$)', formatted_table)
-                        if sep_match:
-                            hdr_end = sep_match.end()
-                            current_tbl_hdr = formatted_table[:hdr_end].strip()
-                        else:
-                            first_ln = formatted_table.split("\n")[0]
-                            col_cnt = first_ln.count("|") - 1
-                            sep_ln = "| " + " | ".join(["---"] * max(col_cnt, 1)) + " |"
-                            current_tbl_hdr = f"{first_ln}\n{sep_ln}"
-
-                        if block_idx == len(blocks) - 1:
-                            active_table_header = current_tbl_hdr
-                        else:
-                            active_table_header = None
-
-                        table_max_chars = max(chunk_size * 2, 1000)
-                        splits = _chunk_table_atomically(formatted_table, max_chunk_chars=table_max_chars)
-                    else:
-                        active_table_header = None
-                        splits = text_splitter.split_text(block_stripped)
-
-                    for split in splits:
-                        raw_split = split.strip()
-                        if len(raw_split) > 15:
-                            chunk_section = current_section
-                            if isinstance(page_sections, list):
-                                for sec in page_sections:
-                                    sec_name = sec if isinstance(sec, str) else sec.get("heading", "")
-                                    if sec_name and sec_name.lower() in raw_split.lower():
-                                        chunk_section = sec_name
-                                        break
-
-                            parts = []
-                            if document_name:
-                                parts.append(f"Document: {document_name}")
-                            if chunk_section:
-                                parts.append(f"Section: {chunk_section}")
-                            breadcrumb = f"[{' > '.join(parts)}]" if parts else ""
-
-                            enriched_text = f"{breadcrumb}\n{raw_split}" if breadcrumb else raw_split
-
-                            chunks.append({
-                                "page": page_num,
-                                "text": enriched_text,
-                                "raw_text": raw_split,
-                                "section": chunk_section,
-                                "breadcrumb": breadcrumb,
-                                "is_table": is_table,
-                                "is_scanned": is_scanned,
-                            })
-
-            except Exception as e:
-                logger.warning(f"Error chunking page {page_num}: {str(e)}")
-                if len(page_text) <= chunk_size * 2:
-                    raw_text = page_text.strip()
-                    parts = []
-                    if document_name:
-                        parts.append(f"Document: {document_name}")
-                    if current_section:
-                        parts.append(f"Section: {current_section}")
-                    breadcrumb = f"[{' > '.join(parts)}]" if parts else ""
-                    enriched = f"{breadcrumb}\n{raw_text}" if breadcrumb else raw_text
-
-                    chunks.append({
-                        "page": page_num,
-                        "text": enriched,
-                        "raw_text": raw_text,
-                        "section": current_section,
-                        "breadcrumb": breadcrumb,
-                        "is_table": False,
-                        "is_scanned": is_scanned,
-                    })
-
-        return chunks
-
-    except Exception as e:
-        logger.error(f"Error in chunk_text: {str(e)}")
-        return [
-            {"page": p["page"], "text": p["text"][:chunk_size], "section": None, "is_scanned": False}
-            for p in pages
-            if p.get("text")
-        ]
+    return all_chunks
 
 
-def get_pdf_metadata(file_input: Union[bytes, str, Path]) -> Optional[Dict]:
-    """Extract metadata from PDF header."""
-    try:
-        close_file = False
-        if isinstance(file_input, (str, Path)):
-            stream = open(file_input, "rb")
-            close_file = True
-        else:
-            stream = io.BytesIO(file_input)
-
-        try:
-            reader = pypdf.PdfReader(stream)
-            return {
-                "num_pages": len(reader.pages),
-                "is_encrypted": reader.is_encrypted,
-                "metadata": dict(reader.metadata) if reader.metadata else {}
-            }
-        finally:
-            if close_file:
-                stream.close()
-    except Exception as e:
-        logger.error(f"Failed to extract PDF metadata: {str(e)}")
-        return None
-
-
-def get_document_metadata(file_bytes: bytes, filename: str) -> Optional[Dict]:
-    """Get metadata for a document file."""
+def get_document_metadata(file_bytes: bytes, filename: str) -> Dict[str, Any]:
+    """Return basic metadata about the uploaded document."""
     ext = Path(filename).suffix.lower()
-
+    num_pages = 1
     if ext == ".pdf":
-        meta = get_pdf_metadata(file_bytes)
-        if meta:
-            meta["filename"] = filename
-            meta["file_size_bytes"] = len(file_bytes)
-        return meta
-    elif ext == ".docx":
-        return {
-            "filename": filename,
-            "file_size_bytes": len(file_bytes),
-            "num_pages": None,
-            "is_encrypted": False,
-            "metadata": {}
-        }
-    elif ext == ".txt":
-        return {
-            "filename": filename,
-            "file_size_bytes": len(file_bytes),
-            "num_pages": max(1, len(file_bytes) // 3000),
-            "is_encrypted": False,
-            "metadata": {}
-        }
-    else:
-        return None
+        try:
+            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            num_pages = len(reader.pages)
+        except Exception:
+            num_pages = 1
+
+    return {
+        "filename": filename,
+        "file_size_bytes": len(file_bytes),
+        "num_pages": num_pages,
+    }

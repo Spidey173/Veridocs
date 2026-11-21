@@ -1,106 +1,37 @@
 """
-Health checks, LLM provider registry inspection, and administrative maintenance endpoints.
+Health check and system status endpoints for Veridocs.
 """
 
-import logging
-from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, Response
-
+from fastapi import APIRouter
 from config import get_settings, get_model_registry
-from auth import require_admin_or_maintenance, UserContext
 from models import HealthResponse
 import database
-from session_store import sessions, cleanup_expired_sessions
-from metrics import metrics
-from tracing import tracer
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["system"])
 
 
 @router.get("/api/health", response_model=HealthResponse)
 async def health_check():
-    """Health check returning model, database, and service status."""
+    """Health check returning real status of embedding model, SQLite DB, and LLM configuration."""
     settings = get_settings()
-    registry = get_model_registry()
-    db_configured = database.is_database_configured()
-    db_connected = database.is_database_ready() if db_configured else False
-
-    status = "healthy"
-    if settings.ENVIRONMENT == "production":
-        if not db_configured or not db_connected:
-            status = "degraded"
+    reg = get_model_registry()
+    sessions = database.list_sessions()
 
     return HealthResponse(
-        status=status,
-        version=settings.APP_VERSION,
+        status="healthy",
+        version="0.2.0",
+        llm_configured=settings.is_llm_configured(),
         active_sessions=len(sessions),
-        models_loaded={
-            "embedding": registry._embedding_model is not None,
-            "reranker": registry._reranker_model is not None,
-        },
-        providers_available=settings.get_available_llm_providers(),
-        database_connected=db_connected if db_configured else None
+        embedding_model_loaded=reg._embedding_model is not None,
     )
 
 
-@router.get("/api/llm/providers")
-async def list_llm_providers():
-    """Return available LLM providers, active selection, and configuration status."""
+@router.get("/api/llm/status")
+async def llm_status():
+    """Return LLM endpoint and model status."""
     settings = get_settings()
-    available = settings.get_available_llm_providers()
     return {
-        "active_provider": settings.LLM_PROVIDER,
-        "available_providers": available,
-        "supported_providers": [
-            "openai", "anthropic", "deepseek", "groq", "google",
-            "mistral", "openrouter", "github", "ollama", "custom", "offline"
-        ],
-        "default_configured": any(available.values())
+        "configured": settings.is_llm_configured(),
+        "base_url": settings.LLM_BASE_URL or "Not set",
+        "model": settings.LLM_MODEL or "Not set",
     }
-
-
-@router.post("/api/admin/cleanup")
-async def trigger_retention_cleanup(
-    max_age_hours: Optional[int] = None,
-    admin_user: UserContext = Depends(require_admin_or_maintenance)
-):
-    """Trigger manual data retention purge of expired sessions and orphaned files."""
-    settings = get_settings()
-    target_max_age = max_age_hours if max_age_hours is not None else settings.RETENTION_HOURS
-    if target_max_age < 1 or target_max_age > 720:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid max_age_hours: Must be between 1 and 720 hours."
-        )
-
-    result = cleanup_expired_sessions(max_age_hours=target_max_age)
-    return {
-        "status": "success",
-        "retention_hours": target_max_age,
-        **result
-    }
-
-
-@router.get("/metrics")
-async def get_prometheus_metrics():
-    """Export Prometheus text exposition format for cluster monitoring and scraping."""
-    metrics.set_gauge("veridocs_active_sessions", len(sessions))
-    content = metrics.export_prometheus()
-    return Response(
-        content=content,
-        media_type="text/plain; version=0.0.4; charset=utf-8"
-    )
-
-
-@router.get("/traces")
-@router.get("/api/traces")
-async def get_distributed_traces(limit: int = 50):
-    """Export recent distributed OpenTelemetry-compatible trace spans."""
-    spans = tracer.get_recent_spans(limit=limit)
-    return {
-        "count": len(spans),
-        "spans": spans
-    }
-

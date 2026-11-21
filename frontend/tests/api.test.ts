@@ -1,32 +1,33 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { isLocalDev, getApiBase, getAuthToken, getOrFetchAuthToken } from "../lib/api";
+import { getApiBase, checkBackendHealth } from "../lib/api";
 
-describe("API Client Unit Test Suite (Headless Vitest)", () => {
+describe("API Client Unit Test Suite", () => {
   beforeEach(() => {
-    localStorage.clear();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ access_token: "mocked_jwt_token" }),
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          status: "healthy",
+          version: "0.2.0",
+          llm_configured: false,
+          active_sessions: 1,
+          embedding_model_loaded: true,
+        }),
+      })
+    );
   });
 
-  it("determines local development environment accurately in jsdom", () => {
-    // In jsdom default window.location.hostname is "localhost"
-    expect(isLocalDev()).toBe(true);
-  });
-
-  it("resolves default API base URL in development environment", () => {
+  it("resolves default API base URL", () => {
     const base = getApiBase();
-    expect(base).toBe("http://localhost:8000");
+    expect(base).toBe("");
   });
 
-  it("reads and stores auth tokens in localStorage", async () => {
-    expect(getAuthToken()).toBe("");
-
-    localStorage.setItem("veridocs_auth_token", "jwt_test_token_xyz");
-    expect(getAuthToken()).toBe("jwt_test_token_xyz");
-
-    const fetched = await getOrFetchAuthToken();
-    expect(fetched).toBe("jwt_test_token_xyz");
+  it("checks backend health status accurately", async () => {
+    const health = await checkBackendHealth();
+    expect(health.ok).toBe(true);
+    expect(health.waking).toBe(false);
+    expect(health.data?.status).toBe("healthy");
+    expect(health.data?.version).toBe("0.2.0");
   });
 });

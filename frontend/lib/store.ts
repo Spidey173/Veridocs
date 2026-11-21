@@ -1,29 +1,12 @@
 /**
  * Veridocs — Global State Store (Zustand)
- * Manages application state: session, messages, UI state.
+ * Clean, minimal state for document RAG, PDF viewing, and citation check.
  */
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type {
-  CitationInfo,
-  SourceInfo,
-  InsightsResponse,
-  RagTriadMetrics,
-  AuditDiffReport,
-} from "./api";
+import type { CitationInfo, SourceInfo, CitationCheckResult } from "./api";
 import { deleteSession } from "./api";
-
-// Types
-
-export interface VisualHighlight {
-  documentName: string;
-  page: number;
-  snippet: string;
-  label?: string;
-  severity?: "citation" | "critical" | "warning" | "info";
-  score?: number;
-}
 
 export interface ChatMessage {
   id: string;
@@ -31,22 +14,9 @@ export interface ChatMessage {
   content: string;
   citations?: CitationInfo[];
   sources?: SourceInfo[];
-  confidence_score?: number;
-  rag_triad?: RagTriadMetrics;
-  claim_verifications?: Array<{
-    claim: string;
-    score: number;
-    status: "verified" | "inferred" | "hallucinated";
-    is_supported: boolean;
-    numeric_grounded?: boolean;
-    best_source_page?: number;
-    source_file?: string;
-  }>;
-  verified_claims?: number;
-  inferred_claims?: number;
-  hallucinated_claims?: number;
+  citation_check?: CitationCheckResult;
   isStreaming?: boolean;
-  timestamp: Date | string;
+  timestamp: string;
 }
 
 export interface UploadedFile {
@@ -56,18 +26,16 @@ export interface UploadedFile {
   pages?: number;
 }
 
-export interface DocViewState {
-  page: number;
-  scale: number;
-}
-
 interface AppState {
   // Session
   sessionId: string | null;
   files: UploadedFile[];
   isUploading: boolean;
   uploadProgress: number;
-  uploadStage: string;
+
+  // Backend Health / Cold start
+  isBackendWaking: boolean;
+  setIsBackendWaking: (waking: boolean) => void;
 
   // Chat
   messages: ChatMessage[];
@@ -75,346 +43,153 @@ interface AppState {
   currentStreamingId: string | null;
   pendingQuestion: string | null;
 
-  // Insights
-  insights: InsightsResponse | null;
-  isLoadingInsights: boolean;
-
   // PDF Viewer
   currentPage: number;
   totalPages: number;
   highlightedCitation: CitationInfo | null;
   pdfScale: number;
 
-  // Local file blob URLs for preview
+  // Local file blob URLs for client-side fallback preview
   localFileUrls: Record<string, string>;
   setLocalFileUrls: (urls: Record<string, string>) => void;
 
-  // Workspace Context & Layout
+  // Active Document
   activeDocumentName: string | null;
-  selectedFileNames: string[];
-  docViewStates: Record<string, DocViewState>;
+
+  // Layout Sidebars
   leftSidebarCollapsed: boolean;
   rightSidebarCollapsed: boolean;
   leftSidebarWidth: number;
   rightSidebarWidth: number;
-
-  // Visual highlighting and contradiction report state
-  activeVisualHighlight: VisualHighlight | null;
-  activeDiffReport: AuditDiffReport | null;
-  isAuditingDiff: boolean;
-  activeWorkspaceTab: "chat" | "contradictions";
+  setLeftSidebarCollapsed: (collapsed: boolean) => void;
+  setRightSidebarCollapsed: (collapsed: boolean) => void;
+  setLeftSidebarWidth: (width: number) => void;
+  setRightSidebarWidth: (width: number) => void;
 
   // Actions
   setSession: (sessionId: string, files: UploadedFile[]) => void;
   clearSession: () => void;
   setUploading: (isUploading: boolean) => void;
-  setUploadProgress: (progress: number, stage?: string) => void;
+  setUploadProgress: (progress: number) => void;
   addMessage: (message: ChatMessage) => void;
   updateMessage: (id: string, update: Partial<ChatMessage>) => void;
   appendToMessage: (id: string, token: string) => void;
   setQuerying: (isQuerying: boolean) => void;
   setCurrentStreamingId: (id: string | null) => void;
   setPendingQuestion: (q: string | null) => void;
-  setInsights: (insights: InsightsResponse) => void;
-  setLoadingInsights: (loading: boolean) => void;
   setCurrentPage: (page: number) => void;
   setTotalPages: (pages: number) => void;
   highlightCitation: (citation: CitationInfo | null) => void;
   setPdfScale: (scale: number) => void;
-
-  // Visual Grounding & Contradiction Actions
-  setActiveVisualHighlight: (highlight: VisualHighlight | null) => void;
-  setActiveDiffReport: (report: AuditDiffReport | null) => void;
-  setIsAuditingDiff: (isAuditing: boolean) => void;
-  setActiveWorkspaceTab: (tab: "chat" | "contradictions") => void;
-
-  // Workspace Actions
   setActiveDocument: (fileName: string | null) => void;
-  setLeftSidebarCollapsed: (collapsed: boolean) => void;
-  setRightSidebarCollapsed: (collapsed: boolean) => void;
-  setLeftSidebarWidth: (width: number) => void;
-  setRightSidebarWidth: (width: number) => void;
 }
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
-  // Initial state
-  sessionId: null,
-  files: [],
-  isUploading: false,
-  uploadProgress: 0,
-  uploadStage: "",
+    (set, get) => ({
+      sessionId: null,
+      files: [],
+      isUploading: false,
+      uploadProgress: 0,
+      isBackendWaking: false,
 
-  messages: [],
-  isQuerying: false,
-  currentStreamingId: null,
-  pendingQuestion: null,
+      setIsBackendWaking: (waking) => set({ isBackendWaking: waking }),
 
-  insights: null,
-  isLoadingInsights: false,
+      messages: [],
+      isQuerying: false,
+      currentStreamingId: null,
+      pendingQuestion: null,
 
-  currentPage: 1,
-  totalPages: 0,
-  highlightedCitation: null,
-  activeVisualHighlight: null,
-  activeDiffReport: null,
-  isAuditingDiff: false,
-  activeWorkspaceTab: "chat",
-  pdfScale: 0.6,
-  localFileUrls: {},
+      currentPage: 1,
+      totalPages: 1,
+      highlightedCitation: null,
+      pdfScale: 1.0,
+      localFileUrls: {},
 
-  // Workspace Context Defaults
-  activeDocumentName: null,
-  selectedFileNames: [],
-  docViewStates: {},
-  leftSidebarCollapsed: false,
-  rightSidebarCollapsed: false,
-  leftSidebarWidth: 240,
-  rightSidebarWidth: 580,
+      activeDocumentName: null,
 
-  setLocalFileUrls: (urls) =>
-    set((state) => ({
-      localFileUrls: { ...state.localFileUrls, ...urls },
-    })),
+      leftSidebarCollapsed: false,
+      rightSidebarCollapsed: false,
+      leftSidebarWidth: 260,
+      rightSidebarWidth: 420,
+      setLeftSidebarCollapsed: (collapsed) => set({ leftSidebarCollapsed: collapsed }),
+      setRightSidebarCollapsed: (collapsed) => set({ rightSidebarCollapsed: collapsed }),
+      setLeftSidebarWidth: (width) => set({ leftSidebarWidth: width }),
+      setRightSidebarWidth: (width) => set({ rightSidebarWidth: width }),
 
-  // Actions
-  setSession: (sessionId, files) =>
-    set((state) => {
-      const existingNames = state.files.map((f) => f.name);
-      const newFile = files.find((f) => !existingNames.includes(f.name));
-
-      const activeDoc = newFile
-        ? newFile.name
-        : (state.activeDocumentName && files.some((f) => f.name === state.activeDocumentName))
-          ? state.activeDocumentName
-          : (files.length > 0 ? files[0].name : null);
-
-      if (typeof window !== "undefined" && sessionId) {
-        try {
-          window.history.replaceState(null, "", `/?session=${encodeURIComponent(sessionId)}`);
-        } catch {}
-      }
-
-      return {
-        sessionId,
-        files,
-        messages: state.sessionId === sessionId ? state.messages : [],
-        insights: state.sessionId === sessionId ? state.insights : null,
-        selectedFileNames: files.map((f) => f.name),
-        activeDocumentName: activeDoc,
-      };
-    }),
-
-  clearSession: () =>
-    set((state) => {
-      const oldSessionId = state.sessionId;
-      if (oldSessionId && oldSessionId !== "demo-session") {
-        deleteSession(oldSessionId).catch((e) => {
-          console.warn("Could not delete session on backend:", e);
+      setSession: (sessionId, files) => {
+        const activeDoc = files.length > 0 ? files[0].name : null;
+        set({
+          sessionId,
+          files,
+          activeDocumentName: activeDoc,
+          currentPage: 1,
+          messages: [],
         });
-      }
-      try {
-        Object.values(state.localFileUrls).forEach((url) => {
-          if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+      },
+
+      clearSession: () => {
+        const sid = get().sessionId;
+        if (sid) {
+          deleteSession(sid).catch(() => {});
+        }
+        set({
+          sessionId: null,
+          files: [],
+          messages: [],
+          activeDocumentName: null,
+          currentPage: 1,
+          totalPages: 1,
+          highlightedCitation: null,
+          localFileUrls: {},
         });
-      } catch {}
-      if (typeof window !== "undefined") {
-        try {
-          localStorage.removeItem("veridocs-workspace-storage");
-          window.history.replaceState(null, "", "/");
-        } catch {}
-      }
-      return {
-        sessionId: null,
-        files: [],
-        messages: [],
-        pendingQuestion: null,
-        insights: null,
-        currentPage: 1,
-        totalPages: 0,
-        highlightedCitation: null,
-        activeDocumentName: null,
-        selectedFileNames: [],
-        docViewStates: {},
-        localFileUrls: {},
-        pdfScale: 0.6,
-      };
-    }),
+      },
 
-  setUploading: (isUploading) => set({ isUploading }),
-  setUploadProgress: (progress, stage) =>
-    set({ uploadProgress: progress, ...(stage ? { uploadStage: stage } : {}) }),
+      setUploading: (isUploading) => set({ isUploading }),
+      setUploadProgress: (progress) => set({ uploadProgress: progress }),
 
-  addMessage: (message) =>
-    set((state) => ({ messages: [...state.messages, message] })),
+      addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
 
-  updateMessage: (id, update) =>
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === id ? { ...m, ...update } : m
-      ),
-    })),
+      updateMessage: (id, update) =>
+        set((state) => ({
+          messages: state.messages.map((m) => (m.id === id ? { ...m, ...update } : m)),
+        })),
 
-  appendToMessage: (id, token) =>
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === id ? { ...m, content: m.content + token } : m
-      ),
-    })),
+      appendToMessage: (id, token) =>
+        set((state) => ({
+          messages: state.messages.map((m) =>
+            m.id === id ? { ...m, content: m.content + token } : m
+          ),
+        })),
 
-  setQuerying: (isQuerying) => set({ isQuerying }),
-  setCurrentStreamingId: (id) => set({ currentStreamingId: id }),
-  setPendingQuestion: (q) => set({ pendingQuestion: q }),
+      setQuerying: (isQuerying) => set({ isQuerying }),
+      setCurrentStreamingId: (id) => set({ currentStreamingId: id }),
+      setPendingQuestion: (q) => set({ pendingQuestion: q }),
 
-  setInsights: (insights) => set({ insights, isLoadingInsights: false }),
-  setLoadingInsights: (loading) => set({ isLoadingInsights: loading }),
-
-  setCurrentPage: (page) =>
-    set((state) => {
-      // Persist page in active document viewstate
-      if (state.activeDocumentName) {
-        const currentViewState = state.docViewStates[state.activeDocumentName] || { page: 1, scale: state.pdfScale };
-        return {
-          currentPage: page,
-          docViewStates: {
-            ...state.docViewStates,
-            [state.activeDocumentName]: { ...currentViewState, page },
-          },
-        };
-      }
-      return { currentPage: page };
-    }),
-
-  setTotalPages: (pages) => set({ totalPages: pages }),
-
-  highlightCitation: (citation) =>
-    set((state) => {
-      const updates: Partial<AppState> = { highlightedCitation: citation };
-      if (citation) {
-        updates.currentPage = citation.page;
-        updates.activeVisualHighlight = {
-          documentName: citation.source_file || state.activeDocumentName || "",
-          page: citation.page,
-          snippet: citation.highlighted_text || (citation as any).snippet || "",
-          label: `Grounded Source [Page ${citation.page}]`,
-          severity: "citation",
-          score: citation.confidence,
-        };
-
-        // Switch to the cited file if it is different
-        if (citation.source_file && citation.source_file !== state.activeDocumentName) {
-          updates.activeDocumentName = citation.source_file;
-          const docState = state.docViewStates[citation.source_file];
-          if (docState) {
-            updates.pdfScale = docState.scale;
+      setCurrentPage: (page) => set({ currentPage: Math.max(1, page) }),
+      setTotalPages: (pages) => set({ totalPages: Math.max(1, pages) }),
+      highlightCitation: (citation) => {
+        set({ highlightedCitation: citation });
+        if (citation) {
+          set({ currentPage: citation.page });
+          if (citation.source_file) {
+            set({ activeDocumentName: citation.source_file });
           }
         }
-        
-        // Persist page in viewstate
-        const activeDoc = citation.source_file || state.activeDocumentName;
-        if (activeDoc) {
-          const currentViewState = state.docViewStates[activeDoc] || { page: 1, scale: state.pdfScale };
-          updates.docViewStates = {
-            ...state.docViewStates,
-            [activeDoc]: { ...currentViewState, page: citation.page },
-          };
-        }
-      } else {
-        updates.activeVisualHighlight = null;
-      }
-      return updates;
-    }),
+      },
 
-  setActiveVisualHighlight: (highlight) =>
-    set((state) => {
-      if (!highlight) {
-        return { activeVisualHighlight: null, highlightedCitation: null };
-      }
-      const updates: Partial<AppState> = {
-        activeVisualHighlight: highlight,
-        currentPage: highlight.page,
-      };
-
-      if (highlight.documentName && highlight.documentName !== state.activeDocumentName) {
-        updates.activeDocumentName = highlight.documentName;
-        const docState = state.docViewStates[highlight.documentName];
-        if (docState) {
-          updates.pdfScale = docState.scale;
-        }
-      }
-
-      const activeDoc = highlight.documentName || state.activeDocumentName;
-      if (activeDoc) {
-        const currentViewState = state.docViewStates[activeDoc] || { page: 1, scale: state.pdfScale };
-        updates.docViewStates = {
-          ...state.docViewStates,
-          [activeDoc]: { ...currentViewState, page: highlight.page },
-        };
-      }
-
-      return updates;
-    }),
-
-  setActiveDiffReport: (report) => set({ activeDiffReport: report }),
-  setIsAuditingDiff: (isAuditing) => set({ isAuditingDiff: isAuditing }),
-  setActiveWorkspaceTab: (tab) => set({ activeWorkspaceTab: tab }),
-
-  setPdfScale: (scale) =>
-    set((state) => {
-      if (state.activeDocumentName) {
-        const currentViewState = state.docViewStates[state.activeDocumentName] || { page: state.currentPage, scale: 0.6 };
-        return {
-          pdfScale: scale,
-          docViewStates: {
-            ...state.docViewStates,
-            [state.activeDocumentName]: { ...currentViewState, scale },
-          },
-        };
-      }
-      return { pdfScale: scale };
-    }),
-
-  // Workspace Actions
-  setActiveDocument: (fileName) =>
-    set((state) => {
-      if (!fileName) return { activeDocumentName: null };
-      const docState = state.docViewStates[fileName] || { page: 1, scale: 0.6 };
-      return {
-        activeDocumentName: fileName,
-        currentPage: docState.page,
-        pdfScale: docState.scale,
-      };
-    }),
-
-  setLeftSidebarCollapsed: (collapsed) => set({ leftSidebarCollapsed: collapsed }),
-  setRightSidebarCollapsed: (collapsed) => set({ rightSidebarCollapsed: collapsed }),
-  setLeftSidebarWidth: (width) => set({ leftSidebarWidth: width }),
-  setRightSidebarWidth: (width) => set({ rightSidebarWidth: width }),
+      setPdfScale: (scale) => set({ pdfScale: Math.max(0.5, Math.min(2.5, scale)) }),
+      setLocalFileUrls: (urls) => set({ localFileUrls: urls }),
+      setActiveDocument: (name) => set({ activeDocumentName: name, currentPage: 1 }),
     }),
     {
       name: "veridocs-workspace-storage",
       partialize: (state) => ({
         sessionId: state.sessionId,
         files: state.files,
-        messages: state.messages,
-        insights: state.insights,
         activeDocumentName: state.activeDocumentName,
-        selectedFileNames: state.selectedFileNames,
-        currentPage: state.currentPage,
-        pdfScale: state.pdfScale,
-        docViewStates: state.docViewStates,
-        activeWorkspaceTab: state.activeWorkspaceTab,
-        activeDiffReport: state.activeDiffReport,
-        leftSidebarCollapsed: state.leftSidebarCollapsed,
-        rightSidebarCollapsed: state.rightSidebarCollapsed,
-        leftSidebarWidth: state.leftSidebarWidth,
-        rightSidebarWidth: state.rightSidebarWidth,
+        messages: state.messages.slice(-20),
       }),
     }
   )
 );
-
-if (typeof window !== "undefined") {
-  (window as unknown as { __VERIDOCS_STORE__?: typeof useAppStore }).__VERIDOCS_STORE__ = useAppStore;
-}
