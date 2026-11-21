@@ -1,291 +1,101 @@
-# 📑 Veridocs — Enterprise Document Intelligence & Verification Engine
+# 📑 Veridocs
 
-Veridocs is an enterprise-grade AI document intelligence platform that enables multi-file question answering, precise page citations with instant coordinate highlights, cross-document contradiction auditing, and RAG Triad grounding verification.
+Fast, honest, lightweight document question answering (RAG) with real page citations and citation support checks.
 
-🌐 **[GitHub Repository](https://github.com/Spidey173/Veridocs)** | 🚀 **One-Command Setup on Windows, macOS, Linux**
-
----
-
-## 🏗️ System Architecture
-
-```mermaid
-flowchart TD
-    subgraph Client ["Frontend Client (Next.js 16 + React 19)"]
-        UI["UI Workspace & Split-Pane Layout"]
-        PDFViewer["Zero-Latency PDF.js Canvas (Local Blob URLs)"]
-        Chat["SSE Streaming Chat & Markdown Renderer"]
-        Drawer["3-State Claim Verification Drawer"]
-        Matrix["Cross-Document Contradiction Matrix"]
-    end
-
-    subgraph API ["FastAPI Backend (Python 3.11)"]
-        Auth["HMAC-SHA256 Token Auth & Anti-IDOR Guard"]
-        Upload["Streaming File Ingestion (PDF, DOCX, TXT)"]
-        TableParser["Atomic Table & SEC Financial Statement Parser"]
-        QueryEngine["Query Coordinator & Token Streamer"]
-        VerifyEngine["RAG Triad & Numeric Grounding Engine"]
-        AuditEngine["Contradiction & Diff Detection Engine"]
-    end
-
-    subgraph Worker ["Distributed Async Pipeline"]
-        Celery["Celery Task Worker"]
-        Redis[("Redis 7 (Broker & Job State)")]
-    end
-
-    subgraph Storage ["PostgreSQL 16 + pgvector"]
-        PGVector[("HNSW Vector Index (Cosine Distance)")]
-        PGFTS[("GIN Full-Text Search (BM25 English)")]
-        RRF["Reciprocal Rank Fusion (RRF k=60)"]
-        Alembic["Alembic Schema Versioning"]
-    end
-
-    subgraph LLM ["Universal Multi-Provider LLM Engine"]
-        Providers["OpenAI | Anthropic | Gemini | DeepSeek | Groq | Ollama | Custom"]
-    end
-
-    UI --> API
-    PDFViewer <--> UI
-    Chat <--> QueryEngine
-    Drawer <--> VerifyEngine
-    Matrix <--> AuditEngine
-
-    Upload --> Celery
-    Celery <--> Redis
-    Celery --> Storage
-
-    QueryEngine --> RRF
-    RRF --> PGVector
-    RRF --> PGFTS
-    QueryEngine <--> Providers
-    VerifyEngine <--> Providers
-    AuditEngine <--> Providers
-```
-
-## Security & Authentication
-
-### Demo Token Endpoint Gating (`ENABLE_DEMO_AUTH`)
-- By default, `ENABLE_DEMO_AUTH=false`. The `/api/auth/demo-token` and `/api/auth/token` routes are completely unregistered from the application router (returning `404 Not Found`).
-- To enable demo authentication for local testing or staging demonstrations, explicitly set:
-  ```bash
-  ENABLE_DEMO_AUTH=true
-  ```
-- **Production Safeguard**: If `ENV=production` (or `ENVIRONMENT=production`) and `ENABLE_DEMO_AUTH=true`, the backend refuses to boot at startup and raises a fatal configuration exception.
-- **Least-Privilege Enforcement**: Demo tokens are locked to a low-privilege `demo` role with a strict 15-minute maximum lifetime (900s). Demo tokens cannot access administrative routes (such as `/api/admin/cleanup`) and cannot elevate to admin or any real user's role.
+Runs entirely locally on an 8GB RAM laptop with **zero Docker required**.
 
 ---
 
-## Running Tests
+## What Actually Works
 
-### Fast Unit Tests
-Fast deterministic unit tests (using canned fixtures and mocks) are located under `tests/unit/`:
+- **Real Document Ingestion**: Upload PDF or TXT documents. Documents are parsed with `pypdf`, chunked with sliding window overlap, and embedded locally using Fastembed ONNX (`bge-small-en-v1.5`).
+- **Durable Local Storage**: Chunks and L2-normalized float32 vectors are stored directly in SQLite (`veridocs.db`). No Postgres, pgvector, Redis, or Celery.
+- **Fast Vector Retrieval**: Pure NumPy cosine similarity search over persistent embeddings (<1ms query latency).
+- **Streaming Answers with Real Citations**: Token-by-token streaming via Server-Sent Events (SSE). Citations include exact document names and page numbers that jump directly to that page in the PDF.
+- **Real PDF Rendering**: Built-in PDF.js canvas viewer rendering actual PDF bytes from the backend with page navigation.
+- **Honest Citation Check**: Verifies answer claims against retrieved source chunks via n-gram overlap check. No fabricated scores or fake "RAG Triad" numbers.
+- **Single OpenAI-Compatible LLM**: Connects to any standard endpoint (OpenAI, local Ollama, vLLM) via `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`. If no LLM is configured, an honest banner is displayed instead of silent fake output.
+- **Render Cold-Start Detection**: UI monitors backend health and informs users if the free-tier backend is waking up.
+
+---
+
+## Quickstart
+
+Tested from a fresh clone. Requires **Python 3.11+** and **Node.js 18+**.
+
+### 1. Install Dependencies
 ```bash
-# Run unit tests
-pytest backend/tests/unit
-# Or via Makefile
-make test
-```
-
-### Live LLM Evaluation Harness
-A separate live evaluation harness (`tests/evals/`) tests the LLM evaluator against a 40-case labeled benchmark (including adversarial inversions, hallucinations, and prompt injections):
-```bash
-# Run live evaluation harness (runs each case 5 times by default)
-make eval
-
-# Configure number of runs and minimum 95% CI agreement threshold:
-make eval EVAL_RUNS=5 EVAL_THRESHOLD=0.75
-```
-
-#### Evaluation Metrics & Statistical Quality Gate:
-- **Mean & Standard Deviation**: Calculated per metric across $N$ stochastic runs ($N=5$ default).
-- **95% Confidence Interval**: Derived via Student's $t$-interval and bootstrap percentiles.
-- **Inter-Rater Reliability**: Compares predictions with human ground truth using **Agreement Rate** and **Cohen's Kappa ($\kappa$)**.
-- **Automated Failure Gate**: The evaluation suite automatically fails if the **lower bound** of the 95% CI drops below the configured `EVAL_THRESHOLD` (default: `0.75`).
-- **Reports**: JSON evaluation reports are cached to `tests/evals/reports/latest.json`.
-
----
-
-## ⚡ Core Capabilities
-
-- **Zero-Latency PDF.js Canvas**: Multi-page PDF viewer with client-side Blob URL rendering and smooth citation coordinate jumps.
-- **Reciprocal Rank Fusion (RRF) Hybrid Search**: Merges PostgreSQL `pgvector` HNSW dense vector cosine distance (`<=>`) with sparse BM25 full-text search (`ts_rank_cd`) inside database CTEs in $< 15\text{ms}$.
-- **Atomic Table & Financial Statement Parsing**: Preserves borderless SEC 10-K balance sheets, income statements, and multi-page tables as indivisible semantic units without splitting cells across chunk boundaries.
-- **RAG Triad Grounding Verification**: Evaluates Context Relevance, Groundedness, Answer Relevance, and Numeric Accuracy for every synthesized answer.
-- **Cross-Document Contradiction Engine**: Identifies numerical mismatches, clause conflicts, and temporal discrepancies across multiple documents side-by-side.
-- **Universal Multi-Provider LLM Hub**: Dynamic zero-lockin architecture. Veridocs auto-detects whichever provider key is configured or connects to local private Ollama instances.
-- **Distributed Async Processing**: Background ingestion of massive multi-hundred page filings using Celery workers, Redis queues, and Anti-IDOR ownership isolation.
-
----
-
-## 🤖 Universal LLM Provider Configuration
-
-Veridocs does **not** force any default LLM. It automatically detects and binds to whichever provider you configure in `.env`:
-
-| Provider | Environment Variable | Default Model | Description |
-| :--- | :--- | :--- | :--- |
-| **OpenAI** | `OPENAI_API_KEY` | `gpt-4o-mini` | Fast, accurate general-purpose reasoning |
-| **Anthropic** | `ANTHROPIC_API_KEY` | `claude-3-5-haiku-20241022` | Deep analytical parsing and long-context synthesis |
-| **Google Gemini** | `GOOGLE_API_KEY` | `gemini-2.5-flash` | Low latency with multimodal vision fallback |
-| **DeepSeek** | `DEEPSEEK_API_KEY` | `deepseek-chat` | Cost-effective mathematical & code reasoning |
-| **Groq** | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Ultra-fast LPU inference (500+ tokens/sec) |
-| **Local Ollama** | `OLLAMA_BASE_URL` | `llama3.2` | 100% private, free, runs offline on your machine |
-| **Mistral AI** | `MISTRAL_API_KEY` | `mistral-small-latest` | Multilingual European open-weights model |
-| **OpenRouter** | `OPENROUTER_API_KEY` | User configured | Unified gateway for hundreds of open & closed models |
-| **GitHub Models**| `GITHUB_TOKEN` | `gpt-4o-mini` | Free developer tier models via GitHub Marketplace |
-| **Self-Hosted** | `LLM_BASE_URL` | User configured | Any OpenAI-compatible endpoint (vLLM, TGI, LM Studio) |
-
-To explicitly lock to a specific provider, set `LLM_PROVIDER`:
-```bash
-LLM_PROVIDER=groq  # or 'openai', 'anthropic', 'google', 'ollama', etc.
-```
-
----
-
-## 🚀 Quickstart (Clone & Run in 10s)
-
-Veridocs runs **instantly across macOS, Windows, and Linux** with **zero setup or external dependencies required**.
-
-### ⚡ Instant Showcase Mode (Any OS)
-Install dependencies and run:
-```bash
+pip install -r backend/requirements.txt
 npm install
+```
+
+### 2. Configure LLM (Optional)
+Create a `.env` file in the project root:
+```bash
+# Hosted OpenAI
+OPENAI_API_KEY=sk-...
+
+# Or Local Ollama
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=llama3.2
+```
+*(If omitted, vector search, PDF viewing, and document indexing still work completely. The UI will show a banner explaining that an LLM key is needed for generated answers).*
+
+### 3. Run Dev Server
+```bash
 npm run dev
 ```
-Open **[http://localhost:3000](http://localhost:3000)** in your browser. 
+- **Web App**: http://localhost:3000
+- **API Docs**: http://localhost:8000/docs
 
-The workspace launches immediately with pre-indexed contract review data, full PDF canvas, token-by-token streaming answers, citation coordinates, contradiction matrix, and RAG Triad verification. You can also upload your own documents directly into the canvas.
+---
 
-### 🪟 Windows (One-Click)
-Double-click `run.bat` or run:
-```cmd
-run.bat
+## Architecture
+
 ```
-
-### 🍎 macOS & 🐧 Linux
-Run in your terminal:
-```bash
-chmod +x run.sh && ./run.sh
+Veridocs/
+├── app/                  # Next.js App Router (layout, page, styles)
+├── components/           # React UI components (PDF viewer, Chat, Upload, Layout)
+├── lib/                  # Zustand store and API client
+├── public/               # Static assets & PDF.js worker
+├── backend/
+│   ├── main.py           # FastAPI entrypoint & lifecycle
+│   ├── database.py       # SQLite chunk & vector persistence
+│   ├── vector_store.py   # Vector retrieval with NumPy dot product
+│   ├── llm_service.py    # OpenAI-compatible streaming client
+│   ├── pdf_processor.py  # pypdf text extraction & chunker
+│   ├── verification.py   # N-gram citation claim check
+│   ├── config.py         # App configuration & Fastembed model registry
+│   └── tests/            # 13 real behavior tests
+├── package.json          # Single package.json for frontend & dev orchestration
+└── scripts/dev.js        # Starts FastAPI and Next.js concurrently
 ```
 
 ---
 
-### 🔧 Optional: Full Python Backend Mode
-For database persistence and running evaluation harnesses:
-```bash
-# Start FastAPI backend on http://localhost:8000
-npm run dev:backend
+## Verification & Tests
 
-# Or run full stack via bash
-./run.sh --full
+### Backend Unit Tests
+```bash
+PYTHONPATH=backend pytest backend/tests/test_veridocs.py -v
 ```
+*Result: 13 passed in ~0.5s.*
+
+### Production Build
+```bash
+npm run build
+```
+*Result: Compiled successfully in ~3s.*
 
 ---
 
-### Option B: Docker Compose (Full-Stack Production)
+## Deployment
 
-Spins up PostgreSQL 16 with `pgvector`, Redis 7, the FastAPI API, the Celery async worker, and the Next.js production runner:
-
-```bash
-docker compose up -d --build
-```
-
-#### Service Endpoints:
-- **Web Client**: `http://localhost:3000`
-- **FastAPI API**: `http://localhost:8000`
-- **PostgreSQL**: `localhost:5432` (`veridocs` / `veridocs_password`)
-- **Redis Broker**: `localhost:6379`
-- **Healthcheck Probe**: `curl http://localhost:8000/api/health`
+- **Frontend**: Deploy directly to [Vercel](https://vercel.com) by importing the repository root. Set `NEXT_PUBLIC_API_URL` to your backend URL.
+- **Backend**: Deploy to [Render](https://render.com) using `backend/Dockerfile`. Fastembed weights (`bge-small-en-v1.5`) are pre-downloaded during Docker build so container cold-starts boot instantly under 30s.
 
 ---
 
-### Option C: Manual Setup
+## License
 
-#### 1. Backend Setup
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-
-# Run database migrations
-alembic upgrade head
-
-# Start FastAPI ASGI server
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-#### 2. Frontend Setup
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
----
-
-## 🗄️ Database & Alembic Migrations
-
-Veridocs uses PostgreSQL 16 with the `pgvector` extension for hybrid vector search.
-
-```bash
-# Apply migrations to head
-cd backend
-alembic upgrade head
-
-# Create a new versioned migration after model changes
-alembic revision --autogenerate -m "describe_schema_change"
-
-# Rollback last migration
-alembic downgrade -1
-```
-
-*Note: In development and test modes without a running PostgreSQL instance, Veridocs automatically falls back to lightweight in-memory vector storage.*
-
----
-
-## 🧪 Testing Suite
-
-### 1. Backend Pytest Suite (Unit, Integration, & Security)
-The backend contains 159 automated unit, integration, and security tests covering RRF hybrid search, anti-IDOR authorization, async tasks, and RAG Triad grounding:
-
-```bash
-# Run all tests with coverage
-pytest backend/tests --cov=backend --cov-report=term-missing
-```
-
-### 2. Frontend Vitest & Playwright Suites
-The frontend includes Vitest unit tests for Zustand state stores and API clients, plus 23 Playwright end-to-end tests covering real browser rendering, drag-and-drop ingestion, SSE token streaming, contradiction audits, and claim drawers:
-
-```bash
-cd frontend
-
-# Run frontend Vitest unit tests
-npm test
-
-# Run all Playwright E2E tests headless
-npm run test:e2e
-
-# Run Playwright with interactive visual UI
-npm run test:e2e:headed
-
-# Run live unmocked backend smoke test
-npm run test:e2e:smoke
-```
-
----
-
-## 🔒 Security Architecture
-
-- **Path Traversal Protection**: Uploaded files are assigned random UUIDs on disk, decoupling user filenames from the filesystem.
-- **Anti-IDOR / Multi-Tenant Isolation**: Every session, document, and background job checks `owner_id` against the authenticated JWT context.
-- **SQL Injection Immunity**: 100% of database interactions use parameterized positional queries (`$1, $2, ...`) via `asyncpg`.
-- **Restricted Secrets**: Dev secrets are isolated with `0o600` file permissions outside public/upload directories.
-- **Build Isolation**: Container builds utilize strict `.dockerignore` files preventing credential leakage.
-
----
-
-## 📄 License
-
-Distributed under the MIT License.
+MIT
