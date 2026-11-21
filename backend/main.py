@@ -4,6 +4,7 @@ High-throughput document extraction, hybrid vector search (RRF), cross-encoder r
 claim-level RAG Triad grounding verification, and cross-document contradiction auditing.
 """
 
+import os
 import asyncio
 import logging
 import threading
