@@ -80,7 +80,7 @@ class LLMService:
         # If localhost/ollama, api_key is optional
         if "localhost" in self.base_url or "127.0.0.1" in self.base_url:
             return True
-        return bool(self.api_key)
+        return bool(self.api_key and self.api_key != "not-needed")
 
     def _build_messages(
         self,

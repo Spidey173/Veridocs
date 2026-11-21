@@ -4,12 +4,19 @@ Lightweight, fast, and real: local Fastembed ONNX embeddings, SQLite persistence
 OpenAI-compatible streaming QA, and honest citation checks.
 """
 
+import sys
 import shutil
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Ensure backend directory is in sys.path so un-prefixed imports work
+# regardless of invocation directory or entrypoint format
+_backend_dir = str(Path(__file__).resolve().parent)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 from config import get_settings, get_model_registry
 import database

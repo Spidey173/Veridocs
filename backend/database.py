@@ -82,6 +82,13 @@ def save_session(session_id: str, file_names: List[str], suggested_questions: Op
             )
         conn.commit()
 
+    # Enforce maximum active sessions limit (prune excess non-demo sessions)
+    try:
+        max_sess = get_settings().MAX_SESSIONS_COUNT
+        cleanup_expired_sessions(max_sessions=max_sess)
+    except Exception:
+        pass
+
 
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve session metadata from SQLite."""

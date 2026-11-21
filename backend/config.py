@@ -45,7 +45,8 @@ class Settings:
 
         if explicit_url:
             self.LLM_BASE_URL: str = explicit_url
-            self.LLM_API_KEY: str = explicit_key or openai_key or groq_key or "not-needed"
+            is_local = "localhost" in explicit_url or "127.0.0.1" in explicit_url
+            self.LLM_API_KEY: str = explicit_key or openai_key or groq_key or ("not-needed" if is_local else "")
             self.LLM_MODEL: str = explicit_model or "default"
         elif groq_key:
             # Native Groq support out of the box
@@ -96,6 +97,7 @@ class Settings:
         # Upload & page constraints
         self.MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
         self.MAX_PDF_PAGES: int = int(os.getenv("MAX_PDF_PAGES", "50"))
+        self.MAX_SESSIONS_COUNT: int = int(os.getenv("MAX_SESSIONS_COUNT", "20"))
         self.ALLOWED_EXTENSIONS: set = {".pdf", ".txt"}
 
         # Rate limiting constraints (per IP per hour)
@@ -108,7 +110,8 @@ class Settings:
 
     def is_llm_configured(self) -> bool:
         """Check if an LLM is configured (either OpenAI key or custom/Ollama base URL)."""
-        return bool(self.LLM_BASE_URL and (self.LLM_API_KEY or "localhost" in self.LLM_BASE_URL or "127.0.0.1" in self.LLM_BASE_URL))
+        is_local = "localhost" in self.LLM_BASE_URL or "127.0.0.1" in self.LLM_BASE_URL
+        return bool(self.LLM_BASE_URL and (self.LLM_API_KEY or is_local))
 
 
 class ModelRegistry:

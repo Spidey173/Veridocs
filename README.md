@@ -32,14 +32,14 @@ Runs entirely locally on an 8GB RAM laptop with **zero Docker required**.
 - **Small-Talk Bypass**: Conversational pleasantries ("ok thanks", "hi", "thank you") bypass vector search and citation checks entirely, returning immediate friendly responses.
 - **Honest Citation Check**: Verifies whether factual answer claims are supported by retrieved excerpts using an n-gram overlap check. Includes safe sentence splitting that protects numbered lists (`1.`) and abbreviations (`e.g.`, `i.e.`). Intro sentences, meta-statements, and missing-data replies are automatically excluded from scoring.
 - **Universal OpenAI-Compatible LLM + BYOK**: Driven by standard `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` (supporting Groq, Together, DeepSeek, OpenAI, or local Ollama). Visitors can also click **Add Key (Bypass limits)** in the UI to paste their own key directly into the browser, stored locally only.
-- **Abuse Protection**: In-memory per-IP rate limiting (20 queries/hr, 10 uploads/hr), 10 MB maximum upload size, 50-page document limit, and 20 active sessions maximum.
+- **Abuse Protection**: In-memory per-IP rate limiting (20 queries/hr, 10 uploads/hr), 10 MB maximum upload size, and 50-page document limit.
 - **Durable Local Storage**: Chunks and L2-normalized float32 vectors are stored in SQLite (`backend/data/veridocs.db`). No Postgres, pgvector, Redis, or Celery.
 
 ---
 
 ## Quickstart
 
-Tested from a fresh clone. Requires **Python 3.10+** and **Node.js 18+**.
+Tested from a fresh clone. Requires **Python 3.11 or 3.12** and **Node.js 18+**.
 
 ### 1. Clone the Repository
 
@@ -62,12 +62,14 @@ cp .env.example .env
 
 #### Option A: One-Command Start (Recommended)
 
-Run the automated startup script:
+Install frontend dependencies and start both services:
 
 ```bash
-./run.sh
+npm install
+npm run dev
 ```
-*(Or use `npm run dev`). This script automatically verifies `.venv`, installs `requirements.txt`, installs `node_modules`, and concurrently boots both the FastAPI backend (port 8000) and Next.js frontend (port 3000).*
+
+*`npm run dev` automatically verifies `.venv`, installs `requirements.txt` into `.venv` if missing, and concurrently boots both the FastAPI backend (port 8000) and Next.js frontend (port 3000).*
 
 #### Option B: Manual Setup (Separate Terminals)
 
@@ -137,7 +139,6 @@ Veridocs/
 │   ├── Dockerfile        # Production multi-stage Docker build
 │   └── tests/            # 22 backend behavior pytest tests
 ├── requirements.txt      # Unified Python dependencies (used by local, Docker, Render)
-├── run.sh                # One-command development startup script
 ├── package.json          # Single package.json for frontend, test & dev orchestration
 └── scripts/
     ├── dev.js            # Starts FastAPI and Next.js concurrently (npm run dev)
@@ -157,7 +158,7 @@ npm test
 ```
 
 - **Frontend (Vitest)**: 11 tests passing (~400ms)
-- **Backend (Pytest)**: 22 tests passing (~1.8s)
+- **Backend (Pytest)**: 22 tests passing (~15s)
 
 ### Production Build
 
