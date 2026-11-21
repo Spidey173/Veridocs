@@ -39,6 +39,7 @@ interface AppState {
 
   // Chat
   messages: ChatMessage[];
+  suggestedQuestions: string[];
   isQuerying: boolean;
   currentStreamingId: string | null;
   pendingQuestion: string | null;
@@ -67,7 +68,8 @@ interface AppState {
   setRightSidebarWidth: (width: number) => void;
 
   // Actions
-  setSession: (sessionId: string, files: UploadedFile[]) => void;
+  setSuggestedQuestions: (q: string[]) => void;
+  setSession: (sessionId: string, files: UploadedFile[], suggestedQuestions?: string[]) => void;
   clearSession: () => void;
   setUploading: (isUploading: boolean) => void;
   setUploadProgress: (progress: number) => void;
@@ -96,6 +98,7 @@ export const useAppStore = create<AppState>()(
       setIsBackendWaking: (waking) => set({ isBackendWaking: waking }),
 
       messages: [],
+      suggestedQuestions: [],
       isQuerying: false,
       currentStreamingId: null,
       pendingQuestion: null,
@@ -117,11 +120,14 @@ export const useAppStore = create<AppState>()(
       setLeftSidebarWidth: (width) => set({ leftSidebarWidth: width }),
       setRightSidebarWidth: (width) => set({ rightSidebarWidth: width }),
 
-      setSession: (sessionId, files) => {
+      setSuggestedQuestions: (suggestedQuestions) => set({ suggestedQuestions }),
+
+      setSession: (sessionId, files, suggestedQuestions) => {
         const activeDoc = files.length > 0 ? files[0].name : null;
         set({
           sessionId,
           files,
+          suggestedQuestions: suggestedQuestions || [],
           activeDocumentName: activeDoc,
           currentPage: 1,
           messages: [],
@@ -136,6 +142,7 @@ export const useAppStore = create<AppState>()(
         set({
           sessionId: null,
           files: [],
+          suggestedQuestions: [],
           messages: [],
           activeDocumentName: null,
           currentPage: 1,

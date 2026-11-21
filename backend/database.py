@@ -28,9 +28,14 @@ def init_db():
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 created_at REAL,
-                file_names TEXT
+                file_names TEXT,
+                suggested_questions TEXT
             );
         """)
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN suggested_questions TEXT;")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS chunks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,21 +57,28 @@ def init_db():
 init_db()
 
 
-def save_session(session_id: str, file_names: List[str]):
-    """Insert or update session with file names."""
+def save_session(session_id: str, file_names: List[str], suggested_questions: Optional[List[str]] = None):
+    """Insert or update session with file names and suggested questions."""
     with get_db_connection() as conn:
-        existing = conn.execute("SELECT file_names FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+        existing = conn.execute("SELECT file_names, suggested_questions FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+        questions_json = json.dumps(suggested_questions) if suggested_questions is not None else None
         if existing:
             current_files = json.loads(existing["file_names"])
             merged = list(dict.fromkeys(current_files + file_names))
-            conn.execute(
-                "UPDATE sessions SET file_names = ? WHERE session_id = ?",
-                (json.dumps(merged), session_id)
-            )
+            if questions_json is not None:
+                conn.execute(
+                    "UPDATE sessions SET file_names = ?, suggested_questions = ? WHERE session_id = ?",
+                    (json.dumps(merged), questions_json, session_id)
+                )
+            else:
+                conn.execute(
+                    "UPDATE sessions SET file_names = ? WHERE session_id = ?",
+                    (json.dumps(merged), session_id)
+                )
         else:
             conn.execute(
-                "INSERT INTO sessions (session_id, created_at, file_names) VALUES (?, ?, ?)",
-                (session_id, time.time(), json.dumps(file_names))
+                "INSERT INTO sessions (session_id, created_at, file_names, suggested_questions) VALUES (?, ?, ?, ?)",
+                (session_id, time.time(), json.dumps(file_names), questions_json or json.dumps([]))
             )
         conn.commit()
 
@@ -74,15 +86,22 @@ def save_session(session_id: str, file_names: List[str]):
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve session metadata from SQLite."""
     with get_db_connection() as conn:
-        row = conn.execute("SELECT session_id, created_at, file_names FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+        row = conn.execute("SELECT session_id, created_at, file_names, suggested_questions FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
         if not row:
             return None
         chunk_count = conn.execute("SELECT COUNT(*) as cnt FROM chunks WHERE session_id = ?", (session_id,)).fetchone()["cnt"]
+        raw_q = row["suggested_questions"] if "suggested_questions" in row.keys() else None
+        try:
+            questions = json.loads(raw_q) if raw_q else []
+        except Exception:
+            questions = []
+
         return {
             "session_id": row["session_id"],
             "created_at": row["created_at"],
             "file_names": json.loads(row["file_names"]),
             "chunk_count": chunk_count,
+            "suggested_questions": questions,
         }
 
 

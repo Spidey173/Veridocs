@@ -141,10 +141,17 @@ def test_stream_query_sse(test_client: TestClient, sample_txt_bytes: bytes):
     upload_res = test_client.post("/api/upload", files=files)
     sid = upload_res.json()["session_id"]
 
-    stream_res = test_client.post("/api/query/stream", json={
-        "session_id": sid,
-        "question": "What is the liability cap?"
-    })
+    stream_res = test_client.post(
+        "/api/query/stream",
+        json={
+            "session_id": sid,
+            "question": "What is the liability cap?"
+        },
+        headers={
+            "X-LLM-API-Key": "test_key",
+            "X-LLM-Base-Url": "http://localhost:11434/v1",
+        }
+    )
     assert stream_res.status_code == 200
     assert "text/event-stream" in stream_res.headers["content-type"]
     text = stream_res.text
@@ -216,4 +223,80 @@ def test_upload_file_size_limit(test_client: TestClient):
     res = test_client.post("/api/upload", files=files)
     assert res.status_code == 400
     assert "exceeds" in res.json()["detail"].lower()
+
+
+def test_health_check_llm_status_reporting(test_client: TestClient, monkeypatch):
+    """Verify health endpoint dynamically reflects LLM configuration status."""
+    import config
+
+    # 1. When no LLM credentials are set
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    config.reload_settings()
+
+    res = test_client.get("/api/health")
+    assert res.status_code == 200
+    assert res.json()["llm_configured"] is False
+
+    # 2. When LLM credentials are set via universal vars
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setenv("LLM_API_KEY", "gsk_test_key_12345")
+    monkeypatch.setenv("LLM_MODEL", "llama-3.3-70b-versatile")
+    config.reload_settings()
+
+    res = test_client.get("/api/health")
+    assert res.status_code == 200
+    assert res.json()["llm_configured"] is True
+
+    # 3. Clean up
+    config.reload_settings()
+
+
+def test_system_notice_not_scored_by_citation_check(test_client: TestClient, sample_txt_bytes: bytes, monkeypatch):
+    """Verify system notices (e.g. No LLM configured) do not emit citations or citation_check."""
+    import config
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    config.reload_settings()
+
+    # Upload document
+    files = [("files", ("notice_doc.txt", sample_txt_bytes, "text/plain"))]
+    sid = test_client.post("/api/upload", files=files).json()["session_id"]
+
+    # Stream query with no LLM configured
+    stream_res = test_client.post("/api/query/stream", json={
+        "session_id": sid,
+        "question": "What is the fee?"
+    })
+    assert stream_res.status_code == 200
+    body = stream_res.text
+    # Tokens should include honest warning notice
+    assert "No LLM is configured" in body
+    # Notice must NOT emit citation or citation_check events
+    assert "event: citation_check" not in body
+    assert "event: citation" not in body
+
+
+def test_dynamic_suggested_questions(test_client: TestClient, sample_txt_bytes: bytes):
+    """Verify sample agreement gets agreement questions while other docs get general questions."""
+    # 1. Non-agreement document gets generic questions
+    files = [("files", ("resume_jane_doe.txt", sample_txt_bytes, "text/plain"))]
+    res = test_client.post("/api/upload", files=files)
+    assert res.status_code == 200
+    suggestions = res.json()["suggested_questions"]
+    assert len(suggestions) >= 2
+    assert "Summarize this document" in suggestions or any("key" in s.lower() for s in suggestions)
+
+    # 2. Query suggestions endpoint
+    sid = res.json()["session_id"]
+    sugg_res = test_client.get(f"/api/sessions/{sid}/suggestions")
+    assert sugg_res.status_code == 200
+    assert sugg_res.json()["suggestions"] == suggestions
+
 

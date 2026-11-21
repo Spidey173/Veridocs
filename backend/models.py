@@ -67,6 +67,7 @@ class UploadResponse(BaseModel):
     processed_files: int
     failed_files: List[str]
     message: str
+    suggested_questions: List[str] = []
     document_metadata: Optional[List[Dict[str, Any]]] = None
 
 
@@ -75,6 +76,7 @@ class SessionInfo(BaseModel):
     created_at: float
     file_names: List[str]
     chunk_count: int
+    suggested_questions: List[str] = []
 
 
 class HealthResponse(BaseModel):

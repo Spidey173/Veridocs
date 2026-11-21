@@ -58,7 +58,7 @@ export default function DropZone() {
           type: f.type,
         }));
 
-        setSession(result.session_id, files);
+        setSession(result.session_id, files, result.suggested_questions);
         setUploading(false);
         setSelectedFiles([]);
       } catch (err: unknown) {

@@ -37,6 +37,8 @@ export default function ChatPanel() {
   const {
     sessionId,
     messages,
+    suggestedQuestions,
+    activeDocumentName,
     isQuerying,
     pendingQuestion,
     addMessage,
@@ -163,24 +165,32 @@ export default function ChatPanel() {
               </p>
             </div>
 
-            {/* Quick Question Prompts */}
+            {/* Dynamic Contextual Question Prompts */}
             <div className="w-full max-w-sm space-y-1.5 pt-2 text-left">
-              <button
-                type="button"
-                onClick={() => setInput("What are the payment terms in this agreement?")}
-                className="w-full p-2 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)] hover:border-[var(--color-accent)] text-xs text-[var(--text-primary)] transition-colors flex items-center gap-2"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-[var(--color-accent)] shrink-0" />
-                <span className="truncate">What are the payment terms in this agreement?</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setInput("What is the limitation of liability and uptime SLA?")}
-                className="w-full p-2 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)] hover:border-[var(--color-accent)] text-xs text-[var(--text-primary)] transition-colors flex items-center gap-2"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-[var(--color-accent)] shrink-0" />
-                <span className="truncate">What is the limitation of liability and uptime SLA?</span>
-              </button>
+              {((suggestedQuestions && suggestedQuestions.length > 0)
+                ? suggestedQuestions
+                : (activeDocumentName?.includes("sample_agreement"))
+                  ? [
+                      "What are the payment terms in this agreement?",
+                      "What is the limitation of liability and uptime SLA?",
+                      "What data protection and encryption standards are required?",
+                    ]
+                  : [
+                      "Summarize this document",
+                      "What are the key points?",
+                      "What are the main requirements and dates?",
+                    ]
+              ).slice(0, 3).map((prompt, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setInput(prompt)}
+                  className="w-full p-2 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)] hover:border-[var(--color-accent)] text-xs text-[var(--text-primary)] transition-colors flex items-center gap-2"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[var(--color-accent)] shrink-0" />
+                  <span className="truncate">{prompt}</span>
+                </button>
+              ))}
             </div>
           </div>
         ) : (
@@ -224,12 +234,16 @@ export default function ChatPanel() {
                   </div>
                 ) : null}
 
-                {/* Real Citation Check Drawer */}
-                {m.role === "assistant" && !m.isStreaming && (
-                  <VerificationDrawer
-                    citations={m.citations}
-                    citationCheck={m.citation_check}
-                  />
+                {/* Real Citation Check Drawer - only for real answers, never for system notices */}
+                {m.role === "assistant" &&
+                  !m.isStreaming &&
+                  !m.content.startsWith("⚠️") &&
+                  !m.content.includes("No LLM is configured") &&
+                  !m.content.includes("Rate Limit Reached") && (
+                    <VerificationDrawer
+                      citations={m.citations}
+                      citationCheck={m.citation_check}
+                    />
                 )}
               </div>
             </div>

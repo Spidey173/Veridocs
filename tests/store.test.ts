@@ -67,4 +67,12 @@ describe("useAppStore", () => {
     useAppStore.getState().setIsBackendWaking(false);
     expect(useAppStore.getState().isBackendWaking).toBe(false);
   });
+
+  it("stores and clears suggested questions with session", () => {
+    useAppStore.getState().setSuggestedQuestions(["Summarize this document", "What are the key points?"]);
+    expect(useAppStore.getState().suggestedQuestions).toHaveLength(2);
+
+    useAppStore.getState().clearSession();
+    expect(useAppStore.getState().suggestedQuestions).toHaveLength(0);
+  });
 });

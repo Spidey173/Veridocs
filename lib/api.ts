@@ -46,6 +46,7 @@ export interface UploadResponse {
   processed_files: number;
   failed_files: string[];
   message: string;
+  suggested_questions?: string[];
   document_metadata?: Array<{
     filename: string;
     file_size_bytes: number;
@@ -58,6 +59,7 @@ export interface SessionInfo {
   created_at: number;
   file_names: string[];
   chunk_count: number;
+  suggested_questions?: string[];
 }
 
 export interface HealthStatus {

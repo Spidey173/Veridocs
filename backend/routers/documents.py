@@ -21,6 +21,58 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["documents"])
 
 
+def generate_suggested_questions(document_name: str, chunks: List[dict]) -> List[str]:
+    """Generate 3 relevant suggested questions based on the document type and content."""
+    # 1. Sample agreement questions only show for sample agreement
+    if "sample_agreement" in document_name.lower():
+        return [
+            "What are the payment terms in this agreement?",
+            "What is the limitation of liability and uptime SLA?",
+            "What data protection and encryption standards are required?",
+        ]
+
+    # 2. Dynamic generation via LLM if configured
+    settings = get_settings()
+    if settings.is_llm_configured() and chunks:
+        try:
+            from llm_service import get_llm_service
+            llm = get_llm_service()
+            if llm.client:
+                # Use top chunk excerpts for dynamic generation
+                sample_text = "\n\n".join([c["text"][:350] for c in chunks[:3]])
+                prompt = (
+                    "Based on the following excerpts from an uploaded document, generate exactly 3 short, relevant questions "
+                    "a user would ask about this document.\n"
+                    "Output ONLY the 3 questions, one per line. Do not number them or include bullets.\n\n"
+                    f"EXCERPTS:\n{sample_text}"
+                )
+                response = llm.client.chat.completions.create(
+                    model=llm.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=120,
+                    temperature=0.2,
+                )
+                raw = response.choices[0].message.content or ""
+                lines = [
+                    l.strip().lstrip("0123456789.-*•) ")
+                    for l in raw.strip().split("\n")
+                    if l.strip() and "?" in l
+                ]
+                if len(lines) >= 3:
+                    return lines[:3]
+                elif lines:
+                    return lines
+        except Exception as e:
+            logger.warning(f"Could not generate dynamic suggestions via LLM: {e}")
+
+    # 3. Clean generic fallback for any other document (e.g. resume, policy, report)
+    return [
+        "Summarize this document",
+        "What are the key points?",
+        "What are the main requirements and dates?",
+    ]
+
+
 @router.post("/api/upload", response_model=UploadResponse)
 async def upload_documents(
     request: Request,
@@ -119,8 +171,9 @@ async def upload_documents(
         chunk_texts = [c["text"] for c in all_chunks]
         embeddings = list(reg.embedding_model.embed(chunk_texts))
 
-        # Persist session and chunks in SQLite
-        database.save_session(sid, saved_file_names)
+        # Persist session and chunks in SQLite with dynamic suggestions
+        suggestions = generate_suggested_questions(saved_file_names[0], all_chunks)
+        database.save_session(sid, saved_file_names, suggested_questions=suggestions)
         database.save_chunks(sid, all_chunks, embeddings)
 
     except Exception as e:
@@ -133,6 +186,7 @@ async def upload_documents(
         processed_files=processed_files,
         failed_files=failed_files,
         message=f"Successfully indexed {processed_files} document(s).",
+        suggested_questions=suggestions,
         document_metadata=doc_metadata,
     )
 
@@ -172,7 +226,17 @@ async def get_session_info(session_id: str):
         created_at=session["created_at"],
         file_names=session["file_names"],
         chunk_count=session["chunk_count"],
+        suggested_questions=session.get("suggested_questions", []),
     )
+
+
+@router.get("/api/sessions/{session_id}/suggestions")
+async def get_session_suggestions_endpoint(session_id: str):
+    """Retrieve suggested questions for the active session."""
+    session = database.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return {"suggestions": session.get("suggested_questions", [])}
 
 
 @router.delete("/api/sessions/{session_id}")

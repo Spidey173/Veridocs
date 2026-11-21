@@ -25,6 +25,16 @@ def seed_demo_session_if_needed():
     try:
         session = database.get_session("demo-session")
         if session and session["chunk_count"] > 0:
+            if not session.get("suggested_questions"):
+                database.save_session(
+                    "demo-session",
+                    session["file_names"],
+                    suggested_questions=[
+                        "What are the payment terms in this agreement?",
+                        "What is the limitation of liability and uptime SLA?",
+                        "What data protection and encryption standards are required?",
+                    ],
+                )
             return
 
         settings = get_settings()
@@ -46,7 +56,15 @@ def seed_demo_session_if_needed():
             chunk_texts = [c["text"] for c in chunks]
             embeddings = list(reg.embedding_model.embed(chunk_texts))
 
-            database.save_session("demo-session", ["sample_agreement.pdf"])
+            database.save_session(
+                "demo-session",
+                ["sample_agreement.pdf"],
+                suggested_questions=[
+                    "What are the payment terms in this agreement?",
+                    "What is the limitation of liability and uptime SLA?",
+                    "What data protection and encryption standards are required?",
+                ],
+            )
             database.save_chunks("demo-session", chunks, embeddings)
 
             dest = settings.UPLOAD_DIR / "demo-session_sample_agreement.pdf"

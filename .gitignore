@@ -31,6 +31,8 @@ uploads/
 *.pdf
 !backend/sample_agreement.pdf
 !public/sample_agreement.pdf
+!backend/sample_resume.pdf
+!public/sample_resume.pdf
 
 # Testing / Reports
 playwright-report/

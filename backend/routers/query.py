@@ -69,9 +69,14 @@ async def query_documents(request: Request, body: QueryRequest):
         logger.error(f"LLM query failed: {e}")
         raise HTTPException(status_code=500, detail=f"LLM request error: {str(e)}")
 
-    # 3. Extract citations and check grounding
-    citations = extract_citations_from_answer(answer, chunks)
-    check_result = check_citations(answer, chunks)
+    # 3. Extract citations and check grounding (only for real answers, never for system notices)
+    is_system_notice = (
+        not llm.is_configured()
+        or answer.strip().startswith("⚠️")
+        or "No LLM is configured" in answer
+    )
+    citations = extract_citations_from_answer(answer, chunks) if not is_system_notice else []
+    check_result = check_citations(answer, chunks) if not is_system_notice else None
 
     sources = [
         SourceInfo(
@@ -87,7 +92,7 @@ async def query_documents(request: Request, body: QueryRequest):
         answer=answer,
         sources=sources,
         citations=[CitationInfo(**c) for c in citations],
-        citation_check=CitationCheckResult(**check_result),
+        citation_check=CitationCheckResult(**check_result) if check_result else None,
     )
 
 
@@ -129,20 +134,29 @@ async def stream_query_endpoint(request: Request, body: StreamQueryRequest):
                 yield _sse_event("done", {})
                 return
 
-            # Send top citations to client upfront
-            citations = extract_citations_from_answer(body.question, chunks)
-            for c in citations:
-                yield _sse_event("citation", c)
+            # Initialize LLM client
+            llm = get_llm_service(base_url=x_base_url, api_key=x_api_key, model=x_model)
+
+            # Send top citations to client upfront only if LLM is active
+            if llm.is_configured():
+                citations = extract_citations_from_answer(body.question, chunks)
+                for c in citations:
+                    yield _sse_event("citation", c)
 
             # Stream LLM tokens (using custom user key if supplied, or server key)
-            llm = get_llm_service(base_url=x_base_url, api_key=x_api_key, model=x_model)
             full_answer = ""
             async for token in llm.generate_answer_stream(body.question, chunks, history=body.history):
                 full_answer += token
                 yield _sse_event("token", {"text": token})
 
-            # Check citations against retrieved context
-            if full_answer:
+            # Check citations against retrieved context ONLY for real answers, never for system notices
+            is_system_notice = (
+                not llm.is_configured()
+                or full_answer.strip().startswith("⚠️")
+                or "No LLM is configured" in full_answer
+                or "Rate Limit Reached" in full_answer
+            )
+            if full_answer and not is_system_notice:
                 check_result = check_citations(full_answer, chunks)
                 yield _sse_event("citation_check", check_result)
 

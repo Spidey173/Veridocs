@@ -55,7 +55,8 @@ export default function Home() {
                 name,
                 size: 1150,
                 type: name.endsWith(".pdf") ? "application/pdf" : "text/plain",
-              }))
+              })),
+              info.suggested_questions
             );
             setActiveDocument(info.file_names[0]);
           }

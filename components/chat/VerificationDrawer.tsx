@@ -24,7 +24,10 @@ export default function VerificationDrawer({
   const [expanded, setExpanded] = useState(false);
   const { highlightCitation } = useAppStore();
 
-  if ((!citations || citations.length === 0) && !citationCheck) {
+  if (
+    (!citations || citations.length === 0) &&
+    (!citationCheck || citationCheck.total_claims === 0)
+  ) {
     return null;
   }
 

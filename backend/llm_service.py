@@ -93,7 +93,7 @@ class LLMService:
         """Synchronously generate an answer using the configured LLM."""
         if not self.is_configured() or not self.client:
             raise ValueError(
-                "No LLM configured. Please set OPENAI_API_KEY in .env or configure LLM_BASE_URL (e.g. http://localhost:11434/v1 for local Ollama)."
+                "No LLM configured. Please set LLM_BASE_URL and LLM_API_KEY in .env, or use the API Key button in the UI."
             )
 
         messages = self._build_messages(question, chunks, history)
@@ -117,7 +117,25 @@ class LLMService:
     ) -> AsyncGenerator[str, None]:
         """Stream answer tokens from the configured LLM."""
         if not self.is_configured() or not self.client:
-            yield "⚠️ **No LLM is configured.**\n\nTo enable streaming answers, please configure an API key or local Ollama:\n- **Hosted:** Set `OPENAI_API_KEY=your_key` in `.env`\n- **Local:** Run Ollama and set `OLLAMA_BASE_URL=http://localhost:11434/v1` in `.env`"
+            yield (
+                "⚠️ **No LLM is configured.**\n\n"
+                "To enable streaming answers, configure your credentials in `.env` or click the **API Key** button in the header:\n\n"
+                "**Option A: Hosted (Groq / Together / DeepSeek / OpenAI-compatible)**\n"
+                "```env\n"
+                "LLM_BASE_URL=https://api.groq.com/openai/v1\n"
+                "LLM_API_KEY=your_key_here\n"
+                "LLM_MODEL=llama-3.3-70b-versatile\n"
+                "```\n\n"
+                "**Option B: Standard OpenAI**\n"
+                "```env\n"
+                "OPENAI_API_KEY=sk-your-openai-key\n"
+                "```\n\n"
+                "**Option C: Local Ollama (Zero cost, private)**\n"
+                "```env\n"
+                "OLLAMA_BASE_URL=http://localhost:11434/v1\n"
+                "OLLAMA_MODEL=llama3.2\n"
+                "```"
+            )
             return
 
         messages = self._build_messages(question, chunks, history)
