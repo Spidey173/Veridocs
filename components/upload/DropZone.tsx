@@ -2,9 +2,9 @@
 
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, FileText, X, AlertCircle, Loader2 } from "lucide-react";
+import { Upload, FileText, X, AlertCircle, Loader2, Sparkles } from "lucide-react";
 import { useAppStore } from "@/lib/store";
-import { uploadDocuments } from "@/lib/api";
+import { uploadDocuments, getSessionInfo } from "@/lib/api";
 import type { UploadedFile } from "@/lib/store";
 
 function formatFileSize(bytes: number): string {
@@ -16,6 +16,7 @@ function formatFileSize(bytes: number): string {
 export default function DropZone() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false);
 
   const {
     isUploading,
@@ -25,6 +26,31 @@ export default function DropZone() {
     setUploadProgress,
     setLocalFileUrls,
   } = useAppStore();
+
+  const handleLoadDemo = async () => {
+    setIsLoadingDemo(true);
+    setError(null);
+    try {
+      const info = await getSessionInfo("demo-session");
+      if (info && info.file_names && info.file_names.length > 0) {
+        setSession(
+          "demo-session",
+          info.file_names.map((name) => ({
+            name,
+            size: 1150,
+            type: name.endsWith(".pdf") ? "application/pdf" : "text/plain",
+          })),
+          info.suggested_questions
+        );
+      } else {
+        setError("Demo document is not available. Please upload your own document.");
+      }
+    } catch {
+      setError("Could not load sample document. Please upload your own document.");
+    } finally {
+      setIsLoadingDemo(false);
+    }
+  };
 
   const removeFile = (index: number) => {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
@@ -115,6 +141,30 @@ export default function DropZone() {
           </p>
         </div>
       </div>
+
+      {/* Quick Start with Sample Agreement */}
+      {selectedFiles.length === 0 && !isUploading && (
+        <div className="flex items-center justify-center pt-1">
+          <button
+            type="button"
+            onClick={handleLoadDemo}
+            disabled={isLoadingDemo}
+            className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--color-accent)] transition-colors underline decoration-dotted disabled:opacity-50"
+          >
+            {isLoadingDemo ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Loading sample contract...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+                <span>Or explore with sample agreement (NDA Contract) →</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 p-3 text-xs rounded border border-red-500/20 bg-red-500/10 text-red-500">

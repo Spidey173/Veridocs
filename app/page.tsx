@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import WorkspaceLayout from "@/components/workspace/WorkspaceLayout";
 import DropZone from "@/components/upload/DropZone";
-import { FileText, Loader2, Sparkles, AlertCircle } from "lucide-react";
-import { checkBackendHealth, getSessionInfo } from "@/lib/api";
+import { Loader2, Sparkles } from "lucide-react";
+import { checkBackendHealth } from "@/lib/api";
 
 export default function Home() {
   const {
@@ -13,9 +13,6 @@ export default function Home() {
     files,
     isBackendWaking,
     setIsBackendWaking,
-    setSession,
-    setActiveDocument,
-    setPendingQuestion,
   } = useAppStore();
 
   const [hasHydrated, setHasHydrated] = useState(false);
@@ -34,40 +31,15 @@ export default function Home() {
           if (check.ok) {
             setIsBackendWaking(false);
             clearInterval(poller);
-            checkDemoSession();
           }
         }, 3000);
       } else {
         setIsBackendWaking(false);
-        checkDemoSession();
-      }
-    }
-
-    async function checkDemoSession() {
-      // If no session exists or user is on demo-session, check backend for demo-session
-      if (!sessionId || sessionId === "demo-session") {
-        try {
-          const info = await getSessionInfo("demo-session");
-          if (info && info.file_names.length > 0) {
-            setSession(
-              "demo-session",
-              info.file_names.map((name) => ({
-                name,
-                size: 1150,
-                type: name.endsWith(".pdf") ? "application/pdf" : "text/plain",
-              })),
-              info.suggested_questions
-            );
-            setActiveDocument(info.file_names[0]);
-          }
-        } catch {
-          // No pre-existing demo-session on backend, user can upload
-        }
       }
     }
 
     initWorkspace();
-  }, [sessionId, setIsBackendWaking, setSession, setActiveDocument]);
+  }, [setIsBackendWaking]);
 
   if (!hasHydrated) {
     return (

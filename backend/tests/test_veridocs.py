@@ -185,15 +185,17 @@ def test_granular_passage_chunking(test_client: TestClient, sample_pdf_bytes: by
 def test_rate_limiting_and_byok_bypass(test_client: TestClient, sample_txt_bytes: bytes):
     """Verify rate limiter blocks excess requests and custom key header bypasses limit."""
     from rate_limiter import _limiter
+    from config import get_settings
     _limiter.reset()
+    settings = get_settings()
 
     # Upload test document
     files = [("files", ("rate_doc.txt", sample_txt_bytes, "text/plain"))]
     sid = test_client.post("/api/upload", files=files).json()["session_id"]
 
     # Fill rate limit bucket
-    for _ in range(20):
-        _limiter.check("query:testclient", max_requests=20)
+    for _ in range(settings.RATE_LIMIT_QUERY_PER_HOUR):
+        _limiter.check("query:testclient", max_requests=settings.RATE_LIMIT_QUERY_PER_HOUR)
 
     # Next standard request should be rate limited
     res = test_client.post("/api/query", json={"session_id": sid, "question": "test"})

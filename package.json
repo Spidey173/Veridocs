@@ -12,7 +12,7 @@
     "lint": "eslint",
     "test": "npm run test:frontend && npm run test:backend",
     "test:frontend": "vitest run",
-    "test:backend": ".venv/bin/python -m pytest backend/tests/test_veridocs.py || python3 -m pytest backend/tests/test_veridocs.py"
+    "test:backend": ".venv/bin/python -m pytest backend/tests/test_veridocs.py"
   },
   "dependencies": {
     "lucide-react": "^1.17.0",

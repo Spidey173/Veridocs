@@ -51,7 +51,7 @@ class Settings:
             # Native Groq support out of the box
             self.LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
             self.LLM_API_KEY: str = groq_key
-            self.LLM_MODEL: str = explicit_model or "llama-3.3-70b-versatile"
+            self.LLM_MODEL: str = explicit_model or "openai/gpt-oss-120b"
         elif openai_key:
             # Native OpenAI support
             self.LLM_BASE_URL: str = "https://api.openai.com/v1"
@@ -66,7 +66,7 @@ class Settings:
             # User provided LLM_API_KEY without base URL: auto-detect provider
             if explicit_key.startswith("gsk_"):
                 self.LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
-                self.LLM_MODEL: str = explicit_model or "llama-3.3-70b-versatile"
+                self.LLM_MODEL: str = explicit_model or "openai/gpt-oss-120b"
             else:
                 self.LLM_BASE_URL: str = "https://api.openai.com/v1"
                 self.LLM_MODEL: str = explicit_model or "gpt-4o-mini"

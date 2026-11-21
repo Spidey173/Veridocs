@@ -29,9 +29,24 @@ class LLMService:
         model: Optional[str] = None,
     ):
         settings = get_settings()
-        self.base_url = (base_url or settings.LLM_BASE_URL or "").strip()
         self.api_key = (api_key or settings.LLM_API_KEY or "").strip()
-        self.model = (model or settings.LLM_MODEL or "gpt-4o-mini").strip()
+        self.base_url = (base_url or settings.LLM_BASE_URL or "").strip()
+        self.model = (model or settings.LLM_MODEL or "").strip()
+
+        # Provider auto-detection for user keys passed at runtime via headers or UI
+        if self.api_key and not self.base_url:
+            if self.api_key.startswith("gsk_"):
+                self.base_url = "https://api.groq.com/openai/v1"
+                if not self.model or self.model == "gpt-4o-mini":
+                    self.model = "openai/gpt-oss-120b"
+            elif self.api_key.startswith("sk-"):
+                self.base_url = "https://api.openai.com/v1"
+                if not self.model:
+                    self.model = "gpt-4o-mini"
+
+        if not self.model:
+            self.model = "openai/gpt-oss-120b" if "groq.com" in self.base_url else "gpt-4o-mini"
+
         self.temperature = settings.LLM_TEMPERATURE
         self.max_tokens = settings.LLM_MAX_TOKENS
 
@@ -98,11 +113,16 @@ class LLMService:
 
         messages = self._build_messages(question, chunks, history)
         try:
+            extra_body = {}
+            if "groq.com" in self.base_url and "gpt-oss" in self.model:
+                extra_body["reasoning_format"] = "hidden"
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                extra_body=extra_body if extra_body else None,
             )
             return response.choices[0].message.content or ""
         except Exception as e:
@@ -124,7 +144,7 @@ class LLMService:
                 "```env\n"
                 "LLM_BASE_URL=https://api.groq.com/openai/v1\n"
                 "LLM_API_KEY=your_key_here\n"
-                "LLM_MODEL=llama-3.3-70b-versatile\n"
+                "LLM_MODEL=openai/gpt-oss-120b\n"
                 "```\n\n"
                 "**Option B: Standard OpenAI**\n"
                 "```env\n"
@@ -140,12 +160,17 @@ class LLMService:
 
         messages = self._build_messages(question, chunks, history)
         try:
+            extra_body = {}
+            if "groq.com" in self.base_url and "gpt-oss" in self.model:
+                extra_body["reasoning_format"] = "hidden"
+
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 stream=True,
+                extra_body=extra_body if extra_body else None,
             )
             for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:

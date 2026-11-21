@@ -192,11 +192,20 @@ export const useAppStore = create<AppState>()(
     {
       name: "veridocs-workspace-storage",
       partialize: (state) => ({
-        sessionId: state.sessionId,
-        files: state.files,
-        activeDocumentName: state.activeDocumentName,
-        messages: state.messages.slice(-20),
+        sessionId: state.sessionId === "demo-session" ? null : state.sessionId,
+        files: state.sessionId === "demo-session" ? [] : state.files,
+        activeDocumentName: state.sessionId === "demo-session" ? null : state.activeDocumentName,
+        messages: state.sessionId === "demo-session" ? [] : state.messages.slice(-20),
       }),
+      onRehydrateStorage: () => (state) => {
+        // Automatically reset if rehydrated session was demo-session or has no files
+        if (state && (state.sessionId === "demo-session" || !state.files || state.files.length === 0)) {
+          state.sessionId = null;
+          state.files = [];
+          state.activeDocumentName = null;
+          state.messages = [];
+        }
+      },
     }
   )
 );
