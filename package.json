@@ -10,7 +10,9 @@
     "build": "NEXT_TELEMETRY_DISABLED=1 next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "pytest backend/tests"
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "vitest run",
+    "test:backend": ".venv/bin/python -m pytest backend/tests/test_veridocs.py || python3 -m pytest backend/tests/test_veridocs.py"
   },
   "dependencies": {
     "lucide-react": "^1.17.0",
@@ -30,6 +32,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.9"
   }
 }

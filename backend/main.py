@@ -32,6 +32,11 @@ def seed_demo_session_if_needed():
         if not sample_path.exists():
             sample_path = settings.UPLOAD_DIR / "sample_agreement.pdf"
 
+        if not sample_path.exists():
+            from pdf_processor import generate_sample_pdf_bytes
+            sample_path = settings.UPLOAD_DIR / "sample_agreement.pdf"
+            sample_path.write_bytes(generate_sample_pdf_bytes())
+
         if sample_path.exists():
             logger.info("Indexing sample_agreement.pdf into demo-session...")
             pages = extract_text_from_file(sample_path, filename="sample_agreement.pdf")
@@ -57,6 +62,7 @@ async def lifespan(app: FastAPI):
     """Initialize SQLite database schema and seed demo document on startup."""
     logger.info("Initializing Veridocs SQLite database...")
     database.init_db()
+    database.cleanup_expired_sessions()
     seed_demo_session_if_needed()
     logger.info("Veridocs backend ready.")
     yield
@@ -72,9 +78,11 @@ app = FastAPI(
 )
 
 # CORS middleware
+origins = settings.CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS or ["*"],
+    allow_origins=origins if origins else ["*"],
+    allow_origin_regex=r"https://.*\.vercel\.app" if any("vercel.app" in o for o in origins) else None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -83,6 +83,38 @@ export function getApiBase(): string {
 }
 
 /**
+ * Retrieve user custom API key stored locally in browser.
+ */
+export function getUserApiKey(): string {
+  if (typeof window !== "undefined" && window.localStorage) {
+    return window.localStorage.getItem("veridocs_user_api_key") || "";
+  }
+  if (typeof localStorage !== "undefined") {
+    return localStorage.getItem("veridocs_user_api_key") || "";
+  }
+  return "";
+}
+
+/**
+ * Persist user custom API key strictly in browser localStorage.
+ */
+export function setUserApiKey(key: string): void {
+  const storage = typeof window !== "undefined" && window.localStorage
+    ? window.localStorage
+    : typeof localStorage !== "undefined"
+    ? localStorage
+    : null;
+
+  if (storage) {
+    if (key.trim()) {
+      storage.setItem("veridocs_user_api_key", key.trim());
+    } else {
+      storage.removeItem("veridocs_user_api_key");
+    }
+  }
+}
+
+/**
  * Check backend health with timeout for waking up cold start detection.
  */
 export async function checkBackendHealth(): Promise<{ ok: boolean; waking: boolean; data?: HealthStatus }> {
@@ -179,9 +211,15 @@ export async function* streamQuery(
   activeFiles?: string[]
 ): AsyncGenerator<StreamEvent> {
   const base = getApiBase();
+  const userKey = getUserApiKey();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (userKey) {
+    headers["X-LLM-API-Key"] = userKey;
+  }
+
   const res = await fetch(`${base}/api/query/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       session_id: sessionId,
       question,

@@ -3,69 +3,175 @@
 << /Type /Catalog /Pages 2 0 R >>
 endobj
 2 0 obj
-<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R 14 0 R] /Count 6 >>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>
-endobj
-4 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>
-endobj
-5 0 obj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
 endobj
-6 0 obj
-<< /Length 410 >>
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+5 0 obj
+<< /Length 962 >>
 stream
 BT
-/F1 16 Tf
-50 720 Td
-(VERIDOCS MASTER SERVICES AGREEMENT) Tj
-/F1 12 Tf
-0 -40 Td
-(Section 1. Scope of Services) Tj
-0 -25 Td
-(Provider shall deliver document retrieval and citation verification services.) Tj
-0 -30 Td
-(Section 2. Financial and Payment Terms) Tj
-0 -25 Td
-(All invoices are payable within 30 calendar days of invoice receipt.) Tj
-0 -25 Td
-(Late balances accrue interest at 1.5% per month.) Tj
+/F1 11 Tf
+50 750 Td
+(MASTER CLOUD SERVICES AGREEMENT) Tj
+0 -20 Td
+(This Master Cloud Services Agreement \(the Agreement\) is entered into as of January 15, 2025 by and between:) Tj
+0 -20 Td
+(Veridocs Systems Inc. \(Vendor\), a Delaware corporation with offices at 100 Enterprise Way, Suite 400, San Francisco, CA 94105, and) Tj
+0 -20 Td
+(Acme Global Logistics LLC \(Customer\), a Delaware limited liability company with offices at 500 Commerce Blvd, Chicago, IL 60601.) Tj
+0 -20 Td
+() Tj
+0 -20 Td
+(RECITALS:) Tj
+0 -20 Td
+(WHEREAS, Vendor provides an enterprise document intelligence and retrieval-augmented verification software-as-a-service platform; and) Tj
+0 -20 Td
+(WHEREAS, Customer desires to subscribe to and utilize the Platform for its corporate logistics operations under the terms and conditions set forth herein.) Tj
+0 -20 Td
+(NOW, THEREFORE, in consideration of the mutual covenants herein contained, the parties agree as follows:) Tj
+0 -20 Td
 ET
 endstream
 endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
 7 0 obj
-<< /Length 405 >>
+<< /Length 845 >>
 stream
 BT
-/F1 14 Tf
-50 720 Td
-(Section 3. Limitation of Liability and SLA) Tj
-/F1 12 Tf
-0 -40 Td
-(Provider guarantees monthly platform availability of at least 99.9% uptime.) Tj
-0 -30 Td
-(Total cumulative aggregate liability of either party shall not exceed USD 500,000.) Tj
-0 -30 Td
-(Section 4. Governing Law and Arbitration) Tj
-0 -25 Td
-(This agreement is governed by the laws of the State of Delaware.) Tj
+/F1 11 Tf
+50 750 Td
+(SECTION 1: SCOPE OF SERVICES & ACCESS RIGHTS) Tj
+0 -20 Td
+(1.1 Subscription Grant. Vendor grants Customer a non-exclusive, non-transferable, worldwide subscription to access and use the Veridocs Platform during the Subscription Term.) Tj
+0 -20 Td
+(1.2 Authorized Users. Access is limited to Customer employees and contractors designated as Authorized Users, not to exceed 250 named seats without additional licensing fees.) Tj
+0 -20 Td
+(1.3 Permitted Data Types. Customer may upload PDF, TXT, and related unstructured documents for parsing, vector embedding, and real-time semantic verification.) Tj
+0 -20 Td
+(1.4 Prohibited Use. Customer shall not reverse engineer, decompile, or attempt to derive the underlying vector retrieval algorithms, nor use the platform for high-risk autonomous defense systems.) Tj
+0 -20 Td
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 9 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+9 0 obj
+<< /Length 713 >>
+stream
+BT
+/F1 11 Tf
+50 750 Td
+(SECTION 2: FEES, TAXES & PAYMENT SCHEDULE) Tj
+0 -20 Td
+(2.1 Annual Subscription Fee. The baseline annual platform fee is USD $120,000, invoiced annually in advance on thirty \(30\) days payment terms.) Tj
+0 -20 Td
+(2.2 Overages. Ingestion volume exceeding 50,000 document pages per calendar month shall be billed at $0.02 per indexed page.) Tj
+0 -20 Td
+(2.3 Late Penalties. Any undisputed invoice unpaid after thirty \(30\) calendar days from receipt shall accrue interest at 1.5% per month or the statutory maximum.) Tj
+0 -20 Td
+(2.4 Taxes. All amounts payable are exclusive of federal, state, local, or value-added taxes, which remain the sole responsibility of Customer.) Tj
+0 -20 Td
+ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 11 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+11 0 obj
+<< /Length 775 >>
+stream
+BT
+/F1 11 Tf
+50 750 Td
+(SECTION 3: SERVICE LEVEL AGREEMENT \(SLA\) & UPTIME) Tj
+0 -20 Td
+(3.1 Guaranteed Availability. Vendor guarantees a Monthly Uptime Percentage of at least 99.9% across all production API and web interfaces.) Tj
+0 -20 Td
+(3.2 Exclusions. Downtime shall exclude Scheduled Maintenance \(not to exceed 4 hours per calendar month with 48 hours advance notice\) and Force Majeure events.) Tj
+0 -20 Td
+(3.3 Service Credits. If Monthly Uptime drops below 99.9%, Customer is eligible for service credits as follows:) Tj
+0 -20 Td
+(    - 99.0% to 99.89%: 10% credit of monthly billing equivalent) Tj
+0 -20 Td
+(    - 95.0% to 98.99%: 25% credit of monthly billing equivalent) Tj
+0 -20 Td
+(    - Below 95.0%: 50% credit of monthly billing equivalent.) Tj
+0 -20 Td
+ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 13 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+13 0 obj
+<< /Length 757 >>
+stream
+BT
+/F1 11 Tf
+50 750 Td
+(SECTION 4: DATA PROTECTION & PRIVACY) Tj
+0 -20 Td
+(4.1 Customer Data Ownership. Customer retains all right, title, and ownership in Customer Data uploaded to the Platform.) Tj
+0 -20 Td
+(4.2 Security Controls. Vendor implements AES-256 encryption at rest and TLS 1.3 in transit. Customer document vectors are stored in isolated SQLite partition databases.) Tj
+0 -20 Td
+(4.3 LLM Data Isolation. Vendor warrants that Customer Data and query texts are never utilized to train third-party foundation models without express written authorization.) Tj
+0 -20 Td
+(4.4 Data Retention & Deletion. Upon contract termination, Vendor shall permanently expunge all Customer documents and vector embeddings within thirty \(30\) days.) Tj
+0 -20 Td
+ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 15 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+15 0 obj
+<< /Length 754 >>
+stream
+BT
+/F1 11 Tf
+50 750 Td
+(SECTION 5: LIMITATION OF LIABILITY & GOVERNING LAW) Tj
+0 -20 Td
+(5.1 Liability Cap. Under no circumstances shall either party aggregate cumulative liability arising out of this Agreement exceed USD $500,000.) Tj
+0 -20 Td
+(5.2 Consequential Damages Waiver. Neither party shall be liable for lost profits, loss of goodwill, punitive, or consequential damages.) Tj
+0 -20 Td
+(5.3 IP Indemnification. Vendor shall defend and indemnify Customer against third-party claims alleging that the Platform infringes any US patent or copyright.) Tj
+0 -20 Td
+(5.4 Governing Law. This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to conflict of laws principles.) Tj
+0 -20 Td
 ET
 endstream
 endobj
 xref
-0 8
+0 16
 0000000000 65535 f 
 0000000009 00000 n 
 0000000058 00000 n 
-0000000121 00000 n 
-0000000247 00000 n 
-0000000373 00000 n 
-0000000443 00000 n 
-0000000903 00000 n 
+0000000148 00000 n 
+0000000218 00000 n 
+0000000344 00000 n 
+0000001357 00000 n 
+0000001483 00000 n 
+0000002379 00000 n 
+0000002505 00000 n 
+0000003269 00000 n 
+0000003397 00000 n 
+0000004224 00000 n 
+0000004352 00000 n 
+0000005161 00000 n 
+0000005289 00000 n 
 trailer
-<< /Size 8 /Root 1 0 R >>
+<< /Size 16 /Root 1 0 R >>
 startxref
-1358
+6095
 %%EOF

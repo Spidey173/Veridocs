@@ -7,7 +7,7 @@ import uuid
 import logging
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from config import get_settings, get_model_registry
@@ -15,6 +15,7 @@ from models import UploadResponse, SessionInfo
 import database
 from pdf_processor import extract_text_from_file, chunk_text, get_document_metadata
 from session_store import save_upload_file_stream, safe_delete_file
+from rate_limiter import check_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["documents"])
@@ -22,11 +23,19 @@ router = APIRouter(tags=["documents"])
 
 @router.post("/api/upload", response_model=UploadResponse)
 async def upload_documents(
+    request: Request,
     files: List[UploadFile] = File(...),
     session_id: Optional[str] = Form(None),
 ):
     """Upload documents (PDF, TXT), extract text, compute Fastembed embeddings, and persist to SQLite."""
     settings = get_settings()
+
+    # Abuse protection: per-IP rate limiting
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    limit_err = check_rate_limit(client_ip, action="upload")
+    if limit_err:
+        raise HTTPException(status_code=429, detail=limit_err)
+
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
 
@@ -65,6 +74,11 @@ async def upload_documents(
             pages = extract_text_from_file(save_path, filename=filename)
             if not pages:
                 failed_files.append(f"{filename} (no extractable text)")
+                safe_delete_file(save_path)
+                continue
+
+            if len(pages) > settings.MAX_PDF_PAGES:
+                failed_files.append(f"{filename} (exceeds {settings.MAX_PDF_PAGES} page limit; has {len(pages)} pages)")
                 safe_delete_file(save_path)
                 continue
 

@@ -163,3 +163,57 @@ def test_delete_session(test_client: TestClient, sample_txt_bytes: bytes):
 
     check_res = test_client.get(f"/api/sessions/{sid}")
     assert check_res.status_code == 404
+
+
+def test_granular_passage_chunking(test_client: TestClient, sample_pdf_bytes: bytes):
+    """Verify ~500-char granular passage chunking creates focused passages, not 1-per-page."""
+    files = [("files", ("multipage.pdf", sample_pdf_bytes, "application/pdf"))]
+    upload_res = test_client.post("/api/upload", files=files)
+    assert upload_res.status_code == 200
+    chunk_count = upload_res.json()["chunk_count"]
+    # 6 pages with 650-800 chars each should produce at least 10 granular chunks
+    assert chunk_count >= 10, f"Expected >= 10 granular chunks, got {chunk_count}"
+
+
+def test_rate_limiting_and_byok_bypass(test_client: TestClient, sample_txt_bytes: bytes):
+    """Verify rate limiter blocks excess requests and custom key header bypasses limit."""
+    from rate_limiter import _limiter
+    _limiter.reset()
+
+    # Upload test document
+    files = [("files", ("rate_doc.txt", sample_txt_bytes, "text/plain"))]
+    sid = test_client.post("/api/upload", files=files).json()["session_id"]
+
+    # Fill rate limit bucket
+    for _ in range(20):
+        _limiter.check("query:testclient", max_requests=20)
+
+    # Next standard request should be rate limited
+    res = test_client.post("/api/query", json={"session_id": sid, "question": "test"})
+    assert res.status_code == 429
+    assert "rate limit" in res.json()["detail"].lower()
+
+    # Request with custom API key header bypasses rate limit
+    byok_res = test_client.post(
+        "/api/query",
+        json={"session_id": sid, "question": "test"},
+        headers={"X-LLM-API-Key": "sk-custom-user-key"}
+    )
+    # Status code is 200 (or if key invalid, not 429)
+    assert byok_res.status_code != 429
+
+    _limiter.reset()
+
+
+def test_upload_file_size_limit(test_client: TestClient):
+    """Verify rejection of files exceeding the 10 MB limit."""
+    from config import get_settings
+    settings = get_settings()
+
+    # Create dummy 11MB payload
+    oversized = b"x" * (11 * 1024 * 1024)
+    files = [("files", ("huge.txt", oversized, "text/plain"))]
+    res = test_client.post("/api/upload", files=files)
+    assert res.status_code == 400
+    assert "exceeds" in res.json()["detail"].lower()
+

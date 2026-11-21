@@ -1,16 +1,38 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Send, Loader2, Bot, User, CornerDownLeft, Sparkles } from "lucide-react";
+import { Send, Loader2, Bot, User, CornerDownLeft, Sparkles, Key, Check, X } from "lucide-react";
 import { useAppStore, type ChatMessage } from "@/lib/store";
-import { streamQuery, type CitationInfo, type CitationCheckResult } from "@/lib/api";
+import { streamQuery, getUserApiKey, setUserApiKey, type CitationInfo, type CitationCheckResult } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import VerificationDrawer from "./VerificationDrawer";
 
 export default function ChatPanel() {
   const [input, setInput] = useState("");
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [customKeyInput, setCustomKeyInput] = useState("");
+  const [hasCustomKey, setHasCustomKey] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const k = getUserApiKey();
+    setHasCustomKey(Boolean(k));
+    if (k) setCustomKeyInput(k);
+  }, []);
+
+  const handleSaveKey = () => {
+    setUserApiKey(customKeyInput);
+    setHasCustomKey(Boolean(customKeyInput.trim()));
+    setShowKeyModal(false);
+  };
+
+  const handleClearKey = () => {
+    setUserApiKey("");
+    setCustomKeyInput("");
+    setHasCustomKey(false);
+    setShowKeyModal(false);
+  };
 
   const {
     sessionId,
@@ -216,8 +238,70 @@ export default function ChatPanel() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Box */}
-      <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+      {/* Input Box Area */}
+      <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-2">
+        {/* Key Status & Rate Limit Indicator */}
+        <div className="flex items-center justify-between px-0.5 text-[11px] text-[var(--text-muted)]">
+          <span className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${hasCustomKey ? "bg-emerald-500" : "bg-amber-500"}`} />
+            {hasCustomKey ? "Custom API key active (unlimited)" : "Public demo (20 queries/hr per IP)"}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowKeyModal(true)}
+            className="hover:text-[var(--color-accent)] underline decoration-dotted transition-colors flex items-center gap-1"
+          >
+            <Key className="w-3 h-3" />
+            {hasCustomKey ? "Edit Key" : "Add Key (Bypass limits)"}
+          </button>
+        </div>
+
+        {/* Custom Key Modal */}
+        {showKeyModal && (
+          <div className="p-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] space-y-2 text-xs shadow-md">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-[var(--color-accent)]" /> Bring Your Own API Key
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowKeyModal(false)}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[11px] text-[var(--text-secondary)] leading-tight">
+              Paste an OpenAI or Groq key (<code className="bg-[var(--bg-canvas)] px-1 py-0.5 rounded">sk-...</code> / <code className="bg-[var(--bg-canvas)] px-1 py-0.5 rounded">gsk_...</code>). Stored locally in your browser only. Never saved to server disk or logs.
+            </p>
+            <input
+              type="password"
+              value={customKeyInput}
+              onChange={(e) => setCustomKeyInput(e.target.value)}
+              placeholder="Paste sk-... or gsk_... key"
+              className="w-full p-2 text-xs rounded border border-[var(--border-default)] bg-[var(--bg-canvas)] text-[var(--text-primary)] outline-none focus:border-[var(--color-accent)]"
+            />
+            <div className="flex items-center justify-end gap-2 pt-1">
+              {hasCustomKey && (
+                <button
+                  type="button"
+                  onClick={handleClearKey}
+                  className="px-2.5 py-1 text-[11px] rounded border border-[var(--border-default)] hover:bg-[var(--bg-surface)] text-[var(--color-error)]"
+                >
+                  Clear Key
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleSaveKey}
+                className="px-3 py-1 text-[11px] rounded bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] font-medium flex items-center gap-1"
+              >
+                <Check className="w-3 h-3" /> Save
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="relative border border-[var(--border-default)] rounded-lg focus-within:border-[var(--color-accent)] bg-[var(--bg-canvas)] transition-colors">
           <textarea
             ref={inputRef}

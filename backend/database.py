@@ -186,3 +186,54 @@ def list_sessions() -> List[Dict[str, Any]]:
                 "chunk_count": cnt,
             })
         return res
+
+
+def cleanup_expired_sessions(max_age_seconds: float = 86400, max_sessions: int = 20) -> int:
+    """
+    Remove expired or excess sessions to prevent unbounded disk growth.
+    Always preserves 'demo-session'.
+    """
+    settings = get_settings()
+    now = time.time()
+    cutoff = now - max_age_seconds
+    deleted_count = 0
+
+    with get_db_connection() as conn:
+        # Find sessions older than cutoff (excluding demo-session)
+        expired = conn.execute(
+            "SELECT session_id, file_names FROM sessions WHERE session_id != 'demo-session' AND created_at < ?",
+            (cutoff,)
+        ).fetchall()
+
+        # Also find oldest sessions if total exceeds max_sessions
+        total = conn.execute("SELECT COUNT(*) as c FROM sessions WHERE session_id != 'demo-session'").fetchone()["c"]
+        excess = []
+        if total > max_sessions:
+            limit = total - max_sessions
+            excess = conn.execute(
+                "SELECT session_id, file_names FROM sessions WHERE session_id != 'demo-session' ORDER BY created_at ASC LIMIT ?",
+                (limit,)
+            ).fetchall()
+
+        to_remove = {r["session_id"]: r["file_names"] for r in (list(expired) + list(excess))}
+
+        for sid, fnames_json in to_remove.items():
+            conn.execute("DELETE FROM chunks WHERE session_id = ?", (sid,))
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (sid,))
+            deleted_count += 1
+
+            # Remove associated files from upload dir
+            try:
+                files = json.loads(fnames_json)
+                for f in files:
+                    fp = settings.UPLOAD_DIR / f"{sid}_{f}"
+                    if fp.exists():
+                        fp.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        if deleted_count > 0:
+            conn.commit()
+            logger.info(f"Cleaned up {deleted_count} expired/excess sessions.")
+
+    return deleted_count

@@ -69,13 +69,18 @@ class Settings:
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.DATABASE_PATH: str = str(self.DATA_DIR / "veridocs.db")
 
-        # Upload constraints
-        self.MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
+        # Upload & page constraints
+        self.MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
+        self.MAX_PDF_PAGES: int = int(os.getenv("MAX_PDF_PAGES", "50"))
         self.ALLOWED_EXTENSIONS: set = {".pdf", ".txt"}
 
+        # Rate limiting constraints (per IP per hour)
+        self.RATE_LIMIT_QUERY_PER_HOUR: int = int(os.getenv("RATE_LIMIT_QUERY_PER_HOUR", "20"))
+        self.RATE_LIMIT_UPLOAD_PER_HOUR: int = int(os.getenv("RATE_LIMIT_UPLOAD_PER_HOUR", "10"))
+
         # CORS
-        origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
-        self.CORS_ORIGINS: list = [o.strip() for o in origins if o.strip()]
+        raw_origins = os.getenv("FRONTEND_ORIGIN") or os.getenv("CORS_ORIGINS") or "http://localhost:3000,http://127.0.0.1:3000"
+        self.CORS_ORIGINS: list = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
     def is_llm_configured(self) -> bool:
         """Check if an LLM is configured (either OpenAI key or custom/Ollama base URL)."""
