@@ -75,4 +75,38 @@ describe("useAppStore", () => {
     useAppStore.getState().clearSession();
     expect(useAppStore.getState().suggestedQuestions).toHaveLength(0);
   });
+
+  it("persists documents and session info across simulated page refresh", () => {
+    useAppStore.getState().setSession("session-123", [
+      { name: "test_report.pdf", size: 2048, type: "application/pdf" },
+    ]);
+    useAppStore.getState().setActiveDocument("test_report.pdf");
+
+    const state = useAppStore.getState();
+    expect(state.sessionId).toBe("session-123");
+    expect(state.files).toHaveLength(1);
+    expect(state.files[0].name).toBe("test_report.pdf");
+    expect(state.activeDocumentName).toBe("test_report.pdf");
+  });
+
+  it("resets cleanly to empty dropzone when a stale session is cleared", () => {
+    useAppStore.getState().setSession("stale-session-456", [
+      { name: "stale_doc.pdf", size: 1024, type: "application/pdf" },
+    ]);
+    useAppStore.getState().addMessage({
+      id: "msg-old",
+      role: "user",
+      content: "old question",
+      timestamp: "12:00",
+    });
+
+    // Clear stale session
+    useAppStore.getState().clearSession();
+
+    const state = useAppStore.getState();
+    expect(state.sessionId).toBeNull();
+    expect(state.files).toHaveLength(0);
+    expect(state.activeDocumentName).toBeNull();
+    expect(state.messages).toHaveLength(0);
+  });
 });

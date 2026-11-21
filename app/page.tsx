@@ -5,7 +5,7 @@ import { useAppStore } from "@/lib/store";
 import WorkspaceLayout from "@/components/workspace/WorkspaceLayout";
 import DropZone from "@/components/upload/DropZone";
 import { Loader2, Sparkles } from "lucide-react";
-import { checkBackendHealth } from "@/lib/api";
+import { checkBackendHealth, getSessionInfo } from "@/lib/api";
 
 export default function Home() {
   const {
@@ -13,6 +13,7 @@ export default function Home() {
     files,
     isBackendWaking,
     setIsBackendWaking,
+    clearSession,
   } = useAppStore();
 
   const [hasHydrated, setHasHydrated] = useState(false);
@@ -22,6 +23,18 @@ export default function Home() {
     setHasHydrated(true);
 
     async function initWorkspace() {
+      const verifyPersistedSession = async () => {
+        const currentSid = useAppStore.getState().sessionId;
+        if (currentSid) {
+          try {
+            await getSessionInfo(currentSid);
+          } catch {
+            // If session expired or 404s (e.g. backend restarted), reset cleanly to empty dropzone
+            clearSession();
+          }
+        }
+      };
+
       const health = await checkBackendHealth();
       if (health.waking) {
         setIsBackendWaking(true);
@@ -31,15 +44,17 @@ export default function Home() {
           if (check.ok) {
             setIsBackendWaking(false);
             clearInterval(poller);
+            await verifyPersistedSession();
           }
         }, 3000);
       } else {
         setIsBackendWaking(false);
+        await verifyPersistedSession();
       }
     }
 
     initWorkspace();
-  }, [setIsBackendWaking]);
+  }, [setIsBackendWaking, clearSession]);
 
   if (!hasHydrated) {
     return (

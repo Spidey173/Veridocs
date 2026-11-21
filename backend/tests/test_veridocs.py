@@ -197,10 +197,14 @@ def test_rate_limiting_and_byok_bypass(test_client: TestClient, sample_txt_bytes
     for _ in range(settings.RATE_LIMIT_QUERY_PER_HOUR):
         _limiter.check("query:testclient", max_requests=settings.RATE_LIMIT_QUERY_PER_HOUR)
 
-    # Next standard request should be rate limited
+    # Next standard request should be rate limited on both endpoints
     res = test_client.post("/api/query", json={"session_id": sid, "question": "test"})
     assert res.status_code == 429
     assert "rate limit" in res.json()["detail"].lower()
+
+    stream_res = test_client.post("/api/query/stream", json={"session_id": sid, "question": "test"})
+    assert stream_res.status_code == 429
+    assert "rate limit" in stream_res.json()["detail"].lower()
 
     # Request with custom API key header bypasses rate limit
     byok_res = test_client.post(

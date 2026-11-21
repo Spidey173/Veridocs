@@ -74,5 +74,21 @@ describe("API Client", () => {
     setUserApiKey("");
     expect(getUserApiKey()).toBe("");
   });
+
+  it("streamQuery throws error with server detail when rate limit 429 is received", async () => {
+    const { streamQuery } = await import("../lib/api");
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({
+        detail: "Rate limit reached (20 requests per hour). Resets in 45 minutes.",
+      }),
+    });
+
+    const generator = streamQuery("demo-session", "Any question?");
+    await expect(generator.next()).rejects.toThrow(
+      "Rate limit reached (20 requests per hour). Resets in 45 minutes."
+    );
+  });
 });
 

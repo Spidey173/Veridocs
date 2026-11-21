@@ -150,7 +150,9 @@ export default function ChatPanel() {
     } catch (err: unknown) {
       const rawMsg = err instanceof Error ? err.message : "Failed to query document.";
       let userFriendlyMsg = `Error: ${rawMsg}`;
-      if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
+      if (rawMsg.toLowerCase().includes("rate limit")) {
+        userFriendlyMsg = `⚠️ **Rate Limit Reached**: ${rawMsg}`;
+      } else if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
         userFriendlyMsg = "⚠️ **Connection failed**: The backend on Render may still be spinning up from cold sleep (~20–30s). Please wait 15 seconds and try sending your question again.";
       }
       updateMessage(aiMsgId, {

@@ -216,14 +216,10 @@ async def stream_query_endpoint(request: Request, body: StreamQueryRequest):
     x_model = request.headers.get("X-LLM-Model")
 
     limit_err = check_rate_limit(client_ip, action="query", has_custom_key=bool(x_api_key))
+    if limit_err:
+        raise HTTPException(status_code=429, detail=limit_err)
 
     async def event_generator():
-        if limit_err:
-            yield _sse_event("token", {
-                "text": f"⚠️ **Rate Limit Reached**: {limit_err}"
-            })
-            yield _sse_event("done", {})
-            return
 
         # 1. Handle small talk directly: skip retrieval and citation check
         small_talk_reply = detect_small_talk(body.question)

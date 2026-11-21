@@ -192,22 +192,17 @@ export const useAppStore = create<AppState>()(
     {
       name: "veridocs-workspace-storage",
       partialize: (state) => ({
+        sessionId: state.sessionId,
+        files: state.files,
+        activeDocumentName: state.activeDocumentName,
+        messages: state.messages,
+        suggestedQuestions: state.suggestedQuestions,
         leftSidebarCollapsed: state.leftSidebarCollapsed,
         rightSidebarCollapsed: state.rightSidebarCollapsed,
         leftSidebarWidth: state.leftSidebarWidth,
         rightSidebarWidth: state.rightSidebarWidth,
         pdfScale: state.pdfScale,
       }),
-      onRehydrateStorage: () => (state) => {
-        // Ensure fresh visits always begin at the clean document upload screen
-        if (state) {
-          state.sessionId = null;
-          state.files = [];
-          state.activeDocumentName = null;
-          state.messages = [];
-          state.highlightedCitation = null;
-        }
-      },
     }
   )
 );
