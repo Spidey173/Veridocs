@@ -11,9 +11,9 @@ echo "  - Backend: http://localhost:8000"
 echo "=========================================================="
 
 # Ensure frontend dependencies
-if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
+if [ ! -d "$ROOT_DIR/node_modules" ]; then
     echo "Installing frontend dependencies..."
-    (cd "$ROOT_DIR/frontend" && npm install)
+    npm install
 fi
 
 # Detect Python interpreter
@@ -35,8 +35,7 @@ BACKEND_PID=$!
 echo "Starting frontend on http://localhost:3000..."
 (
   export NEXT_PUBLIC_API_URL="http://localhost:8000"
-  cd "$ROOT_DIR/frontend"
-  npm run dev
+  npm run dev:frontend
 ) &
 FRONTEND_PID=$!
 
@@ -48,6 +47,5 @@ cleanup() {
     exit 0
 }
 
-trap cleanup SIGINT SIGTERM EXIT
-
+trap cleanup INT TERM EXIT
 wait

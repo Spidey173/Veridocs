@@ -3,7 +3,6 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
-const frontendDir = path.join(rootDir, 'frontend');
 const backendDir = path.join(rootDir, 'backend');
 
 console.log('==========================================================');
@@ -31,8 +30,8 @@ const backend = spawn(pythonCmd, ['-m', 'uvicorn', 'main:app', '--host', '0.0.0.
 });
 
 // 2. Spawn Next.js frontend
-const frontend = spawn(npmCmd, ['run', 'dev'], {
-  cwd: frontendDir,
+const frontend = spawn(npmCmd, ['run', 'dev:frontend'], {
+  cwd: rootDir,
   stdio: 'inherit',
   shell: true,
   env: {

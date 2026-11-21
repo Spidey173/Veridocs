@@ -23,13 +23,17 @@ ENV/
 htmlcov/
 *.log
 
-# Sensitive environment variables and secrets (prevents baking keys into image)
+# Sensitive environment variables and secrets
 .env
 .env.*
 !.env.example
 
-# Local uploads and test files
-uploads/
+# Local uploads and databases
+uploads/*
+!uploads/.gitkeep
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
 *.pdf
-*.docx
-
+!sample_agreement.pdf

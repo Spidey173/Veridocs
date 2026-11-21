@@ -14,11 +14,9 @@ env/
 .coverage
 .pytest_cache/
 
-# Node
+# Node & Next.js
 node_modules/
-frontend/node_modules/
 .next/
-frontend/.next/
 dist/
 out/
 build/
@@ -32,7 +30,7 @@ backend/data/*
 uploads/
 *.pdf
 !backend/sample_agreement.pdf
-!frontend/public/sample_agreement.pdf
+!public/sample_agreement.pdf
 
 # Testing / Reports
 playwright-report/

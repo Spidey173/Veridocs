@@ -45,7 +45,10 @@ Section 3. Liability. Maximum cumulative liability is capped at $500,000."""
 
 @pytest.fixture
 def sample_pdf_bytes():
-    pdf_path = Path(__file__).resolve().parent.parent / "uploads" / "sample_agreement.pdf"
+    pdf_path = Path(__file__).resolve().parent.parent / "sample_agreement.pdf"
     if pdf_path.exists():
         return pdf_path.read_bytes()
+    alt_path = Path(__file__).resolve().parent.parent / "uploads" / "sample_agreement.pdf"
+    if alt_path.exists():
+        return alt_path.read_bytes()
     return b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n115\n%%EOF\n"

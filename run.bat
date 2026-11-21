@@ -1,30 +1,13 @@
 @echo off
-setlocal enabledelayedexpansion
-
 echo ==========================================================
-echo   Veridocs - Document Intelligence Workspace
-echo   Web App: http://localhost:3000
-echo   API:     http://localhost:8000
+echo   Starting Veridocs (Frontend + Backend)
+echo   - Web App: http://localhost:3000
+echo   - Backend: http://localhost:8000
 echo ==========================================================
-echo.
 
-cd /d "%~dp0"
+REM Start FastAPI backend
+start "Veridocs Backend" cmd /k "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
-:: 1. Check for Node.js / npm
-npm --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Node.js is not installed or not in PATH!
-    pause
-    exit /b 1
-)
-
-:: 2. Setup Frontend Dependencies
-if not exist "frontend\node_modules" (
-    echo [*] Installing frontend dependencies...
-    cd frontend
-    call npm install
-    cd ..
-)
-
-:: 3. Start Veridocs
-node scripts/dev.js
+REM Start Next.js frontend
+set NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev:frontend
