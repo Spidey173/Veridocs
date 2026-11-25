@@ -81,7 +81,7 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
         )
         # Convert embedding column to pgvector vector(384)
-        op.execute("ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(384) USING embedding::vector;")
+        op.execute("ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(384) USING NULL::vector(384);")
         # HNSW Index for Cosine Similarity
         op.execute(
             "CREATE INDEX IF NOT EXISTS idx_chunks_embedding_hnsw "

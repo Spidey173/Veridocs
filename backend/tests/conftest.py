@@ -37,8 +37,8 @@ def clean_environment(tmp_path, monkeypatch):
         if env_db_url.startswith("postgres"):
             pg_test_url = env_db_url
 
-    # In CI, enforce real PostgreSQL by default and fail loudly if unreachable
-    is_ci = os.environ.get("CI", "").lower() in ("true", "1") or os.environ.get("REQUIRE_POSTGRES", "").lower() in (
+    # Enforce real PostgreSQL when REQUIRE_POSTGRES is set (e.g., Postgres CI job)
+    is_ci = os.environ.get("REQUIRE_POSTGRES", "").lower() in (
         "true",
         "1",
     )

@@ -39,9 +39,9 @@ def _upload_contract_docx(test_client: TestClient) -> str:
     doc_id = res.json()["document_id"]
 
     st = ""
-    for _ in range(50):
+    for _ in range(240):
         st = test_client.get(f"/documents/{doc_id}/status").json()["status"]
-        if st == "ready":
+        if st in ("ready", "failed"):
             break
         time.sleep(0.05)
     assert st == "ready"

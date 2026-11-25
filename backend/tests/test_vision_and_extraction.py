@@ -128,9 +128,14 @@ def test_vision_service_figure_chunks():
         layout_notes="Standard single column layout.",
     )
 
+    doc = database.create_document(
+        filename="dummy.pdf",
+        mime_type="application/pdf",
+        session_id="vision-test-session",
+    )
     service = VisionService(backend=backend)
     res = service.process_document_vision(
-        document_id="doc-123",
+        document_id=doc["id"],
         pages=[{"page_number": 1, "has_figures": True, "text": "Chart text"}],
         file_path="dummy.pdf",
     )

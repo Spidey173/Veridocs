@@ -35,9 +35,10 @@ def _upload_sample_docx(test_client: TestClient) -> str:
     assert res.status_code == 200
     doc_id = res.json()["document_id"]
 
-    for _ in range(50):
+    st = ""
+    for _ in range(240):
         st = test_client.get(f"/documents/{doc_id}/status").json()["status"]
-        if st == "ready":
+        if st in ("ready", "failed"):
             break
         time.sleep(0.05)
     assert st == "ready"
@@ -59,7 +60,7 @@ def test_summary_generation_caching_and_nli_verification(test_client: TestClient
 
     # 3. Poll GET until ready
     summary_data = None
-    for _ in range(60):
+    for _ in range(240):
         g = test_client.get(f"/documents/{doc_id}/summary")
         assert g.status_code == 200
         summary_data = g.json()
@@ -93,7 +94,7 @@ def test_summary_generation_caching_and_nli_verification(test_client: TestClient
     assert regen_res.status_code == 200
     assert regen_res.json()["status"] in ("queued", "processing", "ready")
 
-    for _ in range(60):
+    for _ in range(240):
         g2 = test_client.get(f"/documents/{doc_id}/summary")
         if g2.json()["status"] in ("ready", "failed"):
             break

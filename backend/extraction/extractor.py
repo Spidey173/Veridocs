@@ -125,6 +125,13 @@ class SchemaExtractor:
         if not extracted_data:
             extracted_data = self._heuristic_extract(doc_type, pages, tables)
 
+        if doc_type == "contract" and isinstance(extracted_data.get("deadlines"), dict):
+            d_obj = extracted_data["deadlines"]
+            if isinstance(d_obj.get("value"), list):
+                extracted_data["deadlines"] = [item for item in d_obj["value"] if isinstance(item, dict)]
+            else:
+                extracted_data["deadlines"] = [d_obj] if d_obj.get("description") or d_obj.get("quote") else []
+
         # 3. Post-Check: Verbatim quote-in-page verification
         total_fields = 0
         verified_fields = 0

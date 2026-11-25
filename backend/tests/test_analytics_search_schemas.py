@@ -16,7 +16,7 @@ from models_db import QueryLog
 import database
 
 
-def test_schema_polish_invoice_customer_and_contract_deadlines():
+def test_schema_polish_invoice_customer_and_contract_deadlines(monkeypatch):
     # Validate Pydantic schemas
     inv = InvoiceExtraction()
     assert hasattr(inv, "customer_name")
@@ -38,6 +38,7 @@ def test_schema_polish_invoice_customer_and_contract_deadlines():
 
     # Validate heuristic extraction + verbatim quote verification
     extractor = SchemaExtractor()
+    monkeypatch.setattr(extractor.settings, "is_llm_configured", lambda: False)
     inv_pages = [
         {
             "page_number": 1,
