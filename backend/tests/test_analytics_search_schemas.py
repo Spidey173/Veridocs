@@ -118,7 +118,7 @@ def test_cross_document_search_and_analytics(test_client: TestClient, monkeypatc
 
     for did in (d1_id, d2_id):
         status_val = None
-        for _ in range(200):
+        for _ in range(600):
             status_val = test_client.get(f"/documents/{did}/status").json()["status"]
             if status_val in ("ready", "failed"):
                 break

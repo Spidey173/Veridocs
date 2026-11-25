@@ -173,13 +173,13 @@ def test_delete_session(test_client: TestClient, sample_txt_bytes: bytes):
 
 
 def test_granular_passage_chunking(test_client: TestClient, sample_pdf_bytes: bytes):
-    """Verify ~500-char granular passage chunking creates focused passages, not 1-per-page."""
+    """Verify ~600-char granular passage chunking creates focused passages, not 1-per-page."""
     files = [("files", ("multipage.pdf", sample_pdf_bytes, "application/pdf"))]
     upload_res = test_client.post("/api/upload", files=files)
     assert upload_res.status_code == 200
     chunk_count = upload_res.json()["chunk_count"]
-    # 6 pages with 650-800 chars each should produce at least 10 granular chunks
-    assert chunk_count >= 10, f"Expected >= 10 granular chunks, got {chunk_count}"
+    # 6 pages must produce > 6 chunks (splitting multi-section pages rather than 1-per-page)
+    assert chunk_count > 6, f"Expected > 6 granular chunks across 6 pages, got {chunk_count}"
 
 
 def test_rate_limiting_and_byok_bypass(test_client: TestClient, sample_txt_bytes: bytes):

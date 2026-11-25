@@ -39,6 +39,10 @@ jobs:
         run: |
           mypy backend
 
+      - name: Pre-warm Fastembed embedding model
+        run: |
+          python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
+
       - name: Run Pytest Suite (SQLite Fallback)
         run: |
           PYTHONPATH=backend pytest backend/tests/ -v
@@ -97,6 +101,10 @@ jobs:
           DATABASE_URL: postgresql://veridocs:veridocs_test_password@localhost:5432/veridocs_test
         run: |
           alembic upgrade head
+
+      - name: Pre-warm Fastembed embedding model
+        run: |
+          python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
       - name: Run Pytest against real PostgreSQL + pgvector
         env:
