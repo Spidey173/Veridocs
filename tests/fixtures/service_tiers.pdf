@@ -1,0 +1,33 @@
+%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length 320 >> stream
+BT
+/F1 12 Tf
+40 720 Td
+(Cloud Compute and Infrastructure Tiers) Tj
+0 -30 Td
+(| Plan | vCPU | RAM | Bandwidth | Price |) Tj
+0 -18 Td
+(| Starter | 2 | 4 GB | 1 TB | $20 |) Tj
+0 -18 Td
+(| Professional | 4 | 16 GB | 5 TB | $80 |) Tj
+0 -18 Td
+(| Dedicated | 16 | 64 GB | Unlimited | $350 |) Tj
+ET
+endstream
+endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000244 00000 n 
+0000000616 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+691
+%%EOF

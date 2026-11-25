@@ -44,6 +44,8 @@ uploads/
 !public/sample_agreement.pdf
 !backend/sample_resume.pdf
 !public/sample_resume.pdf
+!tests/fixtures/*.pdf
+tests/fixtures/*_converted.pdf
 
 # Generated TypeScript environment
 next-env.d.ts
