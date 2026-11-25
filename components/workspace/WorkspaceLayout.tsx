@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { useAppStore } from "@/lib/store";
 import ResizablePanel from "./ResizablePanel";
 import FileManager from "./FileManager";
 import WorkspaceHeader from "./WorkspaceHeader";
-import PDFViewer from "../pdf-viewer/PDFViewer";
 import ChatPanel from "../chat/ChatPanel";
 import { FileText, Eye, MessageSquare } from "lucide-react";
+
+const PDFViewer = dynamic(() => import("../pdf-viewer/PDFViewer"), { ssr: false });
 
 export default function WorkspaceLayout() {
   const {

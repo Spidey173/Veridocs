@@ -1,0 +1,130 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: veridocs-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-veridocs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-veridocs}
+      POSTGRES_DB: ${POSTGRES_DB:-veridocs}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-veridocs} -d ${POSTGRES_DB:-veridocs}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: veridocs-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 3s
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: runtime
+    container_name: veridocs-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://veridocs:veridocs@postgres:5432/veridocs}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      PORT: "8000"
+      UPLOAD_DIR: "/app/uploads"
+      DATA_DIR: "/app/data"
+      FRONTEND_ORIGIN: "http://localhost:3000,http://127.0.0.1:3000"
+      PARSER_BACKEND: ${PARSER_BACKEND:-docling}
+      OCR_FALLBACK: ${OCR_FALLBACK:-true}
+      OCR_TEXT_LAYER_MIN_CHARS: ${OCR_TEXT_LAYER_MIN_CHARS:-50}
+      OCR_MIN_CONFIDENCE: ${OCR_MIN_CONFIDENCE:-0.6}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - app_uploads:/app/uploads
+      - app_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: runtime
+    container_name: veridocs-worker
+    restart: unless-stopped
+    command: ["python", "-m", "worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://veridocs:veridocs@postgres:5432/veridocs}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      UPLOAD_DIR: "/app/uploads"
+      DATA_DIR: "/app/data"
+      PARSER_BACKEND: ${PARSER_BACKEND:-docling}
+      OCR_FALLBACK: ${OCR_FALLBACK:-true}
+      OCR_TEXT_LAYER_MIN_CHARS: ${OCR_TEXT_LAYER_MIN_CHARS:-50}
+      OCR_MIN_CONFIDENCE: ${OCR_MIN_CONFIDENCE:-0.6}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - app_uploads:/app/uploads
+      - app_data:/app/data
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: veridocs-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8000"
+      BACKEND_URL: "http://api:8000"
+      PORT: "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_uploads:
+  app_data:
+

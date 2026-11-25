@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Send, Loader2, Bot, User, CornerDownLeft, Sparkles, Key, Check, X } from "lucide-react";
-import { useAppStore, type ChatMessage } from "@/lib/store";
+import { Loader2, Bot, User, CornerDownLeft, Sparkles, Key, Check, X } from "lucide-react";
+import { useAppStore } from "@/lib/store";
 import { streamQuery, getUserApiKey, setUserApiKey, type CitationInfo, type CitationCheckResult } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -50,7 +50,6 @@ export default function ChatPanel() {
     suggestedQuestions,
     activeDocumentName,
     isQuerying,
-    isBackendWaking,
     pendingQuestion,
     addMessage,
     appendToMessage,
@@ -153,7 +152,7 @@ export default function ChatPanel() {
       if (rawMsg.toLowerCase().includes("rate limit")) {
         userFriendlyMsg = `⚠️ **Rate Limit Reached**: ${rawMsg}`;
       } else if (rawMsg.includes("Failed to fetch") || rawMsg.includes("NetworkError")) {
-        userFriendlyMsg = "⚠️ **Connection failed**: The backend on Render may still be spinning up from cold sleep (~20–30s). Please wait 15 seconds and try sending your question again.";
+        userFriendlyMsg = "⚠️ **Connection failed**: Could not reach the local Veridocs backend. Please check that the API server is running on port 8000.";
       }
       updateMessage(aiMsgId, {
         content: userFriendlyMsg,
@@ -296,10 +295,20 @@ export default function ChatPanel() {
                                     highlightCitation(citation);
                                   }
                                 }}
-                                className="inline-flex items-center px-1.5 py-0.2 mx-0.5 rounded text-[10.5px] font-mono-data font-semibold bg-[var(--color-accent-subtle)] text-[var(--color-accent)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent)] hover:text-white transition-all cursor-pointer align-baseline"
-                                title={citation ? `Jump to ${citation.source_file} (Page ${citation.page})` : `Citation [${citId}]`}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.2 mx-0.5 rounded text-[10.5px] font-mono-data font-semibold bg-[var(--color-accent-subtle)] text-[var(--color-accent)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent)] hover:text-white transition-all cursor-pointer align-baseline"
+                                title={
+                                  citation
+                                    ? `Jump to ${citation.source_file}${citation.section_path ? ` · ${citation.section_path}` : ""} · p.${citation.page}`
+                                    : `Citation [${citId}]`
+                                }
                               >
-                                [{citId}]
+                                <span>[{citId}]</span>
+                                {citation?.chunk_type === "table" && (
+                                  <span className="text-[9px] px-1 rounded bg-purple-500/20 text-purple-300">Table</span>
+                                )}
+                                {citation?.extraction_method === "ocr" && (
+                                  <span className="text-[9px] px-1 rounded bg-amber-500/20 text-amber-300">OCR</span>
+                                )}
                               </button>
                             );
                           }
@@ -355,14 +364,6 @@ export default function ChatPanel() {
 
       {/* Input Box Area */}
       <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-2">
-        {/* Backend Waking Notice */}
-        {isBackendWaking && (
-          <div className="flex items-center gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[11px]">
-            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-            <span>Backend is waking up on Render free-tier (~20–30s). Please wait...</span>
-          </div>
-        )}
-
         {/* Key Status & Rate Limit Indicator */}
         <div className="flex items-center justify-between px-0.5 text-[11px] text-[var(--text-muted)]">
           <span className="flex items-center gap-1.5">
@@ -432,11 +433,9 @@ export default function ChatPanel() {
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            disabled={!sessionId || isQuerying || isBackendWaking}
+            disabled={!sessionId || isQuerying}
             placeholder={
-              isBackendWaking
-                ? "Connecting to backend... please wait"
-                : sessionId
+              sessionId
                 ? "Ask a question about the document... (Enter to send)"
                 : "Upload a document to start asking questions..."
             }
@@ -445,7 +444,7 @@ export default function ChatPanel() {
 
           <button
             type="button"
-            disabled={!input.trim() || !sessionId || isQuerying || isBackendWaking}
+            disabled={!input.trim() || !sessionId || isQuerying}
             onClick={handleSubmit}
             className="absolute right-2 bottom-2 p-1.5 rounded bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-30 disabled:hover:bg-[var(--color-accent)]"
             title="Send question"

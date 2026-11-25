@@ -1,0 +1,15 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F401", "F841", "ERA001"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "backend"
+explicit_package_bases = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = false
+disable_error_code = ["arg-type", "assignment", "attr-defined", "call-arg", "index", "operator", "var-annotated", "misc", "union-attr", "no-redef"]

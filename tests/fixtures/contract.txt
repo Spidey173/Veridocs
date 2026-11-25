@@ -1,0 +1,11 @@
+MASTER SERVICES AGREEMENT
+
+SECTION 1. SCOPE OF SERVICES
+Provider agrees to deliver managed document AI processing and validation.
+
+SECTION 2. PRICING AND PAYMENTS
+Ingestion rate is $0.05 per document OCR. Storage rate is $0.20 monthly per GB.
+Invoices shall be payable within thirty (30) days of the date of invoice.
+
+SECTION 3. CONFIDENTIALITY
+Each party agrees to hold all confidential information in strict confidence.

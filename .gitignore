@@ -13,6 +13,17 @@ env/
 *.db
 .coverage
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs, caches, and benchmark dumps
+*.log
+logs/
+.cache/
+huggingface_cache/
+model_cache/
+results/
+benchmark*.json
 
 # Node & Next.js
 node_modules/
@@ -40,9 +51,10 @@ next-env.d.ts
 # Testing / Reports
 playwright-report/
 test-results/
+tests/real_docs/*
+!tests/real_docs/README.md
 
 # System / IDE
 .DS_Store
 .vscode/
 .idea/
-.vercel

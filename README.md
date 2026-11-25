@@ -1,208 +1,170 @@
-# 📑 Veridocs
+# Veridocs
 
-Fast, honest, lightweight document question answering (RAG) with real page citations and claim grounding checks.
+Document intelligence workspace combining section-aware parsing, hybrid vector/full-text search, claim-level citation verification, contract comparison, anomaly checks, knowledge graphs, and cited report export.
 
-Runs entirely locally on an 8GB RAM laptop with **zero Docker required**.
+![Veridocs Workspace](docs/demo.png)
 
----
+## Key Features
 
-## 🚀 Live Demo
+- **Multi-Format Ingestion**: Parses digital and scanned PDFs (`pymupdf`/`pypdf` + `rapidocr`, plus optional `docling`), `.docx` (`python-docx`), `.doc` (via headless LibreOffice), `.png`/`.jpg`/`.tiff` images converted to PDF, and UTF-8 `.txt` files. Legacy `.doc` conversion and `.docx` → PDF viewer rendering use headless LibreOffice (`soffice`), included in `backend/Dockerfile` and verified end-to-end in Docker.
+- **Section-Level Citations & Viewer**: Tracks hierarchical headings (`section_path`, e.g., `3 > 3.1 Payment Terms`) per chunk, renders PDFs (including LibreOffice-converted `.docx`/`.doc` files) alongside a paginated text viewer fallback when LibreOffice is absent, and jumps to cited pages.
+- **Hybrid Retrieval & Cross-Document Search**: Fuses Fastembed dense cosine search (`BAAI/bge-small-en-v1.5`) with full-text sparse ranking via Reciprocal Rank Fusion (`pgvector` HNSW + PostgreSQL `GIN` or SQLite local fallback) across either a workspace session or the entire document library (`POST /api/search`). PostgreSQL `pgvector` paths are verified in Docker Compose and configured for CI (`CI=true`); local unit tests default to SQLite when no Postgres server is targeted.
+- **Two-Stage Citation Grounding Check**: Splits generated answers into factual claims, matches candidate chunks via lexical overlap, and runs contradiction/entailment verification (deterministic heuristic engine by default; optional batched `CrossEncoder` inference when `NLI_ENABLED=true`), surfacing claim support scores and low-confidence OCR/vision warnings in the Verification Drawer.
+- **Structured Extraction, Anomaly Flags & Knowledge Graph**: Extracts typed schemas (`invoice`, `contract`, `research_paper`, `resume`) wrapped in verbatim-verified `FieldEvidence`, flags invoice math/date/threshold/metadata anomalies, and builds canonicalized entity-relationship graphs queried alongside vector search.
+- **Contract Clause Comparison**: Segments contract clauses, aligns sections via cosine similarity + `scipy.optimize.linear_sum_assignment`, computes token-level word diffs, and exports Markdown redline summaries.
+- **Structured Summaries, Risk Reports & Analytics**: Generates cached map-reduce summaries verified by `check_citations` (`POST /api/documents/{id}/summary`), builds cited risk reports exportable as Markdown, PDF (`reportlab`), or DOCX (`python-docx`), and tracks upload/query/flag metrics (`GET /api/analytics`).
 
-- **Web Application**: [https://veridocs17.vercel.app](https://veridocs17.vercel.app)
-- **FastAPI Backend**: [https://veridocs-backend.onrender.com](https://veridocs-backend.onrender.com)
-- **API Documentation**: [https://veridocs-backend.onrender.com/docs](https://veridocs-backend.onrender.com/docs)
+## Architecture
 
-*(Hosted on free-tier Render & Vercel. Inactive instances spin down after 15 minutes of idle time; please allow ~20–30s on first load if the backend is waking up).*
+```mermaid
+flowchart LR
+    UI["Next.js 16 Workspace UI"] -->|REST + SSE| API["FastAPI Backend"]
+    API -->|Enqueue Jobs| RQ["Redis + RQ Worker (or ThreadPool fallback)"]
+    API -->|Vector + FTS + Graph| DB[("PostgreSQL + pgvector / SQLite")]
+    RQ -->|Parse, OCR, Extract, Embed| DB
+    API -->|Streaming QA| LLM["OpenAI-Compatible LLM (OpenAI / Groq / Ollama)"]
+```
 
----
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full pipeline specification, and specialized notes in [docs/EXTRACTION.md](docs/EXTRACTION.md), [docs/COMPARISON.md](docs/COMPARISON.md), and [docs/GRAPH.md](docs/GRAPH.md).
 
-## 📸 Preview
+## Tech Stack
 
-![Veridocs Document Intelligence & Verification](docs/demo.png)
-
----
-
-## What Actually Works
-
-- **Real Document Ingestion**: Upload multi-page PDF or TXT documents. Documents are extracted with `pypdf`, chunked into granular ~600-character windows with 100-character overlap and section header boundary detection, and embedded locally using Fastembed ONNX (`bge-small-en-v1.5`).
-- **Interactive PDF Viewer**: Built-in PDF.js canvas viewer rendering actual PDF bytes from the backend with fit-to-width default, zoom controls, and responsive centered alignment with zero left-edge clipping.
-- **Granular Page Citations**: Citations format as clickable inline chips (`[1]`, `[2]`). Clicking a chip jumps directly to that page in the PDF viewer and displays a floating preview banner with the cited passage excerpt.
-- **GFM Markdown Answers**: Full GitHub-Flavored Markdown support in streaming responses, cleanly formatting tables, code blocks, bulleted lists, and bold text without conversational fluff or closing recap lines.
-- **Conversational Memory & Follow-up Rewriting**: Retains recent conversational turns. Follow-up questions referencing previous answers are rewritten into standalone vector search queries before retrieval.
-- **Small-Talk Bypass**: Conversational pleasantries ("ok thanks", "hi", "thank you") bypass vector search and citation checks entirely, returning immediate friendly responses.
-- **Honest Citation Check**: Verifies whether factual answer claims are supported by retrieved excerpts using an n-gram overlap check. Includes safe sentence splitting that protects numbered lists (`1.`) and abbreviations (`e.g.`, `i.e.`). Intro sentences, meta-statements, and missing-data replies are automatically excluded from scoring.
-- **Universal OpenAI-Compatible LLM + BYOK**: Driven by standard `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` (supporting Groq, Together, DeepSeek, OpenAI, or local Ollama). Visitors can also click **Add Key (Bypass limits)** in the UI to paste their own key directly into the browser, stored locally only.
-- **Abuse Protection**: In-memory per-IP rate limiting (20 queries/hr, 10 uploads/hr), 10 MB maximum upload size, and 50-page document limit.
-- **Durable Local Storage**: Chunks and L2-normalized float32 vectors are stored in SQLite (`backend/data/veridocs.db`). No Postgres, pgvector, Redis, or Celery.
-
----
+- **Backend**: Python 3.11, FastAPI, SQLAlchemy 2.x, Alembic, PostgreSQL 16 + `pgvector`, Redis + RQ, `fastembed` (`BAAI/bge-small-en-v1.5`), `pypdf`/`pymupdf`, `python-docx`, `rapidocr-onnxruntime`, `rapidfuzz`, `scipy`, `reportlab`.
+- **Frontend**: Next.js 16 (React 19, TypeScript), Tailwind CSS, Zustand, `pdfjs-dist`, `lucide-react`, `react-markdown`, `react-dropzone`.
+- **Tooling & Testing**: `pytest`, `vitest`, `ruff`, `mypy`, `eslint`, `tsc`.
 
 ## Quickstart
 
-Tested from a fresh clone. Requires **Python 3.11 or 3.12** and **Node.js 18+**.
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/Spidey173/Veridocs.git
-cd Veridocs
-```
-
-### 2. Configure Environment
-
-Copy the example environment template:
+### 1. Docker Compose (Full Stack)
 
 ```bash
 cp .env.example .env
+# Edit .env to supply LLM_API_KEY / OPENAI_API_KEY / GROQ_API_KEY (or configure OLLAMA_BASE_URL)
+docker compose up --build
 ```
 
-*(Optional: Open `.env` and add your Groq or OpenAI API key. If left blank, document indexing, vector search, and the PDF viewer work completely. You can also paste your API key directly in the chat panel via the **Add Key (Bypass limits)** button).*
+Services started:
+- Web UI: `http://localhost:3000`
+- FastAPI Backend & OpenAPI docs: `http://localhost:8000` (`/docs`)
+- PostgreSQL + `pgvector`: port `5432`
+- Redis + RQ worker (`veridocs-worker`)
 
-### 3. Launch the Application
+### 2. Local Development (SQLite + In-Process Worker Fallback)
 
-#### Option A: One-Command Start (Recommended)
+Backend:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Optional: leave DATABASE_URL unset or set sqlite:///backend/data/veridocs.db for local dev
+alembic upgrade head
+cd backend && uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-Install frontend dependencies and start both services:
-
+Frontend (in a second terminal):
 ```bash
 npm install
 npm run dev
 ```
 
-*`npm run dev` automatically verifies `.venv`, installs `requirements.txt` into `.venv` if missing, and concurrently boots both the FastAPI backend (port 8000) and Next.js frontend (port 3000).*
+### Environment Variables
 
-#### Option B: Manual Setup (Separate Terminals)
-
-If you prefer running services in separate terminal windows:
-
-```bash
-# 1. Setup Python backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# 2. Setup Node frontend
-npm install
-
-# Terminal 1: Backend
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir backend
-
-# Terminal 2: Frontend
-npm run dev:frontend
-```
-
-### 4. Access the App
-
-- **Web Application**: [http://localhost:3000](http://localhost:3000)
-- **FastAPI Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-
----
-
-## Performance & Memory Benchmarks
-
-Measured on macOS (Apple Silicon, 8GB RAM baseline) on the bundled **6-page sample agreement** (12 passage chunks):
-
-| Metric | Measured Value | Notes |
+| Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| **RAM Usage (Idle)** | **~302 MB** | Baseline Python runtime + loaded Fastembed ONNX session |
-| **RAM Usage (Peak Querying)** | **~311 MB** | Fully stable under 500 MB (runs easily on 8GB laptops) |
-| **Fastembed Model Download** | **~133 MB** | One-time download on first cold run, cached locally |
-| **Model Init from Disk Cache** | **~360 ms** | Once cached, loads locally in under half a second |
-| **6-Page PDF Ingestion & Embed** | **~207 ms** | ~17.2 ms per passage chunk |
-| **Vector Retrieval Latency** | **~3.4 ms** | SQLite scan + NumPy dot product cosine similarity on the 6-page sample |
-| **Citation Check Latency** | **~0.3 ms** | N-gram claim overlap analysis |
+| `DATABASE_URL` | `sqlite:///backend/data/veridocs.db` | PostgreSQL (`pgvector`) or SQLite database connection string |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis URL for RQ queue and status pub/sub (falls back to in-process threadpool) |
+| `PARSER_BACKEND` | `docling` | Primary PDF parser (`docling` falls back to `pymupdf`/`pypdf` if uninstalled) |
+| `OCR_FALLBACK` | `true` | Enables RapidOCR on scanned pages or images below `OCR_TEXT_LAYER_MIN_CHARS` |
+| `NLI_ENABLED` | `false` | Enables CrossEncoder model (`NLI_MODEL`) instead of heuristic NLI screen |
+| `VISION_ENABLED` | `false` | Enables multimodal page vision analysis for flagged figures/signatures |
+| `FLAGS_ENABLED` | `true` | Runs deterministic anomaly checks during ingestion |
+| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | unset | Universal OpenAI-compatible provider config (or `OPENAI_API_KEY`, `GROQ_API_KEY`, `OLLAMA_BASE_URL`) |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend base URL used by the Next.js frontend |
 
----
+## Usage
 
-## Architecture
+1. Open `http://localhost:3000` (a sample agreement is seeded into `demo-session` on startup) or drag/drop `.pdf`, `.docx`, `.doc` (requires LibreOffice in Docker/PATH), `.png`, `.jpg`, `.tiff`, or `.txt` files.
+2. Wait for background status stages (`queued -> parsing -> ocr -> chunking -> extraction -> embedding -> ready`).
+3. Ask questions in the chat panel or use the header search bar (`POST /api/search`) for cross-document lookup; click inline `[N]` badges to jump to the cited page and inspect claim verification scores.
+4. Open the sidebar tabs to inspect Tables, Entities, Fields (with editable overrides and math checks), Summary, Report (MD/PDF/DOCX export), Compare (clause redlines), Flags, and Graph, or click **Dashboard** for workspace metrics.
 
-```
-Veridocs/
-├── app/                  # Next.js App Router (layout, page, theme)
-├── components/           # React UI components
-│   ├── chat/             # ChatPanel, CitationBadge, VerificationDrawer
-│   ├── pdf-viewer/       # PDFViewer canvas with fit-to-width & jump-to-page
-│   ├── upload/           # DropZone document upload
-│   └── workspace/        # WorkspaceLayout, Header, FileManager
-├── lib/                  # Zustand store and honest API client
-├── public/               # Sample contract, icons, static assets
-├── tests/                # Frontend Vitest test suite (11 tests)
+## API Overview
+
+Full OpenAPI-generated reference: [docs/API.md](docs/API.md). Core endpoints:
+
+- `POST /api/documents/upload`, `GET /api/documents/{id}/status`, `GET /api/documents/{id}/events`
+- `GET /api/documents/{id}/tables|entities|extraction|flags`, `PATCH /api/documents/{id}/extraction`
+- `POST /api/documents/{id}/summary`, `GET /api/documents/{id}/summary`
+- `POST /api/documents/{id}/report`, `GET /api/documents/{id}/report/export?format=md|pdf|docx`
+- `POST /api/query`, `POST /api/query/stream`, `POST /api/search`
+- `POST /api/comparisons`, `GET /api/comparisons/{id}/export`
+- `GET /api/graph`, `GET /api/analytics`, `GET /api/health`
+
+## Evaluation & Performance
+
+Reproducible offline benchmark and evaluation numbers:
+
+| Suite | Command | Measured Result |
+| :--- | :--- | :--- |
+| Ingestion & OCR | `.venv/bin/python evals/ingestion_eval.py` | 11/11 fixtures: 100.0% char accuracy, 100.0% table accuracy (6 text, 5 OCR) |
+| Hybrid Retrieval | `.venv/bin/python evals/retrieval_eval.py` | Held-out (10 queries / 20 chunks): Recall@5 = 100.0%, MRR = 1.000 |
+| Claim Verification | `.venv/bin/python evals/verification_eval.py` | Held-out (30 pairs): Accuracy = 83.3%, Support F1 = 90.9%, Contradiction catch = 60.0% |
+| Extraction & Entities | `.venv/bin/python evals/extraction_eval.py` | Held-out (5 docs): DocType = 100.0%, Quote Verified = 100.0%, Entity F1 = 77.8% |
+| Contract Comparison | `.venv/bin/python evals/comparison_eval.py` | Held-out (2 pairs): Change Detection F1 = 100.0%, Risk Agreement = 100.0% |
+| Anomaly Flags | `.venv/bin/python evals/flags_eval.py` | Held-out (20 invoices): Clean FPR = 0.0%, Avg Rule F1 = 75.0% |
+| Knowledge Graph | `.venv/bin/python evals/graph_eval.py` | Held-out (2 contracts): Entity Resolution = 100.0%, Edge F1 = 100.0% |
+
+Full methodology and caveats are in [docs/EVALUATION.md](docs/EVALUATION.md) and latency/memory measurements are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+## Project Structure
+
+```text
 ├── backend/
-│   ├── main.py           # FastAPI entrypoint, lifespan & CORS
-│   ├── database.py       # SQLite chunk & vector persistence + TTL cleanup
-│   ├── vector_store.py   # Vector retrieval with NumPy dot product
-│   ├── llm_service.py    # OpenAI-compatible streaming client
-│   ├── pdf_processor.py  # pypdf text extraction, smart chunking & sample generator
-│   ├── verification.py   # N-gram citation claim check & sentence splitter
-│   ├── rate_limiter.py   # Per-IP sliding window abuse protection
-│   ├── config.py         # App configuration & Fastembed model registry
-│   ├── Dockerfile        # Production multi-stage Docker build
-│   └── tests/            # 22 backend behavior pytest tests
-├── requirements.txt      # Unified Python dependencies (used by local, Docker, Render)
-├── package.json          # Single package.json for frontend, test & dev orchestration
-└── scripts/
-    ├── dev.js            # Starts FastAPI and Next.js concurrently (npm run dev)
-    └── dev/              # Development testing and verification tools
-        ├── README.md
-        └── test_resume_qa.py # Multi-turn resume QA test script
+│   ├── alembic/              # Database schema migrations (001..008)
+│   ├── classification/       # Heuristic & LLM document classifier
+│   ├── comparison/           # Clause segmentation, Hungarian aligner, word diffing
+│   ├── entities/             # Regex/heuristic NER extractor
+│   ├── extraction/           # Typed schemas (FieldEvidence) & verification checks
+│   ├── flags/                # Invoice/contract anomaly checkers
+│   ├── graph/                # Canonical entity resolution, graph builder, QA router
+│   ├── ingestion/            # Magic-byte validation, Docling/PyMuPDF/DOCX/OCR parsers
+│   ├── routers/              # FastAPI endpoints (documents, query, comparisons, graph, analytics, system)
+│   ├── tests/                # Pytest test suite (82 tests)
+│   ├── Dockerfile
+│   ├── main.py               # FastAPI entrypoint & lifespan setup
+│   ├── verification.py       # Citation extractor & two-stage claim verifier
+│   └── worker.py             # RQ background worker entrypoint
+├── components/               # Next.js React components (workspace, chat, upload, pdf-viewer)
+├── docs/                     # Architecture, OpenAPI reference, evaluation, performance docs
+├── evals/                    # Reproducible domain evaluation benchmarks
+├── lib/                      # Typed API client & Zustand store
+├── scripts/                  # Fixture generator, SQLite->PG migration, benchmark runner
+├── tests/                    # Frontend Vitest suite (14 tests) & shared fixtures
+├── docker-compose.yml
+├── Makefile                  # lint, test, build, clean targets
+└── pyproject.toml            # Ruff & mypy configuration
 ```
 
----
-
-## Verification & Tests
-
-### Run Full Test Suite (Frontend + Backend)
+## Testing & Linting
 
 ```bash
-npm test
+make lint    # ruff check + mypy backend + eslint + tsc --noEmit
+make test    # 82 backend pytest tests + 14 frontend vitest tests
+make build   # Production Next.js webpack build
 ```
-
-- **Frontend (Vitest)**: 11 tests passing (~400ms)
-- **Backend (Pytest)**: 22 tests passing (~15s)
-
-### Production Build
-
-```bash
-npm run build
-```
-
-*Result: Compiled successfully with zero TypeScript or webpack errors in ~2.5s.*
-
----
-
-## Deployment & Environment Variables
-
-### 1. Backend on Render (Web Service)
-- **Runtime**: Docker (points to `backend/Dockerfile`, context `.`).
-- **Build**: Fastembed ONNX weights (`bge-small-en-v1.5`) are pre-downloaded during Docker build so the image boots immediately without downloading weights at runtime.
-- **Environment Variables**:
-  | Variable | Value | Description |
-  | :--- | :--- | :--- |
-  | `FRONTEND_ORIGIN` | `https://veridocs17.vercel.app` | Allowed CORS origin (also auto-allows `*.vercel.app` previews) |
-  | `LLM_BASE_URL` | `https://api.groq.com/openai/v1` | OpenAI-compatible API endpoint |
-  | `LLM_API_KEY` | `gsk_...` | API key for LLM |
-  | `LLM_MODEL` | `openai/gpt-oss-120b` | Model identifier |
-  | `RATE_LIMIT_QUERY_PER_HOUR` | `20` | Max queries/hour per IP (BYOK users bypass this limit) |
-  | `MAX_FILE_SIZE_MB` | `10` | Max upload size in megabytes |
-
-### 2. Frontend on Vercel
-- **Framework**: Next.js (Root Directory: `.`).
-- **Environment Variables**:
-  | Variable | Value | Description |
-  | :--- | :--- | :--- |
-  | `NEXT_PUBLIC_API_URL` | `https://veridocs-backend.onrender.com` | Render backend URL |
-
----
 
 ## Known Limitations
 
-1. **Ephemeral Storage on Render Free Tier**: Render's free tier uses an ephemeral filesystem. On container restarts or after spinning down from inactivity (~15 minutes idle), custom uploaded documents reset. The bundled 6-page `sample_agreement.pdf` is automatically re-indexed on boot for showcase testing.
-2. **Cold Starts on Free Hosting**: Free-tier Render instances spin down when idle. Cold starts take **20–30 seconds** to wake up the container. The frontend detects this and displays a notification banner while polling for health.
-3. **Single-User Workspace**: Veridocs is designed for focused document inspection and local execution; it does not include multi-tenant organization management or document RBAC.
-4. **Citation Check Scope**: The citation check is an **n-gram text overlap heuristic** verifying whether answer claims literally appear in the retrieved context chunks. It is not an expensive multi-judge LLM evaluation model.
+- **Verified Live vs. Local Scope**:
+  - Clean `docker compose down -v && up --build` has been verified live against PostgreSQL 16 + `pgvector`, Redis/RQ, Next.js (`http://localhost:3000`), headless LibreOffice (`soffice`), and RapidOCR across PDF, `.docx`, `.doc`, and scanned PDF uploads, Q&A, Map-Reduce Summary, Report generation & export (`md`, `pdf`, `docx`), Analytics Dashboard, and cross-document search.
+  - Because `make test` runs against SQLite by default locally, PostgreSQL CI (`backend-postgres-pgvector-tests`) runs on push/PR in GitHub Actions; interactive browser UI click-through has not been automated with Playwright.
+- **CPU Embedding Throughput**: Without a GPU, `BAAI/bge-small-en-v1.5` ONNX CPU inference accounts for ~85% of multi-page PDF ingestion latency (~8.5s median end-to-end for a 50-page digital PDF locally).
+- **Verification Model Defaults**: `NLI_ENABLED` defaults to `false` to avoid downloading/running a cross-encoder model at runtime; subtle semantic paraphrases and implicit contradictions scored only by the heuristic engine show 60.0% contradiction catch rate on the held-out eval split.
+- **Offline Fallback Mode**: Without an external LLM API key configured, summarization, comparison explanations, and schema extraction fall back to deterministic heuristics.
 
----
+## Roadmap
 
-## License
-
-MIT
+- Add Playwright browser integration tests against the Docker Compose stack.
+- Support optional quantized GPU/CoreML ONNX execution providers for faster bulk ingestion.
+- Extend `evals/` coverage from synthetic fixtures to multi-hundred-page public contract corpora.

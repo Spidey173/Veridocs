@@ -21,7 +21,7 @@ if _backend_dir not in sys.path:
 from config import get_settings, get_model_registry
 import database
 from pdf_processor import extract_text_from_file, chunk_text
-from routers import documents, query, system
+from routers import documents, query, system, comparisons, graph, analytics
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("veridocs")
@@ -54,7 +54,12 @@ def seed_demo_session_if_needed():
         if sample_path.exists():
             logger.info("Indexing sample_agreement.pdf into demo-session...")
             pages = extract_text_from_file(sample_path, filename="sample_agreement.pdf")
-            chunks = chunk_text(pages, chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP, document_name="sample_agreement.pdf")
+            chunks = chunk_text(
+                pages,
+                chunk_size=settings.CHUNK_SIZE,
+                chunk_overlap=settings.CHUNK_OVERLAP,
+                document_name="sample_agreement.pdf",
+            )
 
             reg = get_model_registry()
             chunk_texts = [c["text"] for c in chunks]
@@ -81,11 +86,15 @@ def seed_demo_session_if_needed():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize SQLite database schema and seed demo document on startup."""
-    logger.info("Initializing Veridocs SQLite database...")
+    """Initialize database schema, warm embedding model, and seed demo document on startup."""
+    logger.info("Initializing Veridocs database...")
     database.init_db()
     database.cleanup_expired_sessions()
     seed_demo_session_if_needed()
+    try:
+        _ = get_model_registry().embedding_model
+    except Exception as e:
+        logger.warning(f"Embedding model pre-warm skipped: {e}")
     logger.info("Veridocs backend ready.")
     yield
 
@@ -104,7 +113,6 @@ origins = settings.CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins if origins else ["*"],
-    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -114,6 +122,9 @@ app.add_middleware(
 app.include_router(system.router)
 app.include_router(documents.router)
 app.include_router(query.router)
+app.include_router(comparisons.router)
+app.include_router(graph.router)
+app.include_router(analytics.router)
 
 
 @app.get("/")

@@ -112,7 +112,12 @@ export default function DropZone() {
     onDrop,
     accept: {
       "application/pdf": [".pdf"],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+      "application/msword": [".doc"],
       "text/plain": [".txt"],
+      "image/png": [".png"],
+      "image/jpeg": [".jpg", ".jpeg"],
+      "image/tiff": [".tiff", ".tif"],
     },
     maxSize: 50 * 1024 * 1024,
     multiple: true,
@@ -134,10 +139,10 @@ export default function DropZone() {
             <Upload className="w-5 h-5" />
           </div>
           <p className="text-sm font-semibold text-[var(--text-primary)]">
-            {isDragActive ? "Drop documents here..." : "Drag & drop contracts or PDF/TXT files"}
+            {isDragActive ? "Drop documents here..." : "Drag & drop contracts, Word docs, or PDF/TXT files"}
           </p>
           <p className="text-xs text-[var(--text-muted)]">
-            Supports PDF and TXT up to 50MB. Local Fastembed vector indexing.
+            Supports PDF, DOCX, DOC, TXT, PNG, JPG, and TIFF up to 15MB. Multi-modal layout analysis, tables, and OCR.
           </p>
         </div>
       </div>

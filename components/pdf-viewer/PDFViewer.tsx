@@ -11,7 +11,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
-import { fetchPdfBlobUrl } from "@/lib/api";
+import { fetchPdfBlobUrl, fetchDocumentTextPages, type TextViewerPage } from "@/lib/api";
 
 type PDFDocumentProxy = any;
 type PDFPageProxy = any;
@@ -37,6 +37,7 @@ export default function PDFViewer() {
 
   const [pdfLib, setPdfLib] = useState<any>(null);
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const [textPages, setTextPages] = useState<TextViewerPage[] | null>(null);
   const [isLoadingDoc, setIsLoadingDoc] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
@@ -62,10 +63,11 @@ export default function PDFViewer() {
     };
   }, []);
 
-  // Fetch and load PDF document into PDF.js
+  // Fetch and load PDF document into PDF.js (or fall back to text viewer for DOCX/TXT without converted PDF)
   useEffect(() => {
     if (!pdfLib || !sessionId || !activeDocumentName) {
       setPdfDoc(null);
+      setTextPages(null);
       return;
     }
 
@@ -73,10 +75,22 @@ export default function PDFViewer() {
     let blobUrlToRevoke: string | null = null;
     setIsLoadingDoc(true);
     setErrorMsg(null);
+    setTextPages(null);
 
     async function loadDocument() {
+      const isNativePdf = /\.pdf$/i.test(activeDocumentName || "");
+      const isTextOnly = /\.txt$/i.test(activeDocumentName || "");
       try {
-        let url = localFileUrls[activeDocumentName!];
+        if (isTextOnly) {
+          const pages = await fetchDocumentTextPages(sessionId!, activeDocumentName!);
+          if (!isMounted) return;
+          setPdfDoc(null);
+          setTextPages(pages);
+          setTotalPages(Math.max(1, pages.length));
+          return;
+        }
+
+        let url = isNativePdf ? localFileUrls[activeDocumentName!] : null;
         if (!url) {
           url = await fetchPdfBlobUrl(sessionId!, activeDocumentName!);
           blobUrlToRevoke = url;
@@ -86,6 +100,7 @@ export default function PDFViewer() {
         if (!isMounted) return;
 
         setPdfDoc(doc);
+        setTextPages(null);
         setTotalPages(doc.numPages);
 
         // Default to fit-to-width on initial load
@@ -102,9 +117,19 @@ export default function PDFViewer() {
         } catch { }
       } catch (err: unknown) {
         if (!isMounted) return;
-        console.error("PDF load error:", err);
-        setErrorMsg("Failed to render PDF document.");
-        setPdfDoc(null);
+        // Fallback to text viewer for Word docs / non-PDFs when LibreOffice PDF conversion is unavailable
+        try {
+          const pages = await fetchDocumentTextPages(sessionId!, activeDocumentName!);
+          if (!isMounted) return;
+          setPdfDoc(null);
+          setTextPages(pages);
+          setTotalPages(Math.max(1, pages.length));
+          setErrorMsg(null);
+        } catch {
+          console.error("PDF load error:", err);
+          setErrorMsg("Failed to render document.");
+          setPdfDoc(null);
+        }
       } finally {
         if (isMounted) setIsLoadingDoc(false);
       }
@@ -196,7 +221,7 @@ export default function PDFViewer() {
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            disabled={currentPage <= 1 || !pdfDoc}
+            disabled={currentPage <= 1 || (!pdfDoc && !textPages)}
             onClick={() => goToPage(currentPage - 1)}
             className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] disabled:opacity-40 transition-colors"
             title="Previous page"
@@ -205,18 +230,24 @@ export default function PDFViewer() {
           </button>
 
           <span className="text-[11px] text-[var(--text-secondary)] px-1">
-            Page {pdfDoc ? currentPage : 0} of {pdfDoc ? totalPages : 0}
+            Page {(pdfDoc || textPages) ? currentPage : 0} of {(pdfDoc || textPages) ? totalPages : 0}
           </span>
 
           <button
             type="button"
-            disabled={currentPage >= totalPages || !pdfDoc}
+            disabled={currentPage >= totalPages || (!pdfDoc && !textPages)}
             onClick={() => goToPage(currentPage + 1)}
             className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] disabled:opacity-40 transition-colors"
             title="Next page"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
+
+          {textPages && !pdfDoc && (
+            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-subtle)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
+              Text Viewer
+            </span>
+          )}
         </div>
 
         {/* Zoom Controls */}
@@ -287,6 +318,16 @@ export default function PDFViewer() {
                 </div>
               )}
             </div>
+          ) : textPages && textPages.length > 0 ? (
+            <div className="w-full max-w-2xl bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-lg shadow-md p-6 my-2 space-y-3">
+              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-2 text-xs font-mono-data text-[var(--text-muted)]">
+                <span>{activeDocumentName}</span>
+                <span>Page {currentPage} / {textPages.length}</span>
+              </div>
+              <div className="text-xs leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap font-serif-doc">
+                {(textPages.find((p) => p.page_number === currentPage) || textPages[currentPage - 1] || textPages[0])?.text || ""}
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center p-8 text-center max-w-xs text-[var(--text-muted)] m-auto">
               <FileText className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-60" />
@@ -304,7 +345,9 @@ export default function PDFViewer() {
         {highlightedCitation && highlightedCitation.page === currentPage && highlightedCitation.highlighted_text && (
           <div className="sticky bottom-0 mx-auto max-w-xl bg-[var(--bg-surface)]/95 backdrop-blur border border-[var(--color-accent)] rounded-lg p-3 shadow-xl text-xs z-10 animate-in fade-in slide-in-from-bottom-2">
             <div className="flex items-center justify-between text-[11px] font-mono-data font-semibold text-[var(--color-accent)] mb-1">
-              <span>Cited Passage (Page {currentPage})</span>
+              <span className="truncate">
+                Cited Passage{highlightedCitation.section_path ? ` · ${highlightedCitation.section_path}` : ""} · p.{currentPage}
+              </span>
               <button
                 type="button"
                 onClick={() => highlightCitation(null)}

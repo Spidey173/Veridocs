@@ -16,8 +16,8 @@ describe("API Client", () => {
     process.env.NEXT_PUBLIC_API_URL = "http://localhost:8000/";
     expect(getApiBase()).toBe("http://localhost:8000");
 
-    process.env.NEXT_PUBLIC_API_URL = "https://veridocs-api.onrender.com";
-    expect(getApiBase()).toBe("https://veridocs-api.onrender.com");
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000";
+    expect(getApiBase()).toBe("http://127.0.0.1:8000");
   });
 
   it("returns empty string when NEXT_PUBLIC_API_URL is unset to use proxy rewrites", () => {
@@ -41,11 +41,10 @@ describe("API Client", () => {
 
     const res = await checkBackendHealth();
     expect(res.ok).toBe(true);
-    expect(res.waking).toBe(false);
     expect(res.data?.status).toBe("healthy");
   });
 
-  it("checkBackendHealth detects cold start waking when request times out", async () => {
+  it("checkBackendHealth returns ok=false when request times out or fails", async () => {
     global.fetch = vi.fn().mockImplementation(() => {
       const err = new Error("Aborted");
       err.name = "AbortError";
@@ -54,7 +53,6 @@ describe("API Client", () => {
 
     const res = await checkBackendHealth();
     expect(res.ok).toBe(false);
-    expect(res.waking).toBe(true);
   });
 
   it("saves and retrieves custom API key from browser storage", () => {

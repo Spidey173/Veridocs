@@ -1,11 +1,24 @@
 /**
  * Veridocs — Global State Store (Zustand)
- * Clean, minimal state for document RAG, PDF viewing, and citation check.
+ * Clean state for document RAG, PDF viewing, citation verification, OCR status, and tables.
  */
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { CitationInfo, SourceInfo, CitationCheckResult } from "./api";
+import type {
+  CitationInfo,
+  SourceInfo,
+  CitationCheckResult,
+  ExtractedTable,
+  EntityItem,
+  ExtractionResult,
+  VisionResult,
+  ComparisonData,
+  DocumentFlagsResult,
+  GraphResult,
+  DocumentSummaryResult,
+  DocumentReportResult,
+} from "./api";
 import { deleteSession } from "./api";
 
 export interface ChatMessage {
@@ -24,6 +37,13 @@ export interface UploadedFile {
   size: number;
   type: string;
   pages?: number;
+  documentId?: string;
+  status?: "queued" | "parsing" | "ocr" | "chunking" | "embedding" | "ready" | "failed";
+  extractionMethod?: "text_layer" | "ocr";
+  ocrConfidence?: number;
+  doc_type?: string;
+  doc_type_confidence?: number;
+  error?: string;
 }
 
 interface AppState {
@@ -32,10 +52,6 @@ interface AppState {
   files: UploadedFile[];
   isUploading: boolean;
   uploadProgress: number;
-
-  // Backend Health / Cold start
-  isBackendWaking: boolean;
-  setIsBackendWaking: (waking: boolean) => void;
 
   // Chat
   messages: ChatMessage[];
@@ -50,7 +66,35 @@ interface AppState {
   highlightedCitation: CitationInfo | null;
   pdfScale: number;
 
-  // Local file blob URLs for client-side fallback preview
+  // Extracted Tables, Entities, Extractions, Flags, Graph, Comparisons
+  documentTables: Record<string, ExtractedTable[]>;
+  documentEntities: Record<string, EntityItem[]>;
+  documentExtractions: Record<string, ExtractionResult>;
+  documentVision: Record<string, VisionResult>;
+  documentFlags: Record<string, DocumentFlagsResult>;
+  documentGraphs: Record<string, GraphResult>;
+  documentSummaries: Record<string, DocumentSummaryResult>;
+  documentReports: Record<string, DocumentReportResult>;
+  crossDocumentGraph: GraphResult | null;
+  activeComparison: ComparisonData | null;
+  isComparing: boolean;
+
+  activeSidebarTab: "documents" | "tables" | "entities" | "fields" | "summary" | "report" | "compare" | "flags" | "graph";
+  setActiveSidebarTab: (tab: "documents" | "tables" | "entities" | "fields" | "summary" | "report" | "compare" | "flags" | "graph") => void;
+  setDocumentTables: (documentId: string, tables: ExtractedTable[]) => void;
+  setDocumentEntities: (documentId: string, entities: EntityItem[]) => void;
+  setDocumentExtraction: (documentId: string, extraction: ExtractionResult) => void;
+  updateExtractionUserEdit: (documentId: string, fieldName: string, value: any) => void;
+  setDocumentVision: (documentId: string, vision: VisionResult) => void;
+  setDocumentFlags: (documentId: string, flags: DocumentFlagsResult) => void;
+  setDocumentGraph: (documentId: string, graph: GraphResult) => void;
+  setDocumentSummary: (documentId: string, summary: DocumentSummaryResult) => void;
+  setDocumentReport: (documentId: string, report: DocumentReportResult) => void;
+  setCrossDocumentGraph: (graph: GraphResult | null) => void;
+  setActiveComparison: (comp: ComparisonData | null) => void;
+  setIsComparing: (val: boolean) => void;
+
+  // Local file blob URLs
   localFileUrls: Record<string, string>;
   setLocalFileUrls: (urls: Record<string, string>) => void;
 
@@ -70,6 +114,7 @@ interface AppState {
   // Actions
   setSuggestedQuestions: (q: string[]) => void;
   setSession: (sessionId: string, files: UploadedFile[], suggestedQuestions?: string[]) => void;
+  updateFile: (fileName: string, update: Partial<UploadedFile>) => void;
   clearSession: () => void;
   setUploading: (isUploading: boolean) => void;
   setUploadProgress: (progress: number) => void;
@@ -93,9 +138,6 @@ export const useAppStore = create<AppState>()(
       files: [],
       isUploading: false,
       uploadProgress: 0,
-      isBackendWaking: false,
-
-      setIsBackendWaking: (waking) => set({ isBackendWaking: waking }),
 
       messages: [],
       suggestedQuestions: [],
@@ -109,11 +151,78 @@ export const useAppStore = create<AppState>()(
       pdfScale: 1.0,
       localFileUrls: {},
 
+      documentTables: {},
+      documentEntities: {},
+      documentExtractions: {},
+      documentVision: {},
+      documentFlags: {},
+      documentGraphs: {},
+      documentSummaries: {},
+      documentReports: {},
+      crossDocumentGraph: null,
+      activeComparison: null,
+      isComparing: false,
+
+      activeSidebarTab: "documents",
+      setActiveSidebarTab: (activeSidebarTab) => set({ activeSidebarTab }),
+      setDocumentTables: (docId, tables) =>
+        set((state) => ({
+          documentTables: { ...state.documentTables, [docId]: tables },
+        })),
+      setDocumentEntities: (docId, entities) =>
+        set((state) => ({
+          documentEntities: { ...state.documentEntities, [docId]: entities },
+        })),
+      setDocumentExtraction: (docId, extraction) =>
+        set((state) => ({
+          documentExtractions: { ...state.documentExtractions, [docId]: extraction },
+        })),
+      updateExtractionUserEdit: (docId, fieldName, value) =>
+        set((state) => {
+          const current = state.documentExtractions[docId] || {
+            document_id: docId,
+            schema_type: "other",
+            fields: {},
+            verified_ratio: 0.0,
+            user_edits: {},
+          };
+          const updatedEdits = { ...(current.user_edits || {}), [fieldName]: value };
+          return {
+            documentExtractions: {
+              ...state.documentExtractions,
+              [docId]: { ...current, user_edits: updatedEdits },
+            },
+          };
+        }),
+      setDocumentVision: (docId, vision) =>
+        set((state) => ({
+          documentVision: { ...state.documentVision, [docId]: vision },
+        })),
+      setDocumentFlags: (docId, flags) =>
+        set((state) => ({
+          documentFlags: { ...state.documentFlags, [docId]: flags },
+        })),
+      setDocumentGraph: (docId, graph) =>
+        set((state) => ({
+          documentGraphs: { ...state.documentGraphs, [docId]: graph },
+        })),
+      setDocumentSummary: (docId, summary) =>
+        set((state) => ({
+          documentSummaries: { ...state.documentSummaries, [docId]: summary },
+        })),
+      setDocumentReport: (docId, report) =>
+        set((state) => ({
+          documentReports: { ...state.documentReports, [docId]: report },
+        })),
+      setCrossDocumentGraph: (crossDocumentGraph) => set({ crossDocumentGraph }),
+      setActiveComparison: (activeComparison) => set({ activeComparison }),
+      setIsComparing: (isComparing) => set({ isComparing }),
+
       activeDocumentName: null,
 
       leftSidebarCollapsed: false,
       rightSidebarCollapsed: false,
-      leftSidebarWidth: 260,
+      leftSidebarWidth: 280,
       rightSidebarWidth: 420,
       setLeftSidebarCollapsed: (collapsed) => set({ leftSidebarCollapsed: collapsed }),
       setRightSidebarCollapsed: (collapsed) => set({ rightSidebarCollapsed: collapsed }),
@@ -134,6 +243,11 @@ export const useAppStore = create<AppState>()(
         });
       },
 
+      updateFile: (fileName, update) =>
+        set((state) => ({
+          files: state.files.map((f) => (f.name === fileName ? { ...f, ...update } : f)),
+        })),
+
       clearSession: () => {
         const sid = get().sessionId;
         if (sid) {
@@ -149,6 +263,7 @@ export const useAppStore = create<AppState>()(
           totalPages: 1,
           highlightedCitation: null,
           localFileUrls: {},
+          documentTables: {},
         });
       },
 

@@ -4,15 +4,13 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import WorkspaceLayout from "@/components/workspace/WorkspaceLayout";
 import DropZone from "@/components/upload/DropZone";
-import { Loader2, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { checkBackendHealth, getSessionInfo } from "@/lib/api";
 
 export default function Home() {
   const {
     sessionId,
     files,
-    isBackendWaking,
-    setIsBackendWaking,
     clearSession,
   } = useAppStore();
 
@@ -36,25 +34,13 @@ export default function Home() {
       };
 
       const health = await checkBackendHealth();
-      if (health.waking) {
-        setIsBackendWaking(true);
-        // Poll every 3 seconds until awake
-        const poller = setInterval(async () => {
-          const check = await checkBackendHealth();
-          if (check.ok) {
-            setIsBackendWaking(false);
-            clearInterval(poller);
-            await verifyPersistedSession();
-          }
-        }, 3000);
-      } else {
-        setIsBackendWaking(false);
+      if (health.ok) {
         await verifyPersistedSession();
       }
     }
 
     initWorkspace();
-  }, [setIsBackendWaking, clearSession]);
+  }, [clearSession]);
 
   if (!hasHydrated) {
     return (
@@ -69,16 +55,6 @@ export default function Home() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-canvas)] text-[var(--text-primary)]">
-      {/* Cold Start Banner for Free-Tier Hosting (Render) */}
-      {isBackendWaking && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 text-amber-500 px-4 py-2 text-xs flex items-center justify-center gap-2 shrink-0">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          <span className="font-medium">
-            Backend is waking up (free-tier spin up)... Please wait ~20–30s.
-          </span>
-        </div>
-      )}
-
       {sessionId && files.length > 0 ? (
         <WorkspaceLayout />
       ) : (

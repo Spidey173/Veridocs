@@ -4,6 +4,7 @@ Retrieves top document chunks, streams token-by-token answers from OpenAI/Groq/O
 rewrites follow-up questions, detects small talk, emits real citations, and performs citation check.
 """
 
+import asyncio
 import re
 import json
 import logging
@@ -11,7 +12,6 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from config import get_settings
 from models import QueryRequest, StreamQueryRequest, QueryResponse, SourceInfo, CitationInfo, CitationCheckResult
 from vector_store import VectorStore
 from llm_service import get_llm_service, LLMService
@@ -40,29 +40,25 @@ SMALL_TALK_RESPONSES = {
 
 def detect_small_talk(question: str) -> Optional[str]:
     """Check if question is conversational small talk that doesn't need document retrieval."""
-    clean = re.sub(r'[^\w\s]', '', question.strip().lower())
+    clean = re.sub(r"[^\w\s]", "", question.strip().lower())
     clean = " ".join(clean.split())
     if clean in SMALL_TALK_RESPONSES:
         return SMALL_TALK_RESPONSES[clean]
-    if re.match(r'^(?:ok\s+)?(?:thanks|thank\s+you|thx)(?:\s+(?:very\s+much|a\s+lot|so\s+much))?$', clean):
+    if re.match(r"^(?:ok\s+)?(?:thanks|thank\s+you|thx)(?:\s+(?:very\s+much|a\s+lot|so\s+much))?$", clean):
         return "You're welcome! Let me know if you need anything else from the document."
-    if re.match(r'^(?:hi|hello|hey|greetings)(?:\s+there)?$', clean):
+    if re.match(r"^(?:hi|hello|hey|greetings)(?:\s+there)?$", clean):
         return "Hello! How can I help you analyze your document today?"
     return None
 
 
-def rewrite_query_for_retrieval(
-    question: str,
-    history: Optional[List[Dict[str, str]]],
-    llm: LLMService
-) -> str:
+def rewrite_query_for_retrieval(question: str, history: Optional[List[Dict[str, str]]], llm: LLMService) -> str:
     """Rewrite follow-up questions referencing previous turns into a standalone retrieval query."""
     if not history or len(history) == 0:
         return question
 
     PRONOUN_OR_FOLLOWUP_RE = re.compile(
-        r'\b(it|its|they|their|them|he|him|his|she|her|this|that|these|those|first\s+one|second\s+one|last\s+one|former|latter)\b|^(what\s+about|how\s+about|tell\s+me\s+more|elaborate|explain\s+more|why\?|when\?|where\?|which\s+one\?)\b',
-        re.IGNORECASE
+        r"\b(it|its|they|their|them|he|him|his|she|her|this|that|these|those|first\s+one|second\s+one|last\s+one|former|latter)\b|^(what\s+about|how\s+about|tell\s+me\s+more|elaborate|explain\s+more|why\?|when\?|where\?|which\s+one\?)\b",
+        re.IGNORECASE,
     )
 
     clean_q = question.strip()
@@ -102,7 +98,9 @@ def rewrite_query_for_retrieval(
             extra_body=extra_body if extra_body else None,
         )
         rewritten = res.choices[0].message.content.strip()
-        rewritten = re.sub(r'^(Rewritten\s*Query|Standalone\s*Query|Query):\s*', '', rewritten, flags=re.IGNORECASE).strip('"\n ')
+        rewritten = re.sub(
+            r"^(Rewritten\s*Query|Standalone\s*Query|Query):\s*", "", rewritten, flags=re.IGNORECASE
+        ).strip('"\n ')
         if rewritten and len(rewritten) > 3:
             logger.info(f"[Query Rewrite] Original: '{question}' -> Standalone: '{rewritten}'")
             return rewritten
@@ -147,13 +145,41 @@ async def query_documents(request: Request, body: QueryRequest):
     llm = get_llm_service(base_url=x_base_url, api_key=x_api_key, model=x_model)
 
     # 2. Rewrite follow-ups into standalone retrieval query if needed
-    search_query = rewrite_query_for_retrieval(body.question, body.history, llm)
+    search_query = await asyncio.to_thread(rewrite_query_for_retrieval, body.question, body.history, llm)
 
-    # 3. Retrieve top chunks
-    chunks = VectorStore.search(
+    # 3. Graph-Aware Query Routing
+    retrieval_strategy = "hybrid"
+    graph_chunks = []
+    try:
+
+        def _run_graph_route():
+            with database.get_db() as db:
+                from graph.router import GraphQARouter
+
+                router_svc = GraphQARouter(db)
+                return router_svc.route_query(body.question, session_id=body.session_id, active_files=body.active_files)
+
+        graph_chunks, strat = await asyncio.to_thread(_run_graph_route)
+        if graph_chunks:
+            retrieval_strategy = strat
+    except Exception as eg:
+        logger.debug(f"Graph QA routing bypassed: {eg}")
+
+    # Retrieve vector chunks without blocking the event loop
+    vector_chunks = await asyncio.to_thread(
+        VectorStore.search,
         session_id=body.session_id,
         query=search_query,
         active_files=body.active_files,
+    )
+
+    if graph_chunks:
+        chunks = graph_chunks[:4] + vector_chunks[:3]
+    else:
+        chunks = vector_chunks
+
+    logger.info(
+        f"[Retrieval Decision] Strategy: {retrieval_strategy} | Graph Chunks: {len(graph_chunks)} | Vector Chunks: {len(vector_chunks)}"
     )
 
     if not chunks:
@@ -162,11 +188,12 @@ async def query_documents(request: Request, body: QueryRequest):
             sources=[],
             citations=[],
             citation_check=None,
+            retrieval_strategy=retrieval_strategy,
         )
 
     # 4. Generate answer
     try:
-        answer = llm.generate_answer(body.question, chunks, history=body.history)
+        answer = await asyncio.to_thread(llm.generate_answer, body.question, chunks, history=body.history)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -181,14 +208,30 @@ async def query_documents(request: Request, body: QueryRequest):
         or "not found in the document" in answer.lower()
     )
     citations = extract_citations_from_answer(answer, chunks) if not is_system_notice else []
-    check_result = check_citations(answer, chunks) if not is_system_notice else None
+    check_result = await asyncio.to_thread(check_citations, answer, chunks) if not is_system_notice else None
+
+    if not is_system_notice:
+        try:
+            database.log_query(
+                session_id=body.session_id,
+                question=body.question,
+                retrieval_strategy=retrieval_strategy,
+                citation_score=check_result.get("citation_score") if check_result else None,
+                total_claims=check_result.get("total_claims", 0) if check_result else 0,
+                supported_claims=check_result.get("supported_claims", 0) if check_result else 0,
+            )
+        except Exception as e:
+            logger.debug(f"Query log skipped: {e}")
 
     sources = [
         SourceInfo(
-            page=c["page"],
-            snippet=c["text"][:300],
-            source_file=c.get("source_file", "Document"),
+            page=c.get("page") or c.get("page_number", 1),
+            snippet=(c.get("text") or c.get("content", ""))[:300],
+            source_file=c.get("source_file") or c.get("filename", "Document"),
             relevance_score=c.get("relevance_score"),
+            chunk_type=c.get("chunk_type", "text"),
+            extraction_method=c.get("extraction_method", "text_layer"),
+            section_path=c.get("section_path") or (c.get("metadata") or {}).get("section_path"),
         )
         for c in chunks
     ]
@@ -198,6 +241,7 @@ async def query_documents(request: Request, body: QueryRequest):
         sources=sources,
         citations=[CitationInfo(**c) for c in citations],
         citation_check=CitationCheckResult(**check_result) if check_result else None,
+        retrieval_strategy=retrieval_strategy,
     )
 
 
@@ -232,21 +276,51 @@ async def stream_query_endpoint(request: Request, body: StreamQueryRequest):
             llm = get_llm_service(base_url=x_base_url, api_key=x_api_key, model=x_model)
 
             # 2. Rewrite follow-ups into standalone query for retrieval
-            search_query = rewrite_query_for_retrieval(body.question, body.history, llm)
+            search_query = await asyncio.to_thread(rewrite_query_for_retrieval, body.question, body.history, llm)
 
-            # 3. Retrieve top chunks
-            chunks = VectorStore.search(
+            # 3. Graph-Aware Query Routing
+            retrieval_strategy = "hybrid"
+            graph_chunks = []
+            try:
+
+                def _run_stream_graph_route():
+                    with database.get_db() as db:
+                        from graph.router import GraphQARouter
+
+                        router_svc = GraphQARouter(db)
+                        return router_svc.route_query(
+                            body.question, session_id=body.session_id, active_files=body.active_files
+                        )
+
+                graph_chunks, strat = await asyncio.to_thread(_run_stream_graph_route)
+                if graph_chunks:
+                    retrieval_strategy = strat
+            except Exception as eg:
+                logger.debug(f"Graph QA routing bypassed in stream: {eg}")
+
+            # Retrieve top vector chunks without blocking the event loop
+            vector_chunks = await asyncio.to_thread(
+                VectorStore.search,
                 session_id=body.session_id,
                 query=search_query,
                 active_files=body.active_files,
             )
 
+            if graph_chunks:
+                chunks = graph_chunks[:4] + vector_chunks[:3]
+            else:
+                chunks = vector_chunks
+
+            logger.info(
+                f"[Stream Retrieval] Strategy: {retrieval_strategy} | Graph: {len(graph_chunks)} | Vector: {len(vector_chunks)}"
+            )
+
             if not chunks:
-                yield _sse_event("token", {
-                    "text": "Not found in the document."
-                })
+                yield _sse_event("token", {"text": "Not found in the document."})
                 yield _sse_event("done", {})
                 return
+
+            yield _sse_event("strategy", {"strategy": retrieval_strategy})
 
             # 4. Stream LLM tokens
             full_answer = ""
@@ -268,9 +342,21 @@ async def stream_query_endpoint(request: Request, body: StreamQueryRequest):
                 for c in citations:
                     yield _sse_event("citation", c)
 
-                check_result = check_citations(full_answer, chunks)
+                check_result = await asyncio.to_thread(check_citations, full_answer, chunks)
                 if check_result.get("total_claims", 0) > 0:
                     yield _sse_event("citation_check", check_result)
+
+                try:
+                    database.log_query(
+                        session_id=body.session_id,
+                        question=body.question,
+                        retrieval_strategy=retrieval_strategy,
+                        citation_score=check_result.get("citation_score") if check_result else None,
+                        total_claims=check_result.get("total_claims", 0) if check_result else 0,
+                        supported_claims=check_result.get("supported_claims", 0) if check_result else 0,
+                    )
+                except Exception as e:
+                    logger.debug(f"Stream query log skipped: {e}")
 
             yield _sse_event("done", {})
 
@@ -286,5 +372,5 @@ async def stream_query_endpoint(request: Request, body: StreamQueryRequest):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )

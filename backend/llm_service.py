@@ -4,15 +4,36 @@ Works with any hosted OpenAI endpoint (OpenAI, Groq, DeepSeek, etc.) or local Ol
 No external provider-specific SDK bloat.
 """
 
-import os
 import re
+import threading
 import logging
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple
 from openai import OpenAI
 
 from config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_CLIENT_CACHE: Dict[Tuple[str, str], OpenAI] = {}
+_CLIENT_CACHE_LOCK = threading.Lock()
+
+
+def _get_cached_openai_client(base_url: str, api_key: str) -> OpenAI:
+    key = (base_url or "", api_key or "not-needed")
+    client = _CLIENT_CACHE.get(key)
+    if client is not None:
+        return client
+    with _CLIENT_CACHE_LOCK:
+        client = _CLIENT_CACHE.get(key)
+        if client is None:
+            client = OpenAI(
+                base_url=key[0] or None,
+                api_key=key[1],
+                timeout=30.0,
+            )
+            _CLIENT_CACHE[key] = client
+        return client
+
 
 SYSTEM_PROMPT = """You are Veridocs AI, a precise document intelligence assistant.
 Rules:
@@ -25,8 +46,8 @@ Rules:
 
 def strip_raw_markers(text: str) -> str:
     """Convert 【1】 to [1] and remove raw citation symbols."""
-    text = re.sub(r'【(\d+)】', r'[\1]', text)
-    text = re.sub(r'【[^】]*】', '', text)
+    text = re.sub(r"【(\d+)】", r"[\1]", text)
+    text = re.sub(r"【[^】]*】", "", text)
     return text
 
 
@@ -64,11 +85,7 @@ class LLMService:
         self.client: Optional[OpenAI] = None
         if self.is_configured():
             try:
-                self.client = OpenAI(
-                    base_url=self.base_url or None,
-                    api_key=self.api_key or "not-needed",
-                    timeout=30.0,
-                )
+                self.client = _get_cached_openai_client(self.base_url, self.api_key or "not-needed")
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI client: {e}")
                 self.client = None
@@ -83,19 +100,18 @@ class LLMService:
         return bool(self.api_key and self.api_key != "not-needed")
 
     def _build_messages(
-        self,
-        question: str,
-        chunks: List[Dict[str, Any]],
-        history: Optional[List[Dict[str, str]]] = None
+        self, question: str, chunks: List[Dict[str, Any]], history: Optional[List[Dict[str, str]]] = None
     ) -> List[Dict[str, str]]:
         """Construct messages payload including system prompt, context chunks, and history."""
         context_parts = []
         for i, c in enumerate(chunks):
             src = c.get("source_file", "Document")
             page = c.get("page", 1)
+            sec = c.get("section_path") or (c.get("metadata") or {}).get("section_path")
+            sec_str = f" | Section: {sec}" if sec else ""
             text = c.get("text", "").strip()
             idx = i + 1
-            context_parts.append(f"[{idx}] Document: {src} | Page {page}\n{text}")
+            context_parts.append(f"[{idx}] Document: {src}{sec_str} | Page {page}\n{text}")
 
         context_str = "\n\n".join(context_parts)
         user_content = f"CONTEXT EXCERPTS:\n{context_str}\n\nQUESTION:\n{question}"
@@ -112,10 +128,7 @@ class LLMService:
         return messages
 
     def generate_answer(
-        self,
-        question: str,
-        chunks: List[Dict[str, Any]],
-        history: Optional[List[Dict[str, str]]] = None
+        self, question: str, chunks: List[Dict[str, Any]], history: Optional[List[Dict[str, str]]] = None
     ) -> str:
         """Synchronously generate an answer using the configured LLM."""
         if not self.is_configured() or not self.client:
@@ -143,10 +156,7 @@ class LLMService:
             raise RuntimeError(f"LLM request failed: {str(e)}")
 
     async def generate_answer_stream(
-        self,
-        question: str,
-        chunks: List[Dict[str, Any]],
-        history: Optional[List[Dict[str, str]]] = None
+        self, question: str, chunks: List[Dict[str, Any]], history: Optional[List[Dict[str, str]]] = None
     ) -> AsyncGenerator[str, None]:
         """Stream answer tokens from the configured LLM."""
         if not self.is_configured() or not self.client:
@@ -203,3 +213,28 @@ def get_llm_service(
     model: Optional[str] = None,
 ) -> LLMService:
     return LLMService(base_url=base_url, api_key=api_key, model=model)
+
+
+def call_llm_json(prompt: str) -> Optional[Any]:
+    """Helper to invoke LLM and parse JSON response with graceful fallback."""
+    service = get_llm_service()
+    if not service.is_configured() or not service.client:
+        return None
+    try:
+        response = service.client.chat.completions.create(
+            model=service.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=1000,
+        )
+        content = (response.choices[0].message.content or "").strip()
+        import json
+
+        if "```" in content:
+            m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
+            if m:
+                content = m.group(1).strip()
+        return json.loads(content)
+    except Exception as e:
+        logger.debug(f"call_llm_json fallback: {e}")
+        return None

@@ -11,7 +11,6 @@ describe("useAppStore", () => {
       totalPages: 1,
       activeDocumentName: null,
       highlightedCitation: null,
-      isBackendWaking: false,
     });
   });
 
@@ -60,12 +59,12 @@ describe("useAppStore", () => {
     expect(state.highlightedCitation).toEqual(citation);
   });
 
-  it("updates backend waking state", () => {
-    useAppStore.getState().setIsBackendWaking(true);
-    expect(useAppStore.getState().isBackendWaking).toBe(true);
+  it("switches active sidebar tab", () => {
+    useAppStore.getState().setActiveSidebarTab("compare");
+    expect(useAppStore.getState().activeSidebarTab).toBe("compare");
 
-    useAppStore.getState().setIsBackendWaking(false);
-    expect(useAppStore.getState().isBackendWaking).toBe(false);
+    useAppStore.getState().setActiveSidebarTab("documents");
+    expect(useAppStore.getState().activeSidebarTab).toBe("documents");
   });
 
   it("stores and clears suggested questions with session", () => {

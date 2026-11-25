@@ -6,7 +6,6 @@ Tests document upload, chunking, Fastembed vector retrieval, citation checking, 
 from fastapi.testclient import TestClient
 from vector_store import VectorStore
 from verification import check_citations, extract_citations_from_answer
-import database
 
 
 def test_root_endpoint(test_client: TestClient):
@@ -97,11 +96,13 @@ def test_vector_search(test_client: TestClient, sample_txt_bytes: bytes):
 
 def test_citation_check_supported():
     """Verify citation check accurately flags supported statements."""
-    chunks = [{
-        "page": 1,
-        "source_file": "agreement.pdf",
-        "text": "All invoices are payable within 30 days of invoice receipt."
-    }]
+    chunks = [
+        {
+            "page": 1,
+            "source_file": "agreement.pdf",
+            "text": "All invoices are payable within 30 days of invoice receipt.",
+        }
+    ]
     answer = "Invoices are payable within 30 days of receipt [Page 1]."
     result = check_citations(answer, chunks)
     assert result["supported_claims"] == 1
@@ -111,11 +112,13 @@ def test_citation_check_supported():
 
 def test_citation_check_unsupported():
     """Verify citation check flags claims not present in source text."""
-    chunks = [{
-        "page": 1,
-        "source_file": "agreement.pdf",
-        "text": "All invoices are payable within 30 days of invoice receipt."
-    }]
+    chunks = [
+        {
+            "page": 1,
+            "source_file": "agreement.pdf",
+            "text": "All invoices are payable within 30 days of invoice receipt.",
+        }
+    ]
     answer = "The platform requires biometric authentication for all user logins."
     result = check_citations(answer, chunks)
     assert result["supported_claims"] == 0
@@ -143,14 +146,11 @@ def test_stream_query_sse(test_client: TestClient, sample_txt_bytes: bytes):
 
     stream_res = test_client.post(
         "/api/query/stream",
-        json={
-            "session_id": sid,
-            "question": "What is the liability cap?"
-        },
+        json={"session_id": sid, "question": "What is the liability cap?"},
         headers={
             "X-LLM-API-Key": "test_key",
             "X-LLM-Base-Url": "http://localhost:11434/v1",
-        }
+        },
     )
     assert stream_res.status_code == 200
     assert "text/event-stream" in stream_res.headers["content-type"]
@@ -186,6 +186,7 @@ def test_rate_limiting_and_byok_bypass(test_client: TestClient, sample_txt_bytes
     """Verify rate limiter blocks excess requests and custom key header bypasses limit."""
     from rate_limiter import _limiter
     from config import get_settings
+
     _limiter.reset()
     settings = get_settings()
 
@@ -208,9 +209,7 @@ def test_rate_limiting_and_byok_bypass(test_client: TestClient, sample_txt_bytes
 
     # Request with custom API key header bypasses rate limit
     byok_res = test_client.post(
-        "/api/query",
-        json={"session_id": sid, "question": "test"},
-        headers={"X-LLM-API-Key": "sk-custom-user-key"}
+        "/api/query", json={"session_id": sid, "question": "test"}, headers={"X-LLM-API-Key": "sk-custom-user-key"}
     )
     # Status code is 200 (or if key invalid, not 429)
     assert byok_res.status_code != 429
@@ -220,9 +219,6 @@ def test_rate_limiting_and_byok_bypass(test_client: TestClient, sample_txt_bytes
 
 def test_upload_file_size_limit(test_client: TestClient):
     """Verify rejection of files exceeding the 10 MB limit."""
-    from config import get_settings
-    settings = get_settings()
-
     # Create dummy 11MB payload
     oversized = b"x" * (11 * 1024 * 1024)
     files = [("files", ("huge.txt", oversized, "text/plain"))]
@@ -264,6 +260,7 @@ def test_health_check_llm_status_reporting(test_client: TestClient, monkeypatch)
 def test_system_notice_not_scored_by_citation_check(test_client: TestClient, sample_txt_bytes: bytes, monkeypatch):
     """Verify system notices (e.g. No LLM configured) do not emit citations or citation_check."""
     import config
+
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
@@ -276,10 +273,7 @@ def test_system_notice_not_scored_by_citation_check(test_client: TestClient, sam
     sid = test_client.post("/api/upload", files=files).json()["session_id"]
 
     # Stream query with no LLM configured
-    stream_res = test_client.post("/api/query/stream", json={
-        "session_id": sid,
-        "question": "What is the fee?"
-    })
+    stream_res = test_client.post("/api/query/stream", json={"session_id": sid, "question": "What is the fee?"})
     assert stream_res.status_code == 200
     body = stream_res.text
     # Tokens should include honest warning notice
@@ -352,14 +346,9 @@ def test_small_talk_detection(test_client: TestClient, sample_txt_bytes: bytes):
     sid = test_client.post("/api/upload", files=files).json()["session_id"]
 
     # Test via API query
-    res = test_client.post("/api/query", json={
-        "session_id": sid,
-        "question": "ok thanks"
-    })
+    res = test_client.post("/api/query", json={"session_id": sid, "question": "ok thanks"})
     assert res.status_code == 200
     data = res.json()
     assert "welcome" in data["answer"].lower()
     assert data["citations"] == []
     assert data["citation_check"] is None
-
-
